@@ -7,12 +7,13 @@ import { WhatMattersPage } from "./pages/WhatMattersPage";
 import { MyPrioritiesPage } from "./pages/MyPrioritiesPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { PressRegistrationPage } from "./pages/PressRegistrationPage";
+import { Help } from "./pages/Help";
 import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
 import { useAuth } from "./stores/auth";
 import { useArenaStore } from "./store";
 import * as api from "./api";
-import { Menu, X, LogOut, User, Bell, BarChart3, Newspaper } from "lucide-react";
+import { Menu, X, LogOut, User, Bell, BarChart3, Newspaper, HelpCircle } from "lucide-react";
 
 interface CandidateContextType {
   candidates: ReturnType<typeof useArenaStore.getState>["allCandidates"];
@@ -80,6 +81,10 @@ function Navigation() {
               Press
             </Link>
           )}
+          <Link to="/help" className="text-zinc-400 hover:text-white transition-colors flex items-center gap-1">
+            <HelpCircle className="w-3.5 h-3.5" />
+            Help
+          </Link>
           {activeCandidateId && (
             <Link to={`/candidate/${activeCandidateId}`} className="text-zinc-400 hover:text-white transition-colors">
               Candidate Portal
@@ -167,6 +172,9 @@ function Navigation() {
               Press Credentials
             </Link>
           )}
+          <Link to="/help" className="block text-zinc-300 hover:text-white py-2 text-lg font-medium transition-colors">
+            Help
+          </Link>
           {activeCandidateId && (
             <Link to={`/candidate/${activeCandidateId}`} className="block text-zinc-300 hover:text-white py-2 text-lg font-medium transition-colors">
               Candidate Portal
@@ -295,6 +303,7 @@ function AppContent() {
             <Route path="/my-priorities" element={user ? <MyPrioritiesPage /> : <Navigate to="/login" replace />} />
             <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/login" replace />} />
             <Route path="/press/register" element={user ? <PressRegistrationPage /> : <Navigate to="/login" replace />} />
+            <Route path="/help" element={<Help />} />
             <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
             <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
             <Route path="*" element={<NotFound />} />
