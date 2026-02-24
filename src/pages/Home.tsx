@@ -92,7 +92,7 @@ export function Home() {
           {races.map((race, idx) => {
             const score = race.activity_score || 0;
             const isTrending = sort === 'trending' && idx < 3 && score > 0;
-            const isHot = score >= 5;
+            const isHot = score >= 10;
 
             return (
               <Link
@@ -167,7 +167,7 @@ export function Home() {
                   {(race.response_count || 0) > 0 && (
                     <div className="flex items-center gap-1" title="Challenge Responses">
                       <ChevronRight className="w-3.5 h-3.5 text-purple-400/70" />
-                      <span>{race.response_count} responses</span>
+                      <span>{race.response_count} {race.response_count === 1 ? 'response' : 'responses'}</span>
                     </div>
                   )}
                   {score === 0 && (
