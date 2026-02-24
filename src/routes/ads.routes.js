@@ -342,12 +342,15 @@ router.post('/rebuttals', async (request, env, ctx) => {
     `SELECT id, race_id, verification_status FROM candidates WHERE id = ? AND is_active = 1`
   ).bind(data.candidate_id).first();
   if (!candidate || candidate.race_id !== ad.race_id) return errorResponse('Candidate must be in the same race');
-  if (candidate.verification_status !== 'verified') return errorResponse('Candidate must be verified');
+  const isAdminRebuttal = ['admin', 'super_admin'].includes(request.user.role);
+  if (!isAdminRebuttal && candidate.verification_status !== 'verified') return errorResponse('Candidate must be verified');
 
-  const link = await env.ARENA_DB.prepare(
-    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-  ).bind(request.user.id, data.candidate_id).first();
-  if (!link) return errorResponse('Not authorized for this candidate', 403);
+  if (!isAdminRebuttal) {
+    const link = await env.ARENA_DB.prepare(
+      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+    ).bind(request.user.id, data.candidate_id).first();
+    if (!link) return errorResponse('Not authorized for this candidate', 403);
+  }
 
   const existingRebuttal = await env.ARENA_DB.prepare(
     `SELECT id FROM rebuttal_ads WHERE parent_ad_id = ? AND candidate_id = ?`
