@@ -67,8 +67,9 @@ export async function getMe() {
 }
 
 // ---- Races ----
-export async function getRaces() {
-  return unwrap<{ races: any[]; total: number }>(await api.get('/races'));
+export async function getRaces(sort?: string) {
+  const params = sort ? `?sort=${sort}` : '';
+  return unwrap<{ races: any[]; total: number }>(await api.get(`/races${params}`));
 }
 
 export async function getRace(id: string) {

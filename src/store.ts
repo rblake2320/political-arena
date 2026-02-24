@@ -17,6 +17,11 @@ export interface Race {
   state: string;
   status: string;
   candidate_count?: number;
+  challenge_count?: number;
+  ad_count?: number;
+  question_count?: number;
+  response_count?: number;
+  activity_score?: number;
 }
 
 export interface Candidate {
@@ -117,7 +122,7 @@ interface ArenaStore {
   _loadCount: number;
 
   // Actions
-  fetchRaces: () => Promise<void>;
+  fetchRaces: (sort?: string) => Promise<void>;
   fetchRace: (id: string) => Promise<RaceDetail | null>;
   fetchAllCandidates: () => Promise<void>;
   invalidate: () => void;
@@ -135,9 +140,9 @@ export const useArenaStore = create<ArenaStore>((set, get) => ({
   loading: false,
   _loadCount: 0,
 
-  fetchRaces: async () => {
+  fetchRaces: async (sort?: string) => {
     try {
-      const { races } = await api.getRaces();
+      const { races } = await api.getRaces(sort);
       set({ races: races as any[] });
     } catch (err) {
       console.error('Failed to fetch races:', err);

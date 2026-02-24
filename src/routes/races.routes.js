@@ -11,25 +11,45 @@ import { validate, createRaceSchema, updateRaceSchema } from '../validation.js';
 
 const router = Router({ base: '/api/races' });
 
-// GET /api/races — Public, filterable
+// GET /api/races — Public, filterable, with activity counts for trending
 router.get('/', async (request, env) => {
   const url = new URL(request.url);
   const { limit, offset } = parsePagination(url);
   const state = url.searchParams.get('state');
   const office = url.searchParams.get('office');
   const status = url.searchParams.get('status') || 'active';
+  const sort = url.searchParams.get('sort'); // 'trending', 'newest', 'name'
 
-  let sql = `SELECT r.*, (SELECT COUNT(*) FROM candidates c WHERE c.race_id = r.id AND c.is_active = 1) as candidate_count FROM races r WHERE 1=1`;
+  let sql = `SELECT r.*,
+    (SELECT COUNT(*) FROM candidates c WHERE c.race_id = r.id AND c.is_active = 1) as candidate_count,
+    (SELECT COUNT(*) FROM challenges ch WHERE ch.race_id = r.id AND ch.is_visible = 1) as challenge_count,
+    (SELECT COUNT(*) FROM ad_flights af WHERE af.race_id = r.id AND af.status IN ('approved','active')) as ad_count,
+    (SELECT COUNT(*) FROM questions q WHERE q.race_id = r.id AND q.status = 'active') as question_count,
+    (SELECT COUNT(*) FROM challenge_responses cr JOIN challenges c2 ON cr.challenge_id = c2.id WHERE c2.race_id = r.id) as response_count
+  FROM races r WHERE 1=1`;
   const binds = [];
 
   if (state) { sql += ` AND r.state = ?`; binds.push(state); }
   if (office) { sql += ` AND r.office = ?`; binds.push(office); }
   if (status) { sql += ` AND r.status = ?`; binds.push(status); }
 
-  sql += ` ORDER BY r.created_at DESC LIMIT ? OFFSET ?`;
+  if (sort === 'trending') {
+    sql += ` ORDER BY (challenge_count + ad_count + question_count + response_count) DESC, r.created_at DESC`;
+  } else if (sort === 'name') {
+    sql += ` ORDER BY r.name ASC`;
+  } else {
+    sql += ` ORDER BY r.created_at DESC`;
+  }
+  sql += ` LIMIT ? OFFSET ?`;
   binds.push(limit, offset);
 
   const result = await env.ARENA_DB.prepare(sql).bind(...binds).all();
+
+  // Compute activity_score for each race
+  const races = (result.results || []).map(r => ({
+    ...r,
+    activity_score: (r.challenge_count || 0) + (r.ad_count || 0) + (r.question_count || 0) + (r.response_count || 0),
+  }));
 
   // Total count for pagination
   let countSql = `SELECT COUNT(*) as total FROM races WHERE 1=1`;
@@ -40,7 +60,7 @@ router.get('/', async (request, env) => {
   const countResult = await env.ARENA_DB.prepare(countSql).bind(...countBinds).first();
 
   return successResponse({
-    races: result.results || [],
+    races,
     total: countResult.total,
     page: Math.floor(offset / limit) + 1,
     limit,
