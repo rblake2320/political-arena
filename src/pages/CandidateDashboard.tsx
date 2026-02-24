@@ -1,0 +1,610 @@
+import React, { useState, useEffect } from "react";
+import { useParams } from "react-router";
+import { BarChart3, Plus, ShieldAlert, Video, MessageSquareWarning, X, TrendingUp, Clock, Eye, Upload, Play, Coins } from "lucide-react";
+import { useArenaStore } from "../store";
+import * as api from "../api";
+import { useAuth } from "../stores/auth";
+
+export function CandidateDashboard() {
+  const { id } = useParams();
+  const [activeTab, setActiveTab] = useState("overview");
+  const [isCreateAdModalOpen, setIsCreateAdModalOpen] = useState(false);
+  const [respondingToChallenge, setRespondingToChallenge] = useState<any>(null);
+  const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const { user } = useAuth();
+
+  const { raceDetails, fetchRace, allCandidates, loading } = useArenaStore();
+
+  // Find candidate across all race details
+  const candidate = allCandidates.find(c => c.id === id);
+  const raceData = candidate ? raceDetails[candidate.race_id] : null;
+
+  useEffect(() => {
+    if (candidate?.race_id) {
+      fetchRace(candidate.race_id);
+    }
+  }, [candidate?.race_id]);
+
+  useEffect(() => {
+    if (id && user) {
+      api.getCreditBalance(id).then(data => setCreditBalance(data.credit_balance)).catch(() => {});
+    }
+  }, [id, user]);
+
+  if (loading && !raceData) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="w-6 h-6 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Bug #6 fix: show spinner when data hasn't loaded yet instead of "not found"
+  if (!candidate && allCandidates.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="w-6 h-6 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
+  if (!candidate) return <div className="p-12 text-center text-zinc-500">Candidate not found.</div>;
+  if (!raceData) return <div className="p-12 text-center text-zinc-500">Race data not found.</div>;
+
+  const candidateAds = raceData.ads.filter(ad => ad.candidate_id === candidate.id);
+  const candidateChallenges = raceData.challenges.filter(
+    c => c.challenger_candidate_id === candidate.id || c.target_candidate_id === candidate.id,
+  );
+  const candidateRebuttals = raceData.rebuttals.filter(r => r.candidate_id === candidate.id);
+
+  const refreshRace = () => {
+    if (candidate?.race_id) fetchRace(candidate.race_id);
+  };
+
+  const tabTitles: Record<string, string> = {
+    overview: "Dashboard Overview",
+    ads: "Ad Flights",
+    challenges: "Challenges",
+    rebuttals: "Rebuttals",
+  };
+
+  return (
+    <div className="flex flex-col md:flex-row min-h-[calc(100vh-64px)]">
+      {/* Sidebar */}
+      <aside className="w-full md:w-64 border-b md:border-b-0 md:border-r border-zinc-800 bg-zinc-950/50 p-4 md:p-6 flex md:flex-col gap-2 overflow-x-auto md:overflow-x-visible">
+        <div className="hidden md:block mb-8">
+          <div className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">Candidate Portal</div>
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white ${
+              candidate.party === "Democrat" ? "bg-blue-600" : candidate.party === "Republican" ? "bg-red-600" : "bg-indigo-600"
+            }`}>
+              {candidate.name.charAt(0)}
+            </div>
+            <div>
+              <div className="font-medium text-white">{candidate.name}</div>
+              <div className="text-xs text-zinc-400">{raceData.office} - {candidate.race_state}</div>
+            </div>
+          </div>
+        </div>
+
+        <NavItem icon={<BarChart3 className="w-4 h-4" />} label="Overview" active={activeTab === "overview"} onClick={() => setActiveTab("overview")} />
+        <NavItem icon={<Video className="w-4 h-4" />} label="Ad Flights" active={activeTab === "ads"} onClick={() => setActiveTab("ads")} />
+        <NavItem icon={<MessageSquareWarning className="w-4 h-4" />} label="Challenges" active={activeTab === "challenges"} onClick={() => setActiveTab("challenges")} />
+        <NavItem icon={<ShieldAlert className="w-4 h-4" />} label="Rebuttals" active={activeTab === "rebuttals"} onClick={() => setActiveTab("rebuttals")} />
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 p-4 md:p-8">
+        <div className="max-w-4xl">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">{tabTitles[activeTab]}</h1>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setIsCreateAdModalOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors text-sm"
+              >
+                <Plus className="w-4 h-4" />
+                New Ad Flight
+              </button>
+            </div>
+          </div>
+
+          {/* Overview Tab */}
+          {activeTab === "overview" && (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 md:gap-6 mb-12">
+                <StatCard icon={<Eye className="w-5 h-5 text-indigo-400" />} label="Active Ads" value={String(candidateAds.filter(a => a.status === 'active').length)} />
+                <StatCard icon={<TrendingUp className="w-5 h-5 text-emerald-400" />} label="Rebuttals" value={String(candidateRebuttals.length)} />
+                <StatCard icon={<Clock className="w-5 h-5 text-amber-400" />} label="Open Challenges" value={String(candidateChallenges.filter(c => c.status === "open").length)} trend="urgent" />
+                <StatCard icon={<Coins className="w-5 h-5 text-yellow-400" />} label="Credits" value={creditBalance !== null ? String(creditBalance) : "—"} trend={creditBalance !== null && creditBalance <= 2 ? "low" : undefined} />
+              </div>
+
+              <h2 className="text-xl font-semibold mb-6">Recent Activity</h2>
+              <div className="space-y-4">
+                {candidateChallenges.filter(c => c.status === "open").map(c => {
+                  const isTarget = c.target_candidate_id === candidate.id;
+                  const otherName = raceData.candidates.find(
+                    cand => cand.id === (isTarget ? c.challenger_candidate_id : c.target_candidate_id),
+                  )?.name || "Unknown";
+                  return (
+                    <ActivityItem
+                      key={c.id}
+                      type="challenge"
+                      title={isTarget ? `Challenge from ${otherName}` : `Challenge to ${otherName}`}
+                      time="Active"
+                      status={isTarget ? "Needs Response" : "Awaiting"}
+                      urgent={isTarget}
+                    />
+                  );
+                })}
+                {candidateAds.map(ad => (
+                  <ActivityItem
+                    key={ad.id}
+                    type="ad"
+                    title={ad.title || 'Ad Flight'}
+                    time={ad.status}
+                    status={ad.status === "active" ? "Running" : ad.status}
+                  />
+                ))}
+                {candidateRebuttals.map(r => (
+                  <ActivityItem
+                    key={r.id}
+                    type="rebuttal"
+                    title="Rebuttal Published"
+                    time={r.status}
+                    status="Active"
+                  />
+                ))}
+                {candidateChallenges.length === 0 && candidateAds.length === 0 && candidateRebuttals.length === 0 && (
+                  <div className="p-8 text-center text-zinc-500 border border-zinc-800 rounded-xl">No recent activity.</div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Ads Tab */}
+          {activeTab === "ads" && (
+            <div className="space-y-6">
+              {candidateAds.length === 0 ? (
+                <EmptyState title="No Ad Flights" description="You haven't created any ad flights yet." />
+              ) : (
+                candidateAds.map(ad => (
+                  <div key={ad.id} className="p-4 md:p-6 rounded-2xl border border-zinc-800 bg-zinc-900/50">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-sm font-medium text-white">{ad.title || 'Ad Flight'}</div>
+                      <span className="px-2 py-1 rounded text-[10px] font-medium uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        {ad.status}
+                      </span>
+                    </div>
+                    {ad.ad_content_text && (
+                      <p className="text-sm text-zinc-300 mb-3">{ad.ad_content_text}</p>
+                    )}
+                    <div className="text-xs text-zinc-500 mb-3">
+                      {ad.start_date ? new Date(ad.start_date).toLocaleDateString() : ''} - {ad.end_date ? new Date(ad.end_date).toLocaleDateString() : ''}
+                    </div>
+                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider border border-zinc-800 p-2 rounded bg-zinc-950/50">
+                      {ad.disclaimer_text}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Challenges Tab */}
+          {activeTab === "challenges" && (
+            <div className="space-y-6">
+              {candidateChallenges.length === 0 ? (
+                <EmptyState title="No Challenges" description="You haven't issued or received any challenges." />
+              ) : (
+                candidateChallenges.map(challenge => {
+                  const isChallenger = challenge.challenger_candidate_id === candidate.id;
+                  const otherCandidateId = isChallenger ? challenge.target_candidate_id : challenge.challenger_candidate_id;
+                  const otherCandidate = raceData.candidates.find(c => c.id === otherCandidateId);
+
+                  return (
+                    <div key={challenge.id} className="p-6 rounded-2xl border border-zinc-800 bg-zinc-900/50">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2 text-sm">
+                          {isChallenger ? (
+                            <>
+                              <span className="text-zinc-500">You challenged</span>
+                              <span className="font-medium text-white">{otherCandidate?.name}</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="font-medium text-white">{otherCandidate?.name}</span>
+                              <span className="text-zinc-500">challenged you</span>
+                            </>
+                          )}
+                        </div>
+                        <span className={`px-2 py-1 rounded text-[10px] font-medium uppercase tracking-wider ${
+                          challenge.status === "open"
+                            ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                            : challenge.status === "responded"
+                            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                            : challenge.status === "expired"
+                            ? "bg-red-500/10 text-red-400 border border-red-500/20"
+                            : challenge.status === "refused"
+                            ? "bg-orange-500/10 text-orange-400 border border-orange-500/20"
+                            : "bg-zinc-800 text-zinc-400"
+                        }`}>
+                          {challenge.status === "expired" ? "NO RESPONSE" : challenge.status === "refused" ? "REFUSED" : challenge.status}
+                        </span>
+                      </div>
+                      <div className="pl-4 border-l-2 border-indigo-500/30 py-2 mb-4">
+                        <p className="text-sm text-zinc-200 font-serif italic">"{challenge.challenge_text}"</p>
+                      </div>
+                      {!isChallenger && challenge.status === "open" && (
+                        <button
+                          onClick={() => setRespondingToChallenge(challenge)}
+                          className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
+                        >
+                          Respond to Challenge
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* Rebuttals Tab */}
+          {activeTab === "rebuttals" && (
+            <div className="space-y-6">
+              {candidateRebuttals.length === 0 ? (
+                <EmptyState title="No Rebuttals" description="You haven't posted any rebuttals yet." />
+              ) : (
+                candidateRebuttals.map(rebuttal => (
+                  <div key={rebuttal.id} className="p-4 md:p-6 rounded-2xl border border-zinc-800 bg-zinc-900/50">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-sm font-medium text-white">Rebuttal</div>
+                      <span className="px-2 py-1 rounded text-[10px] font-medium uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        {rebuttal.status}
+                      </span>
+                    </div>
+                    <p className="text-sm text-zinc-300 mb-4 italic">"{rebuttal.response_text}"</p>
+                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider border border-zinc-800 p-2 rounded bg-zinc-950/50">
+                      {rebuttal.disclaimer_text}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Modals */}
+      {isCreateAdModalOpen && (
+        <CreateAdModal
+          onClose={(refresh) => {
+            setIsCreateAdModalOpen(false);
+            if (refresh) refreshRace();
+          }}
+          candidateId={candidate.id}
+          raceId={candidate.race_id}
+        />
+      )}
+      {respondingToChallenge && (
+        <RespondChallengeModal
+          challenge={respondingToChallenge}
+          candidateId={candidate.id}
+          onClose={(refresh) => {
+            setRespondingToChallenge(null);
+            if (refresh) refreshRace();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---- Helper Components ----
+
+function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap md:w-full text-left ${
+        active
+          ? "bg-indigo-500/10 text-indigo-400"
+          : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function StatCard({ icon, label, value, trend }: { icon: React.ReactNode; label: string; value: string; trend?: string }) {
+  return (
+    <div className="p-6 rounded-2xl border border-zinc-800 bg-zinc-900/50">
+      <div className="flex items-center gap-2 mb-3">
+        {icon}
+        <span className="text-sm font-medium text-zinc-400">{label}</span>
+      </div>
+      <div className="flex items-end justify-between">
+        <div className="text-3xl font-bold text-white">{value}</div>
+        {trend && (
+          <div className={`text-xs font-medium px-2 py-1 rounded ${
+            trend === "urgent" ? "bg-amber-500/10 text-amber-400" :
+            trend === "low" ? "bg-red-500/10 text-red-400" :
+            "bg-zinc-800 text-zinc-400"
+          }`}>
+            {trend}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ActivityItem({ type, title, time, status, urgent }: { type: string; title: string; time: string; status: string; urgent?: boolean }) {
+  const icons: Record<string, React.ReactNode> = {
+    challenge: <MessageSquareWarning className="w-5 h-5 text-amber-400" />,
+    ad: <Video className="w-5 h-5 text-indigo-400" />,
+    rebuttal: <ShieldAlert className="w-5 h-5 text-emerald-400" />,
+  };
+
+  return (
+    <div className="flex items-center justify-between p-4 rounded-xl border border-zinc-800 bg-zinc-900/30 hover:bg-zinc-900/50 transition-colors">
+      <div className="flex items-center gap-4">
+        <div className="w-10 h-10 rounded-full bg-zinc-950 border border-zinc-800 flex items-center justify-center flex-shrink-0">
+          {icons[type]}
+        </div>
+        <div>
+          <div className="font-medium text-white text-sm">{title}</div>
+          <div className="text-xs text-zinc-500">{time}</div>
+        </div>
+      </div>
+      <div className={`text-xs font-medium px-2.5 py-1 rounded-full border ${
+        urgent
+          ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+          : "bg-zinc-800 text-zinc-400 border-zinc-700"
+      }`}>
+        {status}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="p-12 text-center border border-zinc-800 rounded-2xl bg-zinc-900/30">
+      <div className="text-zinc-400 mb-2">{title}</div>
+      <div className="text-sm text-zinc-500">{description}</div>
+    </div>
+  );
+}
+
+// ---- Modals ----
+
+function CreateAdModal({ onClose, candidateId, raceId }: { onClose: (refresh?: boolean) => void; candidateId: string; raceId: string }) {
+  const [formData, setFormData] = useState({ title: '', ad_content_text: '', disclaimer_text: '', media_url: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError('');
+    try {
+      await api.createAd({
+        ...formData,
+        media_url: formData.media_url || undefined,
+        candidate_id: candidateId,
+        race_id: raceId,
+      });
+      onClose(true);
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || 'Failed to create ad');
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalShell title="New Ad Flight" onClose={() => onClose()}>
+      {error && (
+        <div className="mx-6 mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+          {error}
+        </div>
+      )}
+      <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <InputField label="Ad Title" required placeholder="e.g. Healthcare for Alabama" value={formData.title} onChange={v => setFormData({ ...formData, title: v })} />
+        <div>
+          <label className="block text-sm font-medium text-zinc-400 mb-1.5">Ad Content</label>
+          <textarea
+            required
+            rows={4}
+            placeholder="Your ad message..."
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
+            value={formData.ad_content_text}
+            onChange={e => setFormData({ ...formData, ad_content_text: e.target.value })}
+          />
+        </div>
+        <MediaUploadField onMediaUrl={url => setFormData({ ...formData, media_url: url })} label="Attach Ad Media (video, image, audio)" />
+        <InputField label="FEC Disclaimer" required placeholder="Paid for by..." value={formData.disclaimer_text} onChange={v => setFormData({ ...formData, disclaimer_text: v })} />
+        <ModalActions onCancel={() => onClose()} submitLabel={submitting ? 'Creating...' : 'Create Ad Flight'} disabled={submitting} />
+      </form>
+    </ModalShell>
+  );
+}
+
+function RespondChallengeModal({ onClose, challenge, candidateId }: { onClose: (refresh?: boolean) => void; challenge: any; candidateId: string }) {
+  const [formData, setFormData] = useState({ response_text: "", media_url: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError('');
+    try {
+      await api.respondToChallenge(challenge.id, { response_text: formData.response_text, media_url: formData.media_url || undefined });
+      onClose(true);
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || 'Failed to respond');
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalShell title="Respond to Challenge" onClose={() => onClose()}>
+      <div className="p-4 bg-zinc-950/50 border-b border-zinc-800">
+        <div className="text-xs text-zinc-500 mb-1">Original Challenge</div>
+        <div className="text-sm text-zinc-300 italic">"{challenge.challenge_text}"</div>
+      </div>
+      {error && (
+        <div className="mx-6 mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+          {error}
+        </div>
+      )}
+      <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-zinc-400 mb-1.5">Response Text</label>
+          <textarea
+            required
+            rows={4}
+            placeholder="Type your response here..."
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
+            value={formData.response_text}
+            onChange={e => setFormData({ ...formData, response_text: e.target.value })}
+          />
+        </div>
+        <MediaUploadField onMediaUrl={url => setFormData({ ...formData, media_url: url })} label="Attach Response Media (video, image, audio)" />
+        <ModalActions onCancel={() => onClose()} submitLabel={submitting ? 'Submitting...' : 'Submit Response'} disabled={submitting} />
+      </form>
+    </ModalShell>
+  );
+}
+
+// ---- Media Upload ----
+
+function MediaUploadField({ onMediaUrl, label }: { onMediaUrl: (url: string) => void; label?: string }) {
+  const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState<{ name: string; size: string; type: string; url?: string } | null>(null);
+  const [pasteUrl, setPasteUrl] = useState("");
+  const [error, setError] = useState("");
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError("");
+    setUploading(true);
+    const sizeStr = file.size > 1024 * 1024 ? `${(file.size / 1024 / 1024).toFixed(1)}MB` : `${(file.size / 1024).toFixed(0)}KB`;
+    const localUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+    setPreview({ name: file.name, size: sizeStr, type: file.type, url: localUrl });
+    try {
+      const result = await api.uploadMedia(file);
+      onMediaUrl(result.url);
+    } catch (err: any) {
+      setPreview(null);
+      setError(err?.response?.data?.error || "Upload failed — please try again");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handlePaste = () => {
+    if (pasteUrl.trim()) {
+      setPreview({ name: "External link", size: "", type: "link", url: pasteUrl });
+      onMediaUrl(pasteUrl.trim());
+    }
+  };
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-zinc-400 mb-1.5">{label || "Attach Media"}</label>
+      {preview ? (
+        <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-950 border border-zinc-800">
+          {preview.url && preview.type.startsWith("image") ? (
+            <img src={preview.url} alt="" className="w-12 h-12 rounded object-cover" />
+          ) : (
+            <div className="w-12 h-12 rounded bg-zinc-800 flex items-center justify-center">
+              <Play className="w-5 h-5 text-zinc-400" />
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <div className="text-sm text-white truncate">{preview.name}</div>
+            {preview.size && <div className="text-xs text-zinc-500">{preview.size}</div>}
+          </div>
+          <button type="button" onClick={() => { setPreview(null); onMediaUrl(""); }} className="text-zinc-500 hover:text-white">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-zinc-950 border border-dashed border-zinc-700 hover:border-indigo-500/50 cursor-pointer transition-colors">
+            <Upload className="w-4 h-4 text-zinc-400" />
+            <span className="text-sm text-zinc-400">{uploading ? "Uploading..." : "Upload video, image, or audio"}</span>
+            <input type="file" accept="video/*,image/*,audio/*" className="hidden" onChange={handleFile} disabled={uploading} />
+          </label>
+          <div className="flex gap-2">
+            <input type="url" placeholder="Or paste media URL..." className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors" value={pasteUrl} onChange={e => setPasteUrl(e.target.value)} />
+            <button type="button" onClick={handlePaste} disabled={!pasteUrl.trim()} className="px-3 py-1.5 text-xs font-medium text-indigo-400 hover:text-indigo-300 disabled:text-zinc-600 transition-colors">Use</button>
+          </div>
+        </div>
+      )}
+      {error && <div className="text-xs text-amber-400 mt-1">{error}</div>}
+    </div>
+  );
+}
+
+// ---- Shared Modal Parts ----
+
+function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+          <h2 className="text-lg font-semibold text-white">{title}</h2>
+          <button onClick={onClose} className="text-zinc-400 hover:text-white p-1 rounded-md hover:bg-zinc-800 transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function InputField({
+  label, required, type = "text", placeholder, value, onChange
+}: {
+  label: string; required?: boolean; type?: string; placeholder?: string; value: string; onChange: (v: string) => void;
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-zinc-400 mb-1.5">{label}</label>
+      <input
+        required={required}
+        type={type}
+        placeholder={placeholder}
+        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+      />
+    </div>
+  );
+}
+
+function ModalActions({ onCancel, submitLabel, disabled }: { onCancel: () => void; submitLabel: string; disabled?: boolean }) {
+  return (
+    <div className="pt-4 flex justify-end gap-3">
+      <button type="button" onClick={onCancel} className="px-4 py-2 text-sm font-medium text-zinc-300 hover:text-white transition-colors">
+        Cancel
+      </button>
+      <button type="submit" disabled={disabled} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-sm font-medium rounded-lg transition-colors">
+        {submitLabel}
+      </button>
+    </div>
+  );
+}

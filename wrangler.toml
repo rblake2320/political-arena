@@ -1,0 +1,36 @@
+name = "political-arena"
+main = "src/worker.js"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 Database
+[[d1_databases]]
+binding = "ARENA_DB"
+database_name = "arena-database"
+database_id = "debddbf1-b5f4-4ea2-bfb0-ef1a786c3005"
+
+# R2 Media Storage
+[[r2_buckets]]
+binding = "ARENA_MEDIA"
+bucket_name = "political-arena-media"
+
+# Cron Triggers (challenge expiration, ad lifecycle, analytics rollups)
+[triggers]
+crons = ["*/15 * * * *"]
+
+# Serve the Vite-built frontend
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+
+# Configurable platform parameters
+[vars]
+ENVIRONMENT = "production"
+CHALLENGE_SLA_HOURS = "72"
+REBUTTAL_WINDOW_HOURS = "48"
+REBUTTAL_RESERVATION_HOURS = "12"
+MAX_REBUTTALS_PER_AD = "3"
+CHALLENGE_COOLDOWN_HOURS = "24"
+IMPRESSION_LOG_RETENTION_DAYS = "30"
+MAX_CHALLENGES_PER_DAY = "3"
+MAX_CHALLENGES_PER_WEEK = "10"

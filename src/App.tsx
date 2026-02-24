@@ -1,0 +1,331 @@
+import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation, Navigate } from "react-router";
+import React, { useEffect, useState, createContext, useContext } from "react";
+import { Home } from "./pages/Home";
+import { Race } from "./pages/Race";
+import { CandidateDashboard } from "./pages/CandidateDashboard";
+import { WhatMattersPage } from "./pages/WhatMattersPage";
+import { MyPrioritiesPage } from "./pages/MyPrioritiesPage";
+import { NotificationsPage } from "./pages/NotificationsPage";
+import { PressRegistrationPage } from "./pages/PressRegistrationPage";
+import { Login } from "./pages/Login";
+import { Register } from "./pages/Register";
+import { useAuth } from "./stores/auth";
+import { useArenaStore } from "./store";
+import * as api from "./api";
+import { Menu, X, LogOut, User, Bell, BarChart3, Newspaper } from "lucide-react";
+
+interface CandidateContextType {
+  candidates: ReturnType<typeof useArenaStore.getState>["allCandidates"];
+  activeCandidateId: string | null;
+  setActiveCandidateId: (id: string) => void;
+}
+
+export const CandidateContext = createContext<CandidateContextType>({
+  candidates: [],
+  activeCandidateId: null,
+  setActiveCandidateId: () => {},
+});
+
+function Navigation() {
+  const { candidates, activeCandidateId, setActiveCandidateId } = useContext(CandidateContext);
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (user) {
+      api.getUnreadCount().then(data => setUnreadCount(data.count || 0)).catch(() => {});
+    }
+  }, [user, location.pathname]);
+
+  const handleCandidateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = e.target.value;
+    setActiveCandidateId(id);
+    if (location.pathname.startsWith("/candidate")) {
+      navigate(`/candidate/${id}`);
+    }
+    setMobileOpen(false);
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+    setMobileOpen(false);
+  };
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
+  return (
+    <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+        <Link to="/" className="text-xl font-bold tracking-tight text-white flex items-center gap-2.5">
+          <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-xs font-black shadow-lg shadow-indigo-500/20">A</span>
+          Arena
+        </Link>
+
+        {/* Desktop nav */}
+        <nav className="hidden md:flex items-center gap-6 text-sm font-medium">
+          <Link to="/" className="text-zinc-400 hover:text-white transition-colors">Races</Link>
+          <Link to="/what-matters" className="text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1">
+            <BarChart3 className="w-3.5 h-3.5" />
+            What Matters
+          </Link>
+          {user && (
+            <Link to="/press/register" className="text-zinc-400 hover:text-white transition-colors flex items-center gap-1">
+              <Newspaper className="w-3.5 h-3.5" />
+              Press
+            </Link>
+          )}
+          {activeCandidateId && (
+            <Link to={`/candidate/${activeCandidateId}`} className="text-zinc-400 hover:text-white transition-colors">
+              Candidate Portal
+            </Link>
+          )}
+
+          {user ? (
+            <>
+              {/* Candidate selector for staff/admin only */}
+              {candidates.length > 0 && (user.role === 'admin' || user.role === 'super_admin' || user.role === 'staff' || (user.staff_links && user.staff_links.length > 0)) && (
+                <>
+                  <div className="h-4 w-px bg-zinc-800" />
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-500 uppercase tracking-wider">View As:</span>
+                    <select
+                      className="bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:border-indigo-500 cursor-pointer"
+                      value={activeCandidateId || ""}
+                      onChange={handleCandidateChange}
+                    >
+                      {candidates.map(c => (
+                        <option key={c.id} value={c.id}>{c.name} ({c.race_state})</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+
+              <div className="h-4 w-px bg-zinc-800" />
+
+              {/* User menu */}
+              <div className="flex items-center gap-3">
+                <Link to="/notifications" className="text-zinc-400 hover:text-white transition-colors relative">
+                  <Bell className="w-4 h-4" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  )}
+                </Link>
+                <div className="flex items-center gap-2 text-zinc-400">
+                  <User className="w-4 h-4" />
+                  <span className="text-sm">{user.display_name || user.username}</span>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="text-zinc-500 hover:text-red-400 transition-colors"
+                  title="Sign out"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="h-4 w-px bg-zinc-800" />
+              <Link to="/login" className="text-zinc-400 hover:text-white transition-colors">Sign In</Link>
+              <Link to="/register" className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors">
+                Sign Up
+              </Link>
+            </>
+          )}
+        </nav>
+
+        {/* Hamburger button */}
+        <button
+          className="md:hidden p-2 text-zinc-400 hover:text-white transition-colors"
+          onClick={() => setMobileOpen(!mobileOpen)}
+          aria-label="Toggle menu"
+        >
+          {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </div>
+
+      {/* Mobile nav overlay */}
+      {mobileOpen && (
+        <div className="md:hidden border-t border-zinc-800 bg-zinc-950/95 backdrop-blur-lg px-4 py-6 space-y-4">
+          <Link to="/" className="block text-zinc-300 hover:text-white py-2 text-lg font-medium transition-colors">
+            Races
+          </Link>
+          <Link to="/what-matters" className="block text-indigo-400 hover:text-indigo-300 py-2 text-lg font-medium transition-colors">
+            What Matters
+          </Link>
+          {user && (
+            <Link to="/press/register" className="block text-zinc-300 hover:text-white py-2 text-lg font-medium transition-colors">
+              Press Credentials
+            </Link>
+          )}
+          {activeCandidateId && (
+            <Link to={`/candidate/${activeCandidateId}`} className="block text-zinc-300 hover:text-white py-2 text-lg font-medium transition-colors">
+              Candidate Portal
+            </Link>
+          )}
+
+          {user ? (
+            <>
+              {candidates.length > 0 && (user.role === 'admin' || user.role === 'super_admin' || user.role === 'staff' || (user.staff_links && user.staff_links.length > 0)) && (
+                <div className="border-t border-zinc-800 pt-4">
+                  <label className="text-xs text-zinc-500 uppercase tracking-wider mb-2 block">View As Candidate:</label>
+                  <select
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                    value={activeCandidateId || ""}
+                    onChange={handleCandidateChange}
+                  >
+                    {candidates.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} ({c.race_state})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <Link to="/notifications" className="flex items-center gap-2 text-zinc-300 hover:text-white py-2 text-lg font-medium transition-colors border-t border-zinc-800 pt-4">
+                Notifications
+                {unreadCount > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-xs font-bold">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+              </Link>
+              <div className="border-t border-zinc-800 pt-4 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-zinc-400">
+                  <User className="w-4 h-4" />
+                  <span>{user.display_name || user.username}</span>
+                </div>
+                <button onClick={handleLogout} className="text-sm text-red-400 hover:text-red-300">
+                  Sign Out
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="border-t border-zinc-800 pt-4 flex gap-3">
+              <Link to="/login" className="flex-1 text-center py-2 border border-zinc-700 text-white rounded-lg">Sign In</Link>
+              <Link to="/register" className="flex-1 text-center py-2 bg-indigo-600 text-white rounded-lg">Sign Up</Link>
+            </div>
+          )}
+        </div>
+      )}
+    </header>
+  );
+}
+
+function AppContent() {
+  const { user, initialized, init } = useAuth();
+  const { races, fetchRaces, fetchRace, fetchAllCandidates, allCandidates } = useArenaStore();
+  const location = useLocation();
+
+  const [activeCandidateId, setActiveCandidateId] = useState<string | null>(
+    () => {
+      try { return localStorage.getItem("activeCandidateId"); } catch { return null; }
+    }
+  );
+
+  // Initialize auth on mount
+  useEffect(() => {
+    init();
+  }, []);
+
+  // Fetch races on mount and when auth changes (bug #2 fix: invalidate stale data)
+  const userId = user?.id;
+  useEffect(() => {
+    useArenaStore.getState().invalidate();
+    fetchRaces();
+  }, [userId]);
+
+  // Fetch all race details for candidate list (bug #1 fix: use allSettled)
+  useEffect(() => {
+    if (races.length > 0) {
+      Promise.allSettled(races.map(r => fetchRace(r.id))).then(() => {
+        fetchAllCandidates();
+      });
+    }
+  }, [races.length, userId]);
+
+  // Set default active candidate
+  useEffect(() => {
+    if (!activeCandidateId && allCandidates.length > 0) {
+      setActiveCandidateId(allCandidates[0].id);
+    }
+  }, [allCandidates.length]);
+
+  useEffect(() => {
+    if (activeCandidateId) {
+      try { localStorage.setItem("activeCandidateId", activeCandidateId); } catch {}
+    }
+  }, [activeCandidateId]);
+
+  // Bug #3 fix: add activeCandidateId to deps
+  useEffect(() => {
+    const match = location.pathname.match(/\/candidate\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1] !== activeCandidateId) {
+      setActiveCandidateId(match[1]);
+    }
+  }, [location.pathname, activeCandidateId]);
+
+  // Show loading spinner while auth initializes
+  if (!initialized) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <CandidateContext.Provider value={{ candidates: allCandidates, activeCandidateId, setActiveCandidateId }}>
+      <div className="min-h-screen bg-zinc-950 text-zinc-50 font-sans selection:bg-indigo-500/30">
+        <Navigation />
+        <main>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/race/:id" element={<Race />} />
+            <Route path="/candidate/:id" element={user ? <CandidateDashboard /> : <Navigate to="/login" replace />} />
+            <Route path="/candidate" element={<Navigate to="/" replace />} />
+            <Route path="/what-matters" element={<WhatMattersPage />} />
+            <Route path="/my-priorities" element={user ? <MyPrioritiesPage /> : <Navigate to="/login" replace />} />
+            <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/login" replace />} />
+            <Route path="/press/register" element={user ? <PressRegistrationPage /> : <Navigate to="/login" replace />} />
+            <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+            <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </main>
+        <footer className="border-t border-zinc-800 mt-20 py-8 text-center text-xs text-zinc-600">
+          Arena &mdash; A fair, structured environment for political candidates.{' '}
+          {user && <span>Signed in as {user.display_name || user.username}.</span>}
+        </footer>
+      </div>
+    </CandidateContext.Provider>
+  );
+}
+
+function NotFound() {
+  return (
+    <div className="max-w-xl mx-auto px-4 py-24 text-center">
+      <div className="text-6xl font-bold text-zinc-700 mb-4">404</div>
+      <h1 className="text-2xl font-semibold text-white mb-2">Page Not Found</h1>
+      <p className="text-zinc-400 mb-8">The page you're looking for doesn't exist.</p>
+      <Link to="/" className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors">
+        Back to Races
+      </Link>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
+    </BrowserRouter>
+  );
+}
