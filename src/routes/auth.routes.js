@@ -4,14 +4,22 @@
  */
 
 import { Router } from 'itty-router';
-import { hashPassword, verifyPassword, createJWT, hashToken, generateVerificationToken } from '../auth.js';
+import { hashPassword, verifyPassword, createJWT, hashToken, generateVerificationToken, hashIP } from '../auth.js';
 import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
+import { checkRateLimit, clearRateLimit } from '../ratelimit.js';
 import { json, errorResponse, successResponse, parseBody, getClientIP } from '../middleware.js';
 import { validate, registerSchema, loginSchema } from '../validation.js';
 import { authenticate } from '../auth.js';
 
 const router = Router({ base: '/api/auth' });
+
+// Rate limit policies (fixed windows)
+const LOGIN_MAX_PER_IP = 20;        // per 15 min
+const LOGIN_MAX_PER_EMAIL = 10;     // per 15 min
+const LOGIN_WINDOW_SECONDS = 15 * 60;
+const REGISTER_MAX_PER_IP = 5;      // per hour
+const REGISTER_WINDOW_SECONDS = 60 * 60;
 
 // POST /api/auth/register
 router.post('/register', async (request, env, ctx) => {
@@ -20,6 +28,13 @@ router.post('/register', async (request, env, ctx) => {
 
   const { valid, errors, data } = validate(registerSchema, body);
   if (!valid) return errorResponse(errors.join('; '));
+
+  // Rate limit registrations per IP
+  const regIpHash = await hashIP(getClientIP(request));
+  if (regIpHash) {
+    const rl = await checkRateLimit(env.ARENA_DB, `register:${regIpHash}`, REGISTER_MAX_PER_IP, REGISTER_WINDOW_SECONDS);
+    if (rl.limited) return errorResponse('Too many registration attempts. Please try again later.', 429);
+  }
 
   // Check if email or username already exists
   const existing = await env.ARENA_DB.prepare(
@@ -32,20 +47,28 @@ router.post('/register', async (request, env, ctx) => {
   const passwordHash = await hashPassword(data.password);
   const verificationToken = generateVerificationToken();
 
-  await env.ARENA_DB.prepare(
-    `INSERT INTO users (id, email, username, display_name, password_hash, verification_token, party_affiliation, jurisdiction_state, jurisdiction_district)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    userId,
-    data.email.toLowerCase(),
-    data.username.toLowerCase(),
-    data.display_name,
-    passwordHash,
-    verificationToken,
-    data.party_affiliation || null,
-    data.jurisdiction_state || null,
-    data.jurisdiction_district || null,
-  ).run();
+  try {
+    await env.ARENA_DB.prepare(
+      `INSERT INTO users (id, email, username, display_name, password_hash, verification_token, party_affiliation, jurisdiction_state, jurisdiction_district)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      userId,
+      data.email.toLowerCase(),
+      data.username.toLowerCase(),
+      data.display_name,
+      passwordHash,
+      verificationToken,
+      data.party_affiliation || null,
+      data.jurisdiction_state || null,
+      data.jurisdiction_district || null,
+    ).run();
+  } catch (err) {
+    // UNIQUE constraint race: two concurrent registrations with the same email/username
+    if (String(err?.message || err).includes('UNIQUE')) {
+      return errorResponse('Email or username already taken', 409);
+    }
+    throw err;
+  }
 
   auditLog(env.ARENA_DB, ctx, {
     actorId: userId,
@@ -88,6 +111,16 @@ router.post('/login', async (request, env, ctx) => {
   const { valid, errors, data } = validate(loginSchema, body);
   if (!valid) return errorResponse(errors.join('; '));
 
+  // Rate limit login attempts per IP and per target email (brute-force defense)
+  const loginIpHash = await hashIP(getClientIP(request));
+  const emailKey = `login:email:${data.email.toLowerCase()}`;
+  if (loginIpHash) {
+    const rlIp = await checkRateLimit(env.ARENA_DB, `login:ip:${loginIpHash}`, LOGIN_MAX_PER_IP, LOGIN_WINDOW_SECONDS);
+    if (rlIp.limited) return errorResponse('Too many login attempts. Please try again later.', 429);
+  }
+  const rlEmail = await checkRateLimit(env.ARENA_DB, emailKey, LOGIN_MAX_PER_EMAIL, LOGIN_WINDOW_SECONDS);
+  if (rlEmail.limited) return errorResponse('Too many login attempts. Please try again later.', 429);
+
   const user = await env.ARENA_DB.prepare(
     `SELECT id, email, username, display_name, password_hash, role, email_verified, verification_status, party_affiliation, jurisdiction_state, jurisdiction_district, is_active FROM users WHERE email = ?`
   ).bind(data.email.toLowerCase()).first();
@@ -96,6 +129,9 @@ router.post('/login', async (request, env, ctx) => {
 
   const passwordValid = await verifyPassword(data.password, user.password_hash);
   if (!passwordValid) return errorResponse('Invalid email or password', 401);
+
+  // Successful login resets the per-email failure window
+  await clearRateLimit(env.ARENA_DB, emailKey);
 
   // Create session
   const sessionId = generateId('ses');

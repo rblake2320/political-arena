@@ -36,10 +36,16 @@ function Navigation() {
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    if (user) {
-      api.getUnreadCount().then(data => setUnreadCount(data.count || 0)).catch(() => {});
+    if (!user) {
+      setUnreadCount(0);
+      return;
     }
-  }, [user, location.pathname]);
+    const refresh = () => api.getUnreadCount().then(data => setUnreadCount(data.count || 0)).catch(() => {});
+    refresh();
+    // Poll on an interval instead of refetching on every route change
+    const interval = setInterval(refresh, 60_000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   const handleCandidateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const id = e.target.value;

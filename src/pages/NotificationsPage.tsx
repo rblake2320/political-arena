@@ -33,7 +33,10 @@ export function NotificationsPage() {
         setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, is_read: 1 } : n));
       } catch {}
     }
-    if (notif.link_url) navigate(notif.link_url);
+    // Only follow internal app paths — never external or protocol-relative URLs
+    if (notif.link_url && notif.link_url.startsWith('/') && !notif.link_url.startsWith('//')) {
+      navigate(notif.link_url);
+    }
   };
 
   const unreadCount = notifications.filter(n => !n.is_read).length;

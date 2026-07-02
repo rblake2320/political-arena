@@ -5,6 +5,19 @@
 
 import axios from 'axios';
 
+// localStorage can throw (Safari private mode, storage disabled) — never let
+// that take down the app. All token access goes through these helpers.
+const TOKEN_KEY = 'arena_token';
+export function getStoredToken(): string | null {
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+export function setStoredToken(token: string): void {
+  try { localStorage.setItem(TOKEN_KEY, token); } catch {}
+}
+export function clearStoredToken(): void {
+  try { localStorage.removeItem(TOKEN_KEY); } catch {}
+}
+
 const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
@@ -12,7 +25,7 @@ const api = axios.create({
 
 // Inject auth token on every request; fix Content-Type for FormData uploads
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('arena_token');
+  const token = getStoredToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -28,7 +41,7 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('arena_token');
+      clearStoredToken();
       // Only redirect if not already on auth pages
       if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/register')) {
         window.location.href = '/login';
@@ -59,7 +72,7 @@ export async function login(data: { email: string; password: string }) {
 
 export async function logout() {
   try { await api.post('/auth/logout'); } catch {}
-  localStorage.removeItem('arena_token');
+  clearStoredToken();
 }
 
 export async function getMe() {

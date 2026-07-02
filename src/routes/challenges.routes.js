@@ -225,8 +225,9 @@ router.post('/', async (request, env, ctx) => {
         `INSERT INTO notifications (id, user_id, subscription_id, notification_type, title, body, link_url) VALUES (?, ?, ?, 'challenge_issued', ?, ?, ?)`
       ).bind(notifId, sub.user_id, sub.id, 'New Challenge Issued', bodyText, `/race/${data.race_id}`);
     });
-    if (notifBatch.length > 0 && notifBatch.length <= 50) {
-      await env.ARENA_DB.batch(notifBatch);
+    // Chunk into batches of 50 so large subscriber lists are never dropped
+    for (let i = 0; i < notifBatch.length; i += 50) {
+      await env.ARENA_DB.batch(notifBatch.slice(i, i + 50));
     }
   }
 

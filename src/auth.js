@@ -65,16 +65,30 @@ export async function verifyPassword(password, storedHash) {
     const computedHash = Array.from(new Uint8Array(exportedKey))
       .map(b => b.toString(16).padStart(2, '0')).join('');
 
-    return computedHash === hash;
+    return timingSafeEqual(computedHash, hash);
   } catch (error) {
     console.error('Password verification error:', error);
     return false;
   }
 }
 
+// Constant-time string comparison — avoids leaking match position via timing
+function timingSafeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 // ===== JWT Utilities =====
 
 async function getJWTKey(env) {
+  // Fail closed: a production deployment must never run on the dev fallback secret.
+  if (!env.JWT_SECRET && env.ENVIRONMENT === 'production') {
+    throw new Error('JWT_SECRET is not configured. Set it with: wrangler secret put JWT_SECRET');
+  }
   const secretStr = env.JWT_SECRET || 'arena-dev-secret-change-in-production';
   const encoded = new TextEncoder().encode(secretStr);
   const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);

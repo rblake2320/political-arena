@@ -35,7 +35,7 @@ interface AuthState {
 
 export const useAuth = create<AuthState>((set, get) => ({
   user: null,
-  token: localStorage.getItem('arena_token'),
+  token: api.getStoredToken(),
   loading: false,
   initialized: false,
 
@@ -44,7 +44,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     const state = get();
     if (state.initialized || state.loading) return;
 
-    const token = localStorage.getItem('arena_token');
+    const token = api.getStoredToken();
     if (!token) {
       set({ initialized: true, user: null, token: null });
       return;
@@ -54,7 +54,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       const data = await api.getMe();
       set({ user: data, token, initialized: true, loading: false });
     } catch {
-      localStorage.removeItem('arena_token');
+      api.clearStoredToken();
       set({ user: null, token: null, initialized: true, loading: false });
     }
   },
@@ -63,7 +63,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ loading: true });
     try {
       const { user, token } = await api.login({ email, password });
-      localStorage.setItem('arena_token', token);
+      api.setStoredToken(token);
       set({ user, token, loading: false });
     } catch (err: any) {
       set({ loading: false });
@@ -74,8 +74,8 @@ export const useAuth = create<AuthState>((set, get) => ({
   register: async (data) => {
     set({ loading: true });
     try {
-      const { user, token } = await api.register(data);
-      localStorage.setItem('arena_token', token);
+      const { user, token } = await api.register({ ...data, display_name: data.display_name || data.username });
+      api.setStoredToken(token);
       set({ user, token, loading: false });
     } catch (err: any) {
       set({ loading: false });

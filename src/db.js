@@ -412,6 +412,13 @@ export async function initDatabase(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
 
+    // ========== RATE LIMITING ==========
+    db.prepare(`CREATE TABLE IF NOT EXISTS auth_rate_limits (
+      key TEXT PRIMARY KEY,
+      count INTEGER NOT NULL DEFAULT 1,
+      reset_at TEXT NOT NULL
+    )`),
+
     // ========== CREDIT TRANSACTIONS ==========
     db.prepare(`CREATE TABLE IF NOT EXISTS credit_transactions (
       id TEXT PRIMARY KEY,

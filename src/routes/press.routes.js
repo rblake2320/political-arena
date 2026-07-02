@@ -5,8 +5,9 @@
 
 import { Router } from 'itty-router';
 import { generateId } from '../db.js';
+import { auditLog } from '../audit.js';
 import {
-  requireAuth, requireRole, successResponse, errorResponse, parseBody,
+  requireAuth, requireRole, successResponse, errorResponse, parseBody, getClientIP,
 } from '../middleware.js';
 import { validate, registerPressSchema } from '../validation.js';
 
@@ -81,7 +82,7 @@ router.get('/pending', async (request, env) => {
  * PUT /api/press/:id/review — Approve or reject (admin/moderator)
  * Body: { action: 'approve' | 'reject' }
  */
-router.put('/:id/review', async (request, env) => {
+router.put('/:id/review', async (request, env, ctx) => {
   const roleCheck = requireRole('admin', 'super_admin', 'moderator');
   const err = await roleCheck(request, env);
   if (err) return err;
@@ -92,13 +93,23 @@ router.put('/:id/review', async (request, env) => {
     return errorResponse('action must be "approve" or "reject"');
   }
 
-  const cred = await env.ARENA_DB.prepare(`SELECT id, user_id FROM press_credentials WHERE id = ?`).bind(id).first();
+  const cred = await env.ARENA_DB.prepare(`SELECT id, user_id, status FROM press_credentials WHERE id = ?`).bind(id).first();
   if (!cred) return errorResponse('Credential not found', 404);
 
   const newStatus = body.action === 'approve' ? 'approved' : 'rejected';
   await env.ARENA_DB.prepare(
     `UPDATE press_credentials SET status = ?, reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?`
   ).bind(newStatus, request.user.id, id).run();
+
+  auditLog(env.ARENA_DB, ctx, {
+    actorId: request.user.id,
+    action: `press.${body.action}`,
+    entityType: 'press_credentials',
+    entityId: id,
+    beforeState: { status: cred.status },
+    afterState: { status: newStatus },
+    ipAddress: getClientIP(request),
+  });
 
   return successResponse({ id, status: newStatus });
 });

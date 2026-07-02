@@ -7,6 +7,7 @@ import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
 import { requireAuth, requireRole, errorResponse, successResponse, parseBody, parsePagination, getClientIP } from '../middleware.js';
+import { authenticate } from '../auth.js';
 import { validate, createAdSchema, updateAdSchema, reviewAdSchema, createRebuttalSchema } from '../validation.js';
 
 const router = Router({ base: '/api/ads' });
@@ -50,7 +51,7 @@ router.get('/races/:raceId', async (request, env) => {
   return successResponse({ ads: adPairs });
 });
 
-// GET /api/ads/:id — Public single ad
+// GET /api/ads/:id — Public single ad (drafts/rejected visible only to staff/admin)
 router.get('/:id', async (request, env) => {
   const { id } = request.params;
   const ad = await env.ARENA_DB.prepare(
@@ -59,6 +60,20 @@ router.get('/:id', async (request, env) => {
   ).bind(id).first();
 
   if (!ad) return errorResponse('Ad not found', 404);
+
+  // Unpublished ads are only visible to the owning candidate's staff or admins
+  if (!['approved', 'active', 'completed'].includes(ad.status)) {
+    const user = await authenticate(request, env);
+    const isAdmin = user && ['admin', 'super_admin', 'moderator'].includes(user.role);
+    let isStaff = false;
+    if (user && !isAdmin) {
+      const link = await env.ARENA_DB.prepare(
+        `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+      ).bind(user.id, ad.candidate_id).first();
+      isStaff = !!link;
+    }
+    if (!isAdmin && !isStaff) return errorResponse('Ad not found', 404);
+  }
 
   const rebuttals = await env.ARENA_DB.prepare(
     `SELECT ra.*, c.name as candidate_name, c.party as candidate_party
@@ -220,6 +235,15 @@ router.post('/:id/activate', async (request, env, ctx) => {
   const ad = await env.ARENA_DB.prepare(`SELECT * FROM ad_flights WHERE id = ?`).bind(id).first();
   if (!ad) return errorResponse('Ad not found', 404);
   if (ad.status !== 'approved') return errorResponse('Ad must be approved before activation');
+
+  // Only staff of the owning candidate (or admins) may activate
+  const isActivateAdmin = ['admin', 'super_admin'].includes(request.user.role);
+  if (!isActivateAdmin) {
+    const link = await env.ARENA_DB.prepare(
+      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+    ).bind(request.user.id, ad.candidate_id).first();
+    if (!link) return errorResponse('Not authorized for this candidate', 403);
+  }
 
   await env.ARENA_DB.prepare(
     `UPDATE ad_flights SET status = 'active', activated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`

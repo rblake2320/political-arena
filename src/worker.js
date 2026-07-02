@@ -53,6 +53,51 @@ api.get('/health', () => json({ status: 'ok', version: '1.0.0', timestamp: new D
 // 404 for unknown API routes
 api.all('*', () => json({ success: false, error: 'API endpoint not found' }, 404));
 
+// Security headers applied to every response served by the worker
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+};
+
+// CSP for HTML documents (the React SPA). Media/images may come from R2 or
+// external https hosts (e.g. campaign photo CDNs), so img/media allow https.
+const HTML_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' https: data: blob:",
+  "media-src 'self' https: blob:",
+  "connect-src 'self'",
+  "font-src 'self' data:",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join('; ');
+
+function withSecurityHeaders(response, { isHtml = false } = {}) {
+  const headers = new Headers(response.headers);
+  Object.entries(SECURITY_HEADERS).forEach(([k, v]) => headers.set(k, v));
+  if (isHtml) headers.set('Content-Security-Policy', HTML_CSP);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+// One-time bootstrap per isolate: schema + reference data. Demo data only
+// seeds outside production (or when SEED_DEMO_DATA=true is set explicitly) —
+// production databases must never receive fictional candidates or ads.
+let bootstrapped = false;
+async function bootstrap(env) {
+  if (bootstrapped) return;
+  await initDatabase(env.ARENA_DB);
+  await seedIssueCategories(env.ARENA_DB);
+  if (env.ENVIRONMENT !== 'production' || env.SEED_DEMO_DATA === 'true') {
+    await seedDemoData(env.ARENA_DB);
+  }
+  bootstrapped = true;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -62,11 +107,9 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(request) });
     }
 
-    // Initialize database on first request
+    // Initialize database once per isolate
     try {
-      await initDatabase(env.ARENA_DB);
-      await seedIssueCategories(env.ARENA_DB);
-      await seedDemoData(env.ARENA_DB);
+      await bootstrap(env);
     } catch (err) {
       console.error('DB init error:', err);
     }
@@ -75,9 +118,10 @@ export default {
     if (url.pathname.startsWith('/api/')) {
       try {
         const response = await api.fetch(request, env, ctx);
-        // Add CORS headers to all API responses
+        // Add CORS + security headers to all API responses
         const headers = new Headers(response.headers);
         Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+        Object.entries(SECURITY_HEADERS).forEach(([k, v]) => headers.set(k, v));
         return new Response(response.body, { status: response.status, headers });
       } catch (err) {
         console.error('API error:', err);
@@ -114,9 +158,11 @@ export default {
       if (response.status === 404) {
         // SPA fallback: serve index.html for client-side routing
         const indexRequest = new Request(new URL('/', request.url), request);
-        return env.ASSETS.fetch(indexRequest);
+        const indexResponse = await env.ASSETS.fetch(indexRequest);
+        return withSecurityHeaders(indexResponse, { isHtml: true });
       }
-      return response;
+      const isHtml = (response.headers.get('Content-Type') || '').includes('text/html');
+      return withSecurityHeaders(response, { isHtml });
     } catch (e) {
       return new Response('Internal Server Error', { status: 500 });
     }
@@ -155,20 +201,32 @@ export default {
         `UPDATE sessions SET is_active = 0 WHERE is_active = 1 AND expires_at < datetime('now')`
       ).run();
 
-      // 5. Purge old analytics events (30-day retention)
-      const retentionDays = parseInt(env.IMPRESSION_LOG_RETENTION_DAYS || '30');
+      // 5. Purge old analytics events (default 30-day retention)
+      const parsedRetention = Number.parseInt(env.IMPRESSION_LOG_RETENTION_DAYS || '30', 10);
+      const retentionDays = Number.isFinite(parsedRetention) && parsedRetention >= 1 ? parsedRetention : 30;
+      const retentionModifier = `-${retentionDays} days`;
       await env.ARENA_DB.prepare(
-        `DELETE FROM analytics_events WHERE created_at < datetime('now', '-${retentionDays} days')`
-      ).run();
+        `DELETE FROM analytics_events WHERE created_at < datetime('now', ?)`
+      ).bind(retentionModifier).run();
 
       // 6. Purge old impression logs
       await env.ARENA_DB.prepare(
-        `DELETE FROM impression_logs WHERE created_at < datetime('now', '-${retentionDays} days')`
-      ).run();
+        `DELETE FROM impression_logs WHERE created_at < datetime('now', ?)`
+      ).bind(retentionModifier).run();
 
       // 7. Clean expired cooldowns
       await env.ARENA_DB.prepare(
         `DELETE FROM challenge_cooldowns WHERE cooldown_until < datetime('now')`
+      ).run();
+
+      // 8. Reap expired rate-limit windows
+      await env.ARENA_DB.prepare(
+        `DELETE FROM auth_rate_limits WHERE reset_at < datetime('now')`
+      ).run();
+
+      // 9. Hard-delete long-inactive sessions (kept 30 days for audit trails)
+      await env.ARENA_DB.prepare(
+        `DELETE FROM sessions WHERE is_active = 0 AND expires_at < datetime('now', '-30 days')`
       ).run();
 
     } catch (err) {

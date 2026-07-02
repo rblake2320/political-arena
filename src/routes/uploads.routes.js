@@ -69,12 +69,8 @@ router.post('/presign', async (request, env, ctx) => {
   const fileId = generateId('media');
   const key = `uploads/${candidate_id || request.user.id}/${fileId}.${typeConfig.ext}`;
 
-  // If R2 is available, generate presigned URL
+  // If R2 is available, upload goes through the worker proxy endpoint
   if (env.ARENA_MEDIA) {
-    // For R2 multipart upload support
-    const url = `https://${env.ARENA_MEDIA.jurisdiction || ''}.r2.cloudflarestorage.com/${key}`;
-
-    // Use R2 put for direct upload via worker proxy
     return successResponse({
       upload_url: `/uploads/direct`,
       method: 'PUT',
@@ -179,11 +175,8 @@ async function handleDirectUpload(request, env, ctx) {
     });
   }
 
-  // No R2 — return error with instructions
-  return errorResponse(
-    'R2 storage not enabled. Enable R2 in Cloudflare Dashboard and uncomment the R2 binding in wrangler.toml.',
-    503
-  );
+  // No R2 binding available
+  return errorResponse('Media storage is temporarily unavailable. Please try again later.', 503);
 }
 
 // GET /api/uploads/serve/:fileId — Serve file from R2
@@ -192,9 +185,12 @@ router.get('/serve/:fileId', async (request, env) => {
 
   const { fileId } = request.params;
 
-  // Search for file in R2 by prefix
+  // Search for file in R2 by prefix (exact filename match, not substring)
   const list = await env.ARENA_MEDIA.list({ prefix: `uploads/`, limit: 1000 });
-  const match = list.objects.find(o => o.key.includes(fileId));
+  const match = list.objects.find(o => {
+    const filename = o.key.split('/').pop() || '';
+    return filename === fileId || filename.startsWith(`${fileId}.`);
+  });
 
   if (!match) return errorResponse('File not found', 404);
 

@@ -5,9 +5,10 @@
 
 import { Router } from 'itty-router';
 import { generateId } from '../db.js';
+import { auditLog } from '../audit.js';
 import {
   requireAuth, requireRole, requireCandidateStaff,
-  successResponse, errorResponse, parseBody,
+  successResponse, errorResponse, parseBody, getClientIP,
 } from '../middleware.js';
 import { validate, grantCreditsSchema } from '../validation.js';
 
@@ -44,7 +45,7 @@ router.get('/:candidateId', async (request, env) => {
  * POST /api/credits/:candidateId/grant — Admin grants credits
  * Body: { amount, description? }
  */
-router.post('/:candidateId/grant', async (request, env) => {
+router.post('/:candidateId/grant', async (request, env, ctx) => {
   const roleCheck = requireRole('admin', 'super_admin');
   const err = await roleCheck(request, env);
   if (err) return err;
@@ -70,6 +71,16 @@ router.post('/:candidateId/grant', async (request, env) => {
       `INSERT INTO credit_transactions (id, candidate_id, amount, transaction_type, description) VALUES (?, ?, ?, 'grant', ?)`
     ).bind(txId, candidateId, data.amount, data.description || `Admin grant by ${request.user.display_name}`),
   ]);
+
+  auditLog(env.ARENA_DB, ctx, {
+    actorId: request.user.id,
+    action: 'credits.grant',
+    entityType: 'candidate',
+    entityId: candidateId,
+    beforeState: { credit_balance: candidate.credit_balance },
+    afterState: { credit_balance: candidate.credit_balance + data.amount, amount: data.amount },
+    ipAddress: getClientIP(request),
+  });
 
   return successResponse({
     candidate_id: candidateId,

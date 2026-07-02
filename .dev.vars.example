@@ -1,0 +1,8 @@
+# Copy to .dev.vars for local development (`wrangler dev`).
+# In production, set secrets with: wrangler secret put JWT_SECRET
+#
+# JWT_SECRET is REQUIRED in production — the worker fails closed without it.
+JWT_SECRET=generate-a-long-random-string-here
+
+# Optional: force demo data seeding (never enable in production)
+# SEED_DEMO_DATA=true
