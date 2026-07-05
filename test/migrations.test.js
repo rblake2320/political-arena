@@ -68,6 +68,9 @@ function createFakeD1({
           if (sql === 'PRAGMA table_info(correction_requests)') {
             return { results: Array.from(correctionRequestColumns).map(name => ({ name })) };
           }
+          if (sql === 'PRAGMA table_info(correction_request_events)') {
+            return { results: Array.from(correctionEventColumns).map(name => ({ name })) };
+          }
           if (sql === 'PRAGMA table_info(statement_review_proposals)') {
             return { results: Array.from(statementReviewProposalColumns).map(name => ({ name })) };
           }
@@ -118,13 +121,54 @@ function createFakeD1({
           emailDeliveryColumns.add('id');
         }
         if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS correction_requests')) {
-          correctionRequestColumns.add('id');
+          [
+            'id',
+            'requester_id',
+            'content_type',
+            'content_id',
+            'candidate_id',
+            'reason',
+            'requested_change',
+            'evidence_url',
+            'status',
+            'reviewed_by',
+            'reviewed_at',
+            'resolution_note',
+            'public_note',
+            'created_at',
+            'updated_at',
+          ].forEach(column => correctionRequestColumns.add(column));
         }
         if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS correction_request_events')) {
-          correctionEventColumns.add('id');
+          [
+            'id',
+            'correction_request_id',
+            'actor_id',
+            'event_type',
+            'before_status',
+            'after_status',
+            'note',
+            'public_note',
+            'metadata',
+            'created_at',
+          ].forEach(column => correctionEventColumns.add(column));
         }
         if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS statement_review_proposals')) {
-          statementReviewProposalColumns.add('id');
+          [
+            'id',
+            'statement_id',
+            'reviewer_id',
+            'truth_status',
+            'answer_status',
+            'evasion_score',
+            'confidence_score',
+            'review_note',
+            'status',
+            'second_reviewer_id',
+            'applied_at',
+            'created_at',
+            'updated_at',
+          ].forEach(column => statementReviewProposalColumns.add(column));
         }
       }
       return statements.map(() => ({ success: true }));
@@ -358,42 +402,42 @@ describe('runtime migrations', () => {
       `CREATE INDEX IF NOT EXISTS idx_email_deliveries_status
         ON email_deliveries(status, created_at)`,
       `CREATE TABLE IF NOT EXISTS correction_requests (
-        id TEXT PRIMARY KEY,
-        requester_id TEXT NOT NULL REFERENCES users(id),
-        content_type TEXT NOT NULL CHECK(content_type IN ('statement','recite','challenge','challenge_response','candidate','ad','rebuttal')),
-        content_id TEXT NOT NULL,
-        candidate_id TEXT REFERENCES candidates(id),
-        reason TEXT NOT NULL DEFAULT 'factual_error' CHECK(reason IN ('factual_error','missing_context','source_error','identity_error','score_dispute','other')),
-        requested_change TEXT NOT NULL,
-        evidence_url TEXT,
-        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','under_review','upheld','revised','rejected')),
-        reviewed_by TEXT REFERENCES users(id),
-        reviewed_at TEXT,
-        resolution_note TEXT,
-        public_note TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )`,
+      id TEXT PRIMARY KEY,
+      requester_id TEXT NOT NULL REFERENCES users(id),
+      content_type TEXT NOT NULL CHECK(content_type IN ('statement','recite','challenge','challenge_response','candidate','ad','rebuttal')),
+      content_id TEXT NOT NULL,
+      candidate_id TEXT REFERENCES candidates(id),
+      reason TEXT NOT NULL DEFAULT 'factual_error' CHECK(reason IN ('factual_error','missing_context','source_error','identity_error','score_dispute','other')),
+      requested_change TEXT NOT NULL,
+      evidence_url TEXT,
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','under_review','upheld','revised','rejected')),
+      reviewed_by TEXT REFERENCES users(id),
+      reviewed_at TEXT,
+      resolution_note TEXT,
+      public_note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
       `CREATE TABLE IF NOT EXISTS correction_request_events (
-        id TEXT PRIMARY KEY,
-        correction_request_id TEXT NOT NULL REFERENCES correction_requests(id),
-        actor_id TEXT REFERENCES users(id),
-        event_type TEXT NOT NULL CHECK(event_type IN ('submitted','status_changed','public_note')),
-        before_status TEXT,
-        after_status TEXT,
-        note TEXT,
-        public_note TEXT,
-        metadata TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )`,
+      id TEXT PRIMARY KEY,
+      correction_request_id TEXT NOT NULL REFERENCES correction_requests(id),
+      actor_id TEXT REFERENCES users(id),
+      event_type TEXT NOT NULL CHECK(event_type IN ('submitted','status_changed','public_note')),
+      before_status TEXT,
+      after_status TEXT,
+      note TEXT,
+      public_note TEXT,
+      metadata TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
       `CREATE INDEX IF NOT EXISTS idx_corrections_status
-        ON correction_requests(status, created_at)`,
+      ON correction_requests(status, created_at)`,
       `CREATE INDEX IF NOT EXISTS idx_corrections_content
-        ON correction_requests(content_type, content_id, created_at)`,
+      ON correction_requests(content_type, content_id, created_at)`,
       `CREATE INDEX IF NOT EXISTS idx_corrections_requester
-        ON correction_requests(requester_id, created_at)`,
+      ON correction_requests(requester_id, created_at)`,
       `CREATE INDEX IF NOT EXISTS idx_correction_events_request
-        ON correction_request_events(correction_request_id, created_at)`,
+      ON correction_request_events(correction_request_id, created_at)`,
       `CREATE TABLE IF NOT EXISTS statement_review_proposals (
         id TEXT PRIMARY KEY,
         statement_id TEXT NOT NULL REFERENCES public_statements(id),
@@ -449,5 +493,69 @@ describe('runtime migrations', () => {
     expect(db.executed).not.toContain(
       `UPDATE challenges SET public_receipt_slug = id WHERE public_receipt_slug IS NULL OR public_receipt_slug = ''`
     );
+  });
+
+  it('rebuilds legacy correction tables to the current correction schema', async () => {
+    const db = createFakeD1({
+      users: ['id', 'password_reset_token_hash', 'password_reset_expires_at'],
+      adFlights: ['id', 'source_type', 'source_url', 'source_label', 'posted_for_rebuttal_by'],
+      challenges: ['id', 'claim_text', 'dispute_summary', 'requested_response', 'public_receipt_slug'],
+      recites: ['id', 'source_published_at', 'accessed_at', 'archive_url', 'evidence_media_url', 'review_note'],
+      issueCategories: ['id', 'parent_category_id'],
+      voterWriteins: ['id', 'writein_rank'],
+      auditLog: ['id', 'prev_hash', 'entry_hash', 'chain_seq'],
+      pressFeedItems: ['id'],
+      emailDeliveries: ['id'],
+      correctionRequests: [
+        'id',
+        'content_type',
+        'content_id',
+        'submitted_by',
+        'candidate_id',
+        'request_text',
+        'requested_change',
+        'evidence_url',
+        'status',
+        'public_note',
+        'reviewed_by',
+        'reviewed_at',
+        'created_at',
+        'updated_at',
+      ],
+      correctionRequestEvents: [
+        'id',
+        'correction_request_id',
+        'actor_id',
+        'action_type',
+        'note',
+        'previous_status',
+        'new_status',
+        'metadata',
+        'created_at',
+      ],
+      statementReviewProposals: [
+        'id',
+        'statement_id',
+        'reviewer_id',
+        'truth_status',
+        'answer_status',
+        'evasion_score',
+        'confidence_score',
+        'review_note',
+        'status',
+        'second_reviewer_id',
+        'applied_at',
+        'created_at',
+        'updated_at',
+      ],
+    });
+
+    await runRuntimeMigrations(db);
+
+    expect(db.executed).toContain('ALTER TABLE correction_request_events RENAME TO correction_request_events_legacy');
+    expect(db.executed).toContain('ALTER TABLE correction_requests RENAME TO correction_requests_legacy');
+    expect(db.executed.some(sql => sql.includes('INSERT OR IGNORE INTO correction_requests') && sql.includes('submitted_by'))).toBe(true);
+    expect(db.executed.some(sql => sql.includes('INSERT OR IGNORE INTO correction_request_events') && sql.includes('action_type'))).toBe(true);
+    expect(db.executed).toContain('DROP TABLE IF EXISTS correction_requests_legacy');
   });
 });
