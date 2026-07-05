@@ -1058,7 +1058,7 @@ export async function seedOutsideAdExamples(db) {
       title: 'Roy Cooper releases first TV ad of Senate campaign',
       mediaUrl: 'https://www.youtube.com/watch?v=UBZrOCTc4v0',
       sourceUrl: 'https://roycooper.com/new-tv-ad-roy-cooper-releases-first-tv-ad-of-campaign-highlighting-how-hell-work-to-make-life-more-affordable-for-north-carolinians/',
-      sourceLabel: 'Official campaign TV ad link',
+      sourceLabel: 'SAMPLE official campaign TV ad link',
       description: 'Outside TV/digital ad linked as source context. The original video remains hosted by the campaign; Arena provides an open response slot for eligible opposing campaigns.',
       disclaimer: 'Outside ad linked for response context; original paid-for disclaimer remains with source media.',
     },
@@ -1069,7 +1069,7 @@ export async function seedOutsideAdExamples(db) {
       title: 'Andy Barr for Senate: Stop DEI Ad',
       mediaUrl: 'https://www.youtube.com/watch?v=P8dAXjJ-6Eo',
       sourceUrl: 'https://barrforsenate.com/press-release/barr-stop-dei-ad-inflames-woke-leftists-kicks-off-1m-buy-throughout-the-commonwealth/',
-      sourceLabel: 'Official campaign TV ad link',
+      sourceLabel: 'SAMPLE official campaign TV ad link',
       description: 'Outside TV/digital ad linked as source context. The original video remains hosted by the campaign; Arena provides an open response slot for eligible opposing campaigns.',
       disclaimer: 'Outside ad linked for response context; original paid-for disclaimer remains with source media.',
     },
@@ -1102,6 +1102,31 @@ export async function seedOutsideAdExamples(db) {
       example.disclaimer,
       example.sourceUrl,
       example.sourceLabel,
+    )
+  ));
+
+  await db.batch(loadable.map(example =>
+    db.prepare(
+      `UPDATE ad_flights
+       SET title = ?,
+           media_url = ?,
+           media_type = 'video',
+           ad_content_text = ?,
+           disclaimer_text = ?,
+           source_type = 'external',
+           source_url = ?,
+           source_label = ?,
+           status = 'active',
+           updated_at = datetime('now')
+       WHERE id = ?`
+    ).bind(
+      example.title,
+      example.mediaUrl,
+      example.description,
+      example.disclaimer,
+      example.sourceUrl,
+      example.sourceLabel,
+      example.id,
     )
   ));
 
