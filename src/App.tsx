@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation, Navigate } from "react-router";
-import React, { useEffect, useState, createContext, useContext } from "react";
+import React, { useEffect, useState, createContext, useContext, useMemo, useRef } from "react";
 import { Home } from "./pages/Home";
 import { Race } from "./pages/Race";
 import { CandidateDashboard } from "./pages/CandidateDashboard";
@@ -31,6 +31,52 @@ export const CandidateContext = createContext<CandidateContextType>({
   activeCandidateId: null,
   setActiveCandidateId: () => {},
 });
+
+type PageTelemetry = {
+  route: string;
+  race_id?: string;
+  candidate_id?: string;
+  content_type?: string;
+  content_id?: string;
+};
+
+function pageTelemetry(pathname: string): PageTelemetry {
+  const raceMatch = pathname.match(/^\/race\/([^/]+)/);
+  if (raceMatch) {
+    return { route: '/race/:id', race_id: raceMatch[1], content_type: 'race', content_id: raceMatch[1] };
+  }
+
+  const receiptMatch = pathname.match(/^\/challenge\/([^/]+)/);
+  if (receiptMatch) {
+    return { route: '/challenge/:id', content_type: 'challenge', content_id: receiptMatch[1] };
+  }
+
+  const publicProfileMatch = pathname.match(/^\/profile\/candidate\/([^/]+)/);
+  if (publicProfileMatch) {
+    return { route: '/profile/candidate/:id', candidate_id: publicProfileMatch[1], content_type: 'candidate', content_id: publicProfileMatch[1] };
+  }
+
+  const candidatePortalMatch = pathname.match(/^\/candidate\/([^/]+)/);
+  if (candidatePortalMatch) {
+    return { route: '/candidate/:id', candidate_id: candidatePortalMatch[1], content_type: 'candidate_portal', content_id: candidatePortalMatch[1] };
+  }
+
+  const knownStaticRoutes = new Set([
+    '/',
+    '/what-matters',
+    '/my-priorities',
+    '/notifications',
+    '/moderation',
+    '/press/register',
+    '/help',
+    '/login',
+    '/register',
+    '/forgot-password',
+    '/reset-password',
+  ]);
+
+  return { route: knownStaticRoutes.has(pathname) ? pathname : 'unknown' };
+}
 
 function Navigation() {
   const { candidates, activeCandidateId, setActiveCandidateId } = useContext(CandidateContext);
@@ -112,7 +158,7 @@ function Navigation() {
           {user ? (
             <>
               {/* Candidate selector for staff/admin only */}
-              {candidates.length > 0 && (user.role === 'admin' || user.role === 'super_admin' || user.role === 'staff' || (user.staff_links && user.staff_links.length > 0)) && (
+              {candidates.length > 0 && (
                 <>
                   <div className="h-4 w-px bg-zinc-800" />
                   <div className="flex items-center gap-2">
@@ -206,7 +252,7 @@ function Navigation() {
 
           {user ? (
             <>
-              {candidates.length > 0 && (user.role === 'admin' || user.role === 'super_admin' || user.role === 'staff' || (user.staff_links && user.staff_links.length > 0)) && (
+              {candidates.length > 0 && (
                 <div className="border-t border-zinc-800 pt-4">
                   <label className="text-xs text-zinc-500 uppercase tracking-wider mb-2 block">View As Candidate:</label>
                   <select
@@ -254,6 +300,7 @@ function AppContent() {
   const { user, initialized, init } = useAuth();
   const { races, fetchRaces, fetchRace, fetchAllCandidates, allCandidates } = useArenaStore();
   const location = useLocation();
+  const lastTrackedPath = useRef<string | null>(null);
 
   const [activeCandidateId, setActiveCandidateId] = useState<string | null>(
     () => {
@@ -268,6 +315,36 @@ function AppContent() {
 
   // Fetch races on mount and when auth changes (bug #2 fix: invalidate stale data)
   const userId = user?.id;
+  const portalCandidates = useMemo(() => {
+    if (!user) return [];
+    const linkedCandidateIds = new Set((user.staff_links || []).map((link: any) => link.candidate_id));
+    return allCandidates.filter(candidate => linkedCandidateIds.has(candidate.id));
+  }, [allCandidates, user]);
+
+  useEffect(() => {
+    if (!initialized) return;
+
+    const pathname = location.pathname;
+    if (lastTrackedPath.current === pathname) return;
+
+    const previousPath = lastTrackedPath.current;
+    lastTrackedPath.current = pathname;
+    const telemetry = pageTelemetry(pathname);
+    void api.trackEvent({
+      event_type: 'page_view',
+      race_id: telemetry.race_id,
+      candidate_id: telemetry.candidate_id,
+      content_type: telemetry.content_type,
+      content_id: telemetry.content_id,
+      metadata: {
+        path: pathname,
+        route: telemetry.route,
+        referrer_path: previousPath,
+        signed_in: Boolean(userId),
+      },
+    });
+  }, [initialized, location.pathname, userId]);
+
   useEffect(() => {
     useArenaStore.getState().invalidate();
     fetchRaces();
@@ -284,10 +361,14 @@ function AppContent() {
 
   // Set default active candidate
   useEffect(() => {
-    if (!activeCandidateId && allCandidates.length > 0) {
-      setActiveCandidateId(allCandidates[0].id);
+    if (portalCandidates.length === 0) {
+      if (activeCandidateId) setActiveCandidateId(null);
+      return;
     }
-  }, [allCandidates.length]);
+    if (!activeCandidateId || !portalCandidates.some(candidate => candidate.id === activeCandidateId)) {
+      setActiveCandidateId(portalCandidates[0].id);
+    }
+  }, [portalCandidates, activeCandidateId]);
 
   useEffect(() => {
     if (activeCandidateId) {
@@ -313,7 +394,7 @@ function AppContent() {
   }
 
   return (
-    <CandidateContext.Provider value={{ candidates: allCandidates, activeCandidateId, setActiveCandidateId }}>
+    <CandidateContext.Provider value={{ candidates: portalCandidates, activeCandidateId, setActiveCandidateId }}>
       <div className="min-h-screen bg-zinc-950 text-zinc-50 font-sans selection:bg-indigo-500/30">
         <Navigation />
         <main>

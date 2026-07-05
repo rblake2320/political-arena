@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
-import { AlertCircle, CheckCircle2, Clock, ExternalLink, FileCheck2, ShieldAlert } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, ExternalLink, FileCheck2, ShieldAlert, ShieldCheck } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import * as api from "../api";
 import { ContentMedia } from "../components/Media";
@@ -18,6 +18,20 @@ function factScoreLabel(label?: string) {
   if (label === "source-disputed") return "Source-disputed";
   if (label === "mixed") return "Mixed recites";
   return "Under-recited";
+}
+
+function auditChainLabel(status?: string) {
+  if (status === "verified") return "Chain verified";
+  if (status === "partial") return "Partially verified";
+  if (status === "failed") return "Verification failed";
+  return "No chain entries";
+}
+
+function auditChainClass(status?: string) {
+  if (status === "verified") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+  if (status === "partial") return "border-amber-500/30 bg-amber-500/10 text-amber-300";
+  if (status === "failed") return "border-red-500/30 bg-red-500/10 text-red-300";
+  return "border-zinc-700 bg-zinc-900 text-zinc-400";
 }
 
 function ReciteList({ recites }: { recites: any[] }) {
@@ -88,7 +102,7 @@ export function ChallengeReceiptPage() {
     );
   }
 
-  const { challenge, response, recites, response_recites, fact_score, response_fact_score, timeline } = data;
+  const { challenge, response, recites, response_recites, fact_score, response_fact_score, timeline, audit_chain } = data;
   const deadline = challenge.response_deadline ? new Date(challenge.response_deadline) : null;
   const isOpen = challenge.status === "open";
 
@@ -182,6 +196,28 @@ export function ChallengeReceiptPage() {
         </div>
 
         <aside className="space-y-4">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+              {audit_chain?.status === "failed" ? (
+                <ShieldAlert className="w-4 h-4 text-red-300" />
+              ) : (
+                <ShieldCheck className="w-4 h-4 text-emerald-300" />
+              )}
+              Audit Chain
+            </div>
+            <div className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wider ${auditChainClass(audit_chain?.status)}`}>
+              {auditChainLabel(audit_chain?.status)}
+            </div>
+            <div className="mt-3 text-xs text-zinc-500">
+              {audit_chain?.checked_entries ?? 0} checked, {audit_chain?.legacy_entries ?? 0} legacy
+            </div>
+            {audit_chain?.latest_hash && (
+              <div className="mt-2 break-all font-mono text-[10px] text-zinc-600">
+                {audit_chain.latest_hash}
+              </div>
+            )}
+          </div>
+
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
             <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
               <Clock className="w-4 h-4 text-amber-300" />

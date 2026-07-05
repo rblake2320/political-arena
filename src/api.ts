@@ -119,7 +119,16 @@ export async function createAd(data: {
   race_id: string; candidate_id: string; title: string; ad_content_text: string;
   disclaimer_text: string; media_url?: string; media_type?: string; budget_cents?: number;
 }) {
-  return unwrap<any>(await api.post('/ads', data));
+  const result = unwrap<any>(await api.post('/ads', data));
+  void trackEvent({
+    event_type: 'ad_created',
+    race_id: data.race_id,
+    candidate_id: data.candidate_id,
+    content_type: 'ad',
+    content_id: result.id,
+    metadata: { status: result.status, media_type: data.media_type || 'text' },
+  });
+  return result;
 }
 
 // ---- Rebuttals ----
@@ -127,7 +136,16 @@ export async function createRebuttal(data: {
   parent_ad_id: string; race_id: string; candidate_id: string;
   response_text: string; disclaimer_text: string; media_url?: string;
 }) {
-  return unwrap<any>(await api.post('/ads/rebuttals', data));
+  const result = unwrap<any>(await api.post('/ads/rebuttals', data));
+  void trackEvent({
+    event_type: 'rebuttal_created',
+    race_id: data.race_id,
+    candidate_id: data.candidate_id,
+    content_type: 'rebuttal',
+    content_id: result.id,
+    metadata: { parent_ad_id: data.parent_ad_id, status: result.status },
+  });
+  return result;
 }
 
 export async function createExternalAdResponse(data: {
@@ -142,7 +160,18 @@ export async function createExternalAdResponse(data: {
   response_media_url?: string;
   disclaimer_text: string;
 }) {
-  return unwrap<{ ad_id: string; rebuttal_id: string; status: string }>(await api.post('/ads/external-response', data));
+  const result = unwrap<{ ad_id: string; rebuttal_id: string; status: string }>(await api.post('/ads/external-response', data));
+  void trackEvents([
+    {
+      event_type: 'external_ad_response_created',
+      race_id: data.race_id,
+      candidate_id: data.responder_candidate_id,
+      content_type: 'ad',
+      content_id: result.ad_id,
+      metadata: { rebuttal_id: result.rebuttal_id, source_candidate_id: data.source_candidate_id },
+    },
+  ]);
+  return result;
 }
 
 // ---- Challenges ----
@@ -165,11 +194,31 @@ export async function createChallenge(data: {
     evidence_media_url?: string;
   }[];
 }) {
-  return unwrap<any>(await api.post('/challenges', data));
+  const result = unwrap<any>(await api.post('/challenges', data));
+  void trackEvent({
+    event_type: 'challenge_created',
+    race_id: data.race_id,
+    candidate_id: data.challenger_candidate_id,
+    content_type: 'challenge',
+    content_id: result.id,
+    metadata: {
+      challenge_type: data.challenge_type || 'open',
+      target_candidate_id: data.target_candidate_id,
+      initial_recites: data.initial_recites?.length || 0,
+    },
+  });
+  return result;
 }
 
 export async function respondToChallenge(challengeId: string, data: { response_text: string; media_url?: string }) {
-  return unwrap<any>(await api.post(`/challenges/${challengeId}/respond`, data));
+  const result = unwrap<any>(await api.post(`/challenges/${challengeId}/respond`, data));
+  void trackEvent({
+    event_type: 'challenge_responded',
+    content_type: 'challenge',
+    content_id: challengeId,
+    metadata: { response_id: result.response_id, has_media: Boolean(data.media_url) },
+  });
+  return result;
 }
 
 // ---- Media Uploads ----
@@ -186,12 +235,26 @@ export async function uploadMedia(file: File, candidateId?: string) {
   const result = unwrap<{ key: string; url: string; type: string; media_kind: string; size: number }>(
     await api.post(presign.upload_url, uploadForm)
   );
+  void trackEvent({
+    event_type: 'media_uploaded',
+    candidate_id: candidateId,
+    content_type: 'media',
+    content_id: presign.file_id,
+    metadata: { media_kind: result.media_kind, content_type: result.type, size: result.size },
+  });
   return result;
 }
 
 // ---- Reactions ----
 export async function addReaction(data: { content_type: string; content_id: string; reaction_type: string }) {
-  return unwrap<any>(await api.post('/reactions', data));
+  const result = unwrap<any>(await api.post('/reactions', data));
+  void trackEvent({
+    event_type: 'reaction_added',
+    content_type: data.content_type,
+    content_id: data.content_id,
+    metadata: { reaction_type: data.reaction_type },
+  });
+  return result;
 }
 
 export async function getReactions(contentType: string, contentId: string) {
@@ -229,11 +292,23 @@ export async function addRecite(data: {
   archive_url?: string;
   evidence_media_url?: string;
 }) {
-  return unwrap<any>(await api.post('/recites', data));
+  const result = unwrap<any>(await api.post('/recites', data));
+  void trackEvent({
+    event_type: 'recite_added',
+    content_type: data.content_type,
+    content_id: data.content_id,
+    metadata: { recite_id: result.id, source_type: data.source_type || 'other', stance: data.stance },
+  });
+  return result;
 }
 
 export async function reviewRecite(id: string, status: 'pending' | 'verified' | 'rejected', review_note?: string) {
-  return unwrap<any>(await api.put(`/recites/${id}/review`, { status, review_note }));
+  const result = unwrap<any>(await api.put(`/recites/${id}/review`, { status, review_note }));
+  void trackEvent({
+    event_type: 'recite_reviewed',
+    metadata: { recite_id: id, status },
+  });
+  return result;
 }
 
 export async function getPendingRecites(params?: { status?: 'pending' | 'verified' | 'rejected'; page?: number }) {
@@ -266,7 +341,16 @@ export async function createStatement(data: {
   quote_end_seconds?: number;
   statement_at?: string;
 }) {
-  return unwrap<any>(await api.post('/statements', data));
+  const result = unwrap<any>(await api.post('/statements', data));
+  void trackEvent({
+    event_type: 'statement_created',
+    race_id: data.race_id,
+    candidate_id: data.candidate_id,
+    content_type: 'statement',
+    content_id: result.id,
+    metadata: { claim_key: result.claim_key, source_type: data.source_type || 'other', topic: data.topic || null },
+  });
+  return result;
 }
 
 export async function reviewStatement(id: string, data: {
@@ -276,7 +360,19 @@ export async function reviewStatement(id: string, data: {
   confidence_score?: number;
   review_note?: string;
 }) {
-  return unwrap<any>(await api.put(`/statements/${id}/review`, data));
+  const result = unwrap<any>(await api.put(`/statements/${id}/review`, data));
+  void trackEvent({
+    event_type: 'statement_reviewed',
+    content_type: 'statement',
+    content_id: id,
+    metadata: {
+      truth_status: data.truth_status,
+      answer_status: data.answer_status,
+      evasion_score: data.evasion_score,
+      confidence_score: data.confidence_score,
+    },
+  });
+  return result;
 }
 
 // ---- Surveys / What Matters ----
@@ -284,8 +380,14 @@ export async function getIssueCategories() {
   return unwrap<{ categories: any[] }>(await api.get('/surveys/issue-categories'));
 }
 
-export async function submitPriorities(data: { race_id?: string; priorities: { issue_category_id: string; priority_rank: number }[] }) {
-  return unwrap<any>(await api.post('/surveys/my-priorities', data));
+export async function submitPriorities(data: { race_id?: string; priorities: { issue_category_id: string; priority_rank: number }[]; write_ins?: string[] }) {
+  const result = unwrap<any>(await api.post('/surveys/my-priorities', data));
+  void trackEvent({
+    event_type: 'issue_priorities_submitted',
+    race_id: data.race_id,
+    metadata: { count: data.priorities.length, write_ins_count: data.write_ins?.length || 0 },
+  });
+  return result;
 }
 
 export async function getMyPriorities(raceId?: string) {
@@ -316,11 +418,15 @@ export async function getUnreadCount() {
 }
 
 export async function markNotificationRead(id: string) {
-  return unwrap<any>(await api.put(`/notifications/${id}/read`));
+  const result = unwrap<any>(await api.put(`/notifications/${id}/read`));
+  void trackEvent({ event_type: 'notification_read', content_type: 'notification', content_id: id });
+  return result;
 }
 
 export async function markAllNotificationsRead() {
-  return unwrap<any>(await api.put('/notifications/read-all'));
+  const result = unwrap<any>(await api.put('/notifications/read-all'));
+  void trackEvent({ event_type: 'notifications_read_all' });
+  return result;
 }
 
 // ---- Questions ----
@@ -336,16 +442,38 @@ export async function getTopQuestions(raceId: string) {
 }
 
 export async function submitQuestion(raceId: string, data: { source_type: string; question_text: string; media_url?: string }) {
-  return unwrap<any>(await api.post(`/questions/${raceId}`, data));
+  const result = unwrap<any>(await api.post(`/questions/${raceId}`, data));
+  void trackEvent({
+    event_type: 'question_submitted',
+    race_id: raceId,
+    content_type: 'question',
+    content_id: result.id,
+    metadata: { source_type: data.source_type, has_media: Boolean(data.media_url) },
+  });
+  return result;
 }
 
 export async function voteQuestion(questionId: string) {
-  return unwrap<{ voted: boolean; vote_count: number }>(await api.post(`/questions/${questionId}/vote`));
+  const result = unwrap<{ voted: boolean; vote_count: number }>(await api.post(`/questions/${questionId}/vote`));
+  void trackEvent({
+    event_type: result.voted ? 'question_upvoted' : 'question_unvoted',
+    content_type: 'question',
+    content_id: questionId,
+    metadata: { vote_count: result.vote_count },
+  });
+  return result;
 }
 
 // ---- Press Credentials ----
 export async function registerPress(data: { outlet_name: string; outlet_type: string; proof_url?: string }) {
-  return unwrap<any>(await api.post('/press/register', data));
+  const result = unwrap<any>(await api.post('/press/register', data));
+  void trackEvent({
+    event_type: 'press_registered',
+    content_type: 'press_credential',
+    content_id: result.id,
+    metadata: { outlet_type: data.outlet_type, has_proof_url: Boolean(data.proof_url) },
+  });
+  return result;
 }
 
 export async function getPressStatus() {
@@ -358,12 +486,42 @@ export async function getCreditBalance(candidateId: string) {
 }
 
 export async function grantCredits(candidateId: string, data: { amount: number; description?: string }) {
-  return unwrap<any>(await api.post(`/credits/${candidateId}/grant`, data));
+  const result = unwrap<any>(await api.post(`/credits/${candidateId}/grant`, data));
+  void trackEvent({
+    event_type: 'credits_granted',
+    candidate_id: candidateId,
+    metadata: { amount: data.amount },
+  });
+  return result;
 }
 
 // ---- Analytics ----
-export async function trackEvent(data: { event_type: string; event_data?: any; race_id?: string; candidate_id?: string }) {
-  try { await api.post('/analytics/events', { events: [data] }); } catch {}
+export type AnalyticsEvent = {
+  event_type: string;
+  race_id?: string;
+  candidate_id?: string;
+  content_type?: string;
+  content_id?: string;
+  metadata?: any;
+  event_data?: any;
+};
+
+function normalizeAnalyticsEvent(event: AnalyticsEvent) {
+  const { event_data, metadata, ...rest } = event;
+  return {
+    ...rest,
+    metadata: metadata ?? event_data ?? null,
+  };
+}
+
+export async function trackEvent(data: AnalyticsEvent) {
+  try { await api.post('/analytics/events', { events: [normalizeAnalyticsEvent(data)] }); } catch {}
+}
+
+export async function trackEvents(events: AnalyticsEvent[]) {
+  const normalized = events.map(normalizeAnalyticsEvent);
+  if (normalized.length === 0) return;
+  try { await api.post('/analytics/events', { events: normalized }); } catch {}
 }
 
 export default api;

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
-import { Check, Edit2 } from "lucide-react";
+import { Check, Edit2, Plus, X } from "lucide-react";
 import * as api from "../api";
 import { useAuth } from "../stores/auth";
 
@@ -18,6 +18,9 @@ const ICON_COLORS: Record<string, string> = {
   "cpu": "bg-cyan-500",
   "construction": "bg-zinc-500",
   "shield-check": "bg-indigo-500",
+  "vote": "bg-sky-500",
+  "stethoscope": "bg-teal-500",
+  "wallet": "bg-lime-500",
 };
 
 function CategoryIcon({ icon, name }: { icon: string; name: string }) {
@@ -34,7 +37,11 @@ export function MyPrioritiesPage() {
   const navigate = useNavigate();
   const [categories, setCategories] = useState<any[]>([]);
   const [existingPriorities, setExistingPriorities] = useState<any[]>([]);
+  const [existingWriteIns, setExistingWriteIns] = useState<any[]>([]);
   const [selectedRanks, setSelectedRanks] = useState<Record<string, number>>({});
+  const [writeIns, setWriteIns] = useState<string[]>([]);
+  const [writeInDraft, setWriteInDraft] = useState("");
+  const [writeInError, setWriteInError] = useState("");
   const [nextRank, setNextRank] = useState(1);
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -50,7 +57,10 @@ export function MyPrioritiesPage() {
     ]).then(([catData, priData]) => {
       setCategories(catData.categories || []);
       const existing = priData.priorities || [];
+      const savedWriteIns = priData.write_ins || [];
       setExistingPriorities(existing);
+      setExistingWriteIns(savedWriteIns);
+      setWriteIns(savedWriteIns.map((writeIn: any) => writeIn.writein_text));
       if (existing.length > 0) {
         const ranks: Record<string, number> = {};
         existing.forEach((p: any) => { ranks[p.issue_category_id] = p.priority_rank; });
@@ -80,22 +90,56 @@ export function MyPrioritiesPage() {
     });
   };
 
+  const addWriteIn = () => {
+    const trimmed = writeInDraft.trim().replace(/\s+/g, " ");
+    const normalized = trimmed.toLowerCase();
+    setWriteInError("");
+
+    if (!trimmed) return;
+    if (trimmed.length < 3 || trimmed.length > 200) {
+      setWriteInError("Write-ins must be 3 to 200 characters.");
+      return;
+    }
+    if (writeIns.length >= 3) {
+      setWriteInError("You can add up to 3 write-in issues.");
+      return;
+    }
+    if (writeIns.some(item => item.toLowerCase() === normalized)) {
+      setWriteInError("That write-in is already listed.");
+      return;
+    }
+
+    setWriteIns(prev => [...prev, trimmed]);
+    setWriteInDraft("");
+  };
+
+  const removeWriteIn = (index: number) => {
+    setWriteIns(prev => prev.filter((_, i) => i !== index));
+    setWriteInError("");
+  };
+
   const handleSubmit = async () => {
     const priorities = Object.entries(selectedRanks).map(([catId, rank]) => ({
       issue_category_id: catId,
       priority_rank: rank,
     }));
     if (priorities.length === 0) return;
+    const cleanedWriteIns = writeIns.map(item => item.trim().replace(/\s+/g, " ")).filter(Boolean);
     setSubmitting(true);
     setSubmitError("");
     try {
-      await api.submitPriorities({ priorities });
+      await api.submitPriorities({ priorities, write_ins: cleanedWriteIns });
       setSuccess(true);
       setExistingPriorities(priorities.map(p => ({
         ...p,
         category_name: categories.find(c => c.id === p.issue_category_id)?.name,
         icon: categories.find(c => c.id === p.issue_category_id)?.icon,
       })));
+      setExistingWriteIns(cleanedWriteIns.map((writein_text, index) => ({
+        id: `local-${index}`,
+        writein_text,
+      })));
+      setWriteIns(cleanedWriteIns);
       setEditing(false);
     } catch (err: any) {
       setSubmitError(err.response?.data?.error || "Failed to save priorities. Please verify your account and try again.");
@@ -158,6 +202,18 @@ export function MyPrioritiesPage() {
                 );
               })}
           </div>
+          {existingWriteIns.length > 0 && (
+            <div className="mb-8 border-t border-zinc-800 pt-5">
+              <div className="text-sm font-medium text-zinc-300 mb-3">Write-in issues</div>
+              <div className="flex flex-wrap gap-2">
+                {existingWriteIns.map((writeIn: any) => (
+                  <span key={writeIn.id || writeIn.writein_text} className="px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-950 text-sm text-zinc-300">
+                    {writeIn.writein_text}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <button
             onClick={() => setEditing(true)}
             className="inline-flex items-center gap-2 px-4 py-2 border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-600 rounded-lg transition-colors"
@@ -199,6 +255,64 @@ export function MyPrioritiesPage() {
                 </button>
               );
             })}
+          </div>
+
+          <div className="mb-8 border-t border-zinc-800 pt-6">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <div className="text-sm font-medium text-zinc-300">Write-in issues</div>
+                <div className="text-xs text-zinc-500">Optional, secondary to the ranked categories.</div>
+              </div>
+              <div className="text-xs text-zinc-500">{writeIns.length}/3</div>
+            </div>
+
+            {writeIns.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {writeIns.map((item, index) => (
+                  <span key={`${item}-${index}`} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-950 text-sm text-zinc-300">
+                    {item}
+                    <button
+                      type="button"
+                      onClick={() => removeWriteIn(index)}
+                      className="text-zinc-500 hover:text-white"
+                      aria-label={`Remove ${item}`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <input
+                value={writeInDraft}
+                onChange={event => {
+                  setWriteInDraft(event.target.value);
+                  setWriteInError("");
+                }}
+                onKeyDown={event => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addWriteIn();
+                  }
+                }}
+                maxLength={200}
+                disabled={writeIns.length >= 3}
+                className="min-w-0 flex-1 px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                placeholder="Add an issue not listed"
+              />
+              <button
+                type="button"
+                onClick={addWriteIn}
+                disabled={writeIns.length >= 3 || writeInDraft.trim().length === 0}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm text-white transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Add
+              </button>
+            </div>
+            {writeInError && <div className="mt-2 text-xs text-red-400">{writeInError}</div>}
           </div>
 
           <div className="flex gap-3">

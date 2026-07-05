@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useParams } from "react-router";
-import { BarChart3, Plus, ShieldAlert, Video, MessageSquareWarning, X, TrendingUp, Clock, Eye, Coins } from "lucide-react";
+import { BarChart3, Plus, ShieldAlert, Video, MessageSquareWarning, X, TrendingUp, Clock, Eye, Coins, FileText, ExternalLink } from "lucide-react";
 import { useArenaStore } from "../store";
 import * as api from "../api";
 import { useAuth } from "../stores/auth";
@@ -10,8 +10,12 @@ export function CandidateDashboard() {
   const { id } = useParams();
   const [activeTab, setActiveTab] = useState("overview");
   const [isCreateAdModalOpen, setIsCreateAdModalOpen] = useState(false);
+  const [isCreateStatementModalOpen, setIsCreateStatementModalOpen] = useState(false);
   const [respondingToChallenge, setRespondingToChallenge] = useState<any>(null);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const [candidateStatements, setCandidateStatements] = useState<any[]>([]);
+  const [statementsLoading, setStatementsLoading] = useState(false);
+  const [statementsError, setStatementsError] = useState("");
   const { user } = useAuth();
 
   const { raceDetails, fetchRace, allCandidates, loading } = useArenaStore();
@@ -32,6 +36,19 @@ export function CandidateDashboard() {
     }
   }, [id, user]);
 
+  useEffect(() => {
+    if (!id) return;
+    setStatementsLoading(true);
+    setStatementsError("");
+    api.getCandidateStatements(id)
+      .then(data => setCandidateStatements(data.statements || []))
+      .catch((err: any) => {
+        setCandidateStatements([]);
+        setStatementsError(err.response?.data?.error || err.message || "Failed to load statements");
+      })
+      .finally(() => setStatementsLoading(false));
+  }, [id]);
+
   if (loading && !raceData) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -49,6 +66,17 @@ export function CandidateDashboard() {
     );
   }
   if (!candidate) return <div className="p-12 text-center text-zinc-500">Candidate not found.</div>;
+  const hasCampaignAccess = Boolean(user?.staff_links?.some((link: any) => link.candidate_id === candidate.id));
+  if (!hasCampaignAccess) {
+    return (
+      <div className="max-w-xl mx-auto px-4 py-24 text-center">
+        <h1 className="text-2xl font-semibold text-white mb-2">Campaign access required</h1>
+        <p className="text-zinc-400">
+          Candidate portals are limited to users with an active staff link for that campaign. Platform admin and moderation tools are separate from campaign authority.
+        </p>
+      </div>
+    );
+  }
   if (!raceData) return <div className="p-12 text-center text-zinc-500">Race data not found.</div>;
 
   const candidateAds = raceData.ads.filter(ad => ad.candidate_id === candidate.id && ad.source_type !== 'external');
@@ -60,12 +88,25 @@ export function CandidateDashboard() {
   const refreshRace = () => {
     if (candidate?.race_id) fetchRace(candidate.race_id);
   };
+  const refreshStatements = () => {
+    if (!candidate?.id) return;
+    setStatementsLoading(true);
+    setStatementsError("");
+    api.getCandidateStatements(candidate.id)
+      .then(data => setCandidateStatements(data.statements || []))
+      .catch((err: any) => {
+        setCandidateStatements([]);
+        setStatementsError(err.response?.data?.error || err.message || "Failed to load statements");
+      })
+      .finally(() => setStatementsLoading(false));
+  };
 
   const tabTitles: Record<string, string> = {
     overview: "Dashboard Overview",
     ads: "Ad Flights",
     challenges: "Challenges",
     rebuttals: "Rebuttals",
+    statements: "Statement Ledger",
   };
 
   return (
@@ -91,6 +132,7 @@ export function CandidateDashboard() {
         <NavItem icon={<Video className="w-4 h-4" />} label="Ad Flights" active={activeTab === "ads"} onClick={() => setActiveTab("ads")} />
         <NavItem icon={<MessageSquareWarning className="w-4 h-4" />} label="Challenges" active={activeTab === "challenges"} onClick={() => setActiveTab("challenges")} />
         <NavItem icon={<ShieldAlert className="w-4 h-4" />} label="Rebuttals" active={activeTab === "rebuttals"} onClick={() => setActiveTab("rebuttals")} />
+        <NavItem icon={<FileText className="w-4 h-4" />} label="Statements" active={activeTab === "statements"} onClick={() => setActiveTab("statements")} />
       </aside>
 
       {/* Main Content */}
@@ -99,23 +141,35 @@ export function CandidateDashboard() {
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
             <h1 className="text-2xl md:text-3xl font-bold tracking-tight">{tabTitles[activeTab]}</h1>
             <div className="flex gap-3">
-              <button
-                onClick={() => setIsCreateAdModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors text-sm"
-              >
-                <Plus className="w-4 h-4" />
-                New Ad Flight
-              </button>
+              {activeTab === "ads" && (
+                <button
+                  onClick={() => setIsCreateAdModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors text-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  New Ad Flight
+                </button>
+              )}
+              {activeTab === "statements" && (
+                <button
+                  onClick={() => setIsCreateStatementModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors text-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  Log Statement
+                </button>
+              )}
             </div>
           </div>
 
           {/* Overview Tab */}
           {activeTab === "overview" && (
             <>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 md:gap-6 mb-12">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 md:gap-6 mb-12">
                 <StatCard icon={<Eye className="w-5 h-5 text-indigo-400" />} label="Active Ads" value={String(candidateAds.filter(a => a.status === 'active').length)} />
                 <StatCard icon={<TrendingUp className="w-5 h-5 text-emerald-400" />} label="Rebuttals" value={String(candidateRebuttals.length)} />
                 <StatCard icon={<Clock className="w-5 h-5 text-amber-400" />} label="Open Challenges" value={String(candidateChallenges.filter(c => c.status === "open").length)} trend="urgent" />
+                <StatCard icon={<FileText className="w-5 h-5 text-sky-400" />} label="Statements" value={String(candidateStatements.length)} />
                 <StatCard icon={<Coins className="w-5 h-5 text-yellow-400" />} label="Credits" value={creditBalance !== null ? String(creditBalance) : "—"} trend={creditBalance !== null && creditBalance <= 2 ? "low" : undefined} />
               </div>
 
@@ -282,6 +336,47 @@ export function CandidateDashboard() {
               )}
             </div>
           )}
+
+          {/* Statements Tab */}
+          {activeTab === "statements" && (
+            <div className="space-y-6">
+              {statementsError && (
+                <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                  {statementsError}
+                </div>
+              )}
+              {statementsLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <div className="w-6 h-6 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+                </div>
+              ) : candidateStatements.length === 0 ? (
+                <EmptyState title="No Statements Logged" description="Add sourced statements so voters can inspect the public record over time." />
+              ) : (
+                candidateStatements.map(statement => (
+                  <div key={statement.id} className="p-4 md:p-6 rounded-2xl border border-zinc-800 bg-zinc-900/50">
+                    <div className="mb-3 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider">
+                      <span className="rounded-full border border-zinc-700 bg-zinc-950 px-2 py-0.5 text-zinc-300">{statement.truth_status}</span>
+                      <span className="rounded-full border border-zinc-700 bg-zinc-950 px-2 py-0.5 text-zinc-300">{statement.answer_status}</span>
+                      {statement.topic && <span className="rounded-full border border-indigo-500/20 bg-indigo-500/10 px-2 py-0.5 text-indigo-300">{statement.topic}</span>}
+                    </div>
+                    <p className="text-sm leading-relaxed text-zinc-200">"{statement.statement_text}"</p>
+                    <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+                      {statement.statement_at && <span>{new Date(statement.statement_at).toLocaleDateString()}</span>}
+                      <span>{statement.source_type}</span>
+                      <a href={statement.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-300 hover:text-indigo-200">
+                        Source <ExternalLink className="w-3 h-3" />
+                      </a>
+                      {statement.transcript_url && (
+                        <a href={statement.transcript_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-300 hover:text-indigo-200">
+                          Transcript <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       </main>
 
@@ -303,6 +398,16 @@ export function CandidateDashboard() {
           onClose={(refresh) => {
             setRespondingToChallenge(null);
             if (refresh) refreshRace();
+          }}
+        />
+      )}
+      {isCreateStatementModalOpen && (
+        <CreateStatementModal
+          candidateId={candidate.id}
+          raceId={candidate.race_id}
+          onClose={(refresh) => {
+            setIsCreateStatementModalOpen(false);
+            if (refresh) refreshStatements();
           }}
         />
       )}
@@ -485,6 +590,105 @@ function RespondChallengeModal({ onClose, challenge, candidateId }: { onClose: (
         </div>
         <MediaUploadField candidateId={candidateId} onMediaUrl={url => setFormData({ ...formData, media_url: url })} label="Attach Response Media (video, image, audio)" />
         <ModalActions onCancel={() => onClose()} submitLabel={submitting ? 'Submitting...' : 'Submit Response'} disabled={submitting} />
+      </form>
+    </ModalShell>
+  );
+}
+
+function CreateStatementModal({ onClose, candidateId, raceId }: { onClose: (refresh?: boolean) => void; candidateId: string; raceId: string }) {
+  const [formData, setFormData] = useState({
+    statement_text: "",
+    source_url: "",
+    source_type: "article",
+    source_title: "",
+    topic: "",
+    statement_at: "",
+    transcript_url: "",
+    context_text: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      await api.createStatement({
+        candidate_id: candidateId,
+        race_id: raceId,
+        statement_text: formData.statement_text,
+        source_url: formData.source_url,
+        source_type: formData.source_type as any,
+        source_title: formData.source_title || undefined,
+        topic: formData.topic || undefined,
+        statement_at: formData.statement_at ? new Date(formData.statement_at).toISOString() : undefined,
+        transcript_url: formData.transcript_url || undefined,
+        context_text: formData.context_text || undefined,
+      });
+      onClose(true);
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || "Failed to log statement");
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalShell title="Log Public Statement" onClose={() => onClose()}>
+      {error && (
+        <div className="mx-6 mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+          {error}
+        </div>
+      )}
+      <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-zinc-400 mb-1.5">Statement Text</label>
+          <textarea
+            required
+            rows={4}
+            maxLength={5000}
+            placeholder="The exact public statement voters should be able to inspect..."
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
+            value={formData.statement_text}
+            onChange={e => setFormData({ ...formData, statement_text: e.target.value })}
+          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <InputField label="Topic" placeholder="Healthcare, taxes, housing..." value={formData.topic} onChange={v => setFormData({ ...formData, topic: v })} />
+          <div>
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Source Type</label>
+            <select
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+              value={formData.source_type}
+              onChange={e => setFormData({ ...formData, source_type: e.target.value })}
+            >
+              <option value="article">Article</option>
+              <option value="youtube">YouTube</option>
+              <option value="video">Video</option>
+              <option value="audio">Audio</option>
+              <option value="debate">Debate</option>
+              <option value="social">Social</option>
+              <option value="press_release">Press Release</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+        <InputField label="Source URL" required type="url" placeholder="https://..." value={formData.source_url} onChange={v => setFormData({ ...formData, source_url: v })} />
+        <InputField label="Source Title" placeholder="Town hall answer, interview, article title..." value={formData.source_title} onChange={v => setFormData({ ...formData, source_title: v })} />
+        <InputField label="Statement Time" type="datetime-local" value={formData.statement_at} onChange={v => setFormData({ ...formData, statement_at: v })} />
+        <InputField label="Transcript URL" type="url" placeholder="https://..." value={formData.transcript_url} onChange={v => setFormData({ ...formData, transcript_url: v })} />
+        <div>
+          <label className="block text-sm font-medium text-zinc-400 mb-1.5">Context</label>
+          <textarea
+            rows={3}
+            maxLength={5000}
+            placeholder="Optional context around where or why the statement was made..."
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
+            value={formData.context_text}
+            onChange={e => setFormData({ ...formData, context_text: e.target.value })}
+          />
+        </div>
+        <ModalActions onCancel={() => onClose()} submitLabel={submitting ? "Logging..." : "Log Statement"} disabled={submitting} />
       </form>
     </ModalShell>
   );
