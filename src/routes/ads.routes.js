@@ -8,7 +8,7 @@ import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
 import { requireAuth, requireRole, errorResponse, successResponse, parseBody, parsePagination, getClientIP } from '../middleware.js';
 import { authenticate } from '../auth.js';
-import { validate, createAdSchema, updateAdSchema, reviewAdSchema, createRebuttalSchema, createExternalAdResponseSchema } from '../validation.js';
+import { validate, createAdSchema, updateAdSchema, reviewAdSchema, createRebuttalSchema, createExternalAdResponseSchema, createExternalAdSourceSchema } from '../validation.js';
 
 const router = Router({ base: '/api/ads' });
 
@@ -384,6 +384,82 @@ router.post('/rebuttals', async (request, env, ctx) => {
   });
 
   return successResponse({ id: rebuttalId, status: rebuttalStatus });
+});
+
+// POST /api/ads/external-source — Link an outside/TV/digital ad and open a response slot.
+// This records source media metadata only; it is not a fact-check callout and
+// does not create a response on behalf of any campaign.
+router.post('/external-source', async (request, env, ctx) => {
+  const authError = await requireAuth(request, env);
+  if (authError) return authError;
+
+  const body = await parseBody(request);
+  if (!body) return errorResponse('Invalid request body');
+
+  const { valid, errors, data } = validate(createExternalAdSourceSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+
+  if (data.source_candidate_id === data.posting_candidate_id) {
+    return errorResponse('Cannot open a response slot on your own ad');
+  }
+
+  const sourceCandidate = await env.ARENA_DB.prepare(
+    `SELECT id, race_id, name FROM candidates WHERE id = ? AND race_id = ? AND is_active = 1`
+  ).bind(data.source_candidate_id, data.race_id).first();
+  if (!sourceCandidate) return errorResponse('Source candidate not found in this race', 404);
+
+  const postingCandidate = await env.ARENA_DB.prepare(
+    `SELECT id, race_id, name, verification_status FROM candidates WHERE id = ? AND race_id = ? AND is_active = 1`
+  ).bind(data.posting_candidate_id, data.race_id).first();
+  if (!postingCandidate) return errorResponse('Posting candidate not found in this race', 404);
+
+  if (postingCandidate.verification_status !== 'verified') {
+    return errorResponse('Posting candidate must be verified');
+  }
+
+  const postingStaffLink = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+  ).bind(request.user.id, data.posting_candidate_id).first();
+  if (!postingStaffLink) return errorResponse('Not authorized for this candidate', 403);
+
+  const adId = generateId('ad');
+  const sourceDescription = data.source_description || `Outside ad linked for response context by ${postingCandidate.name}.`;
+  const sourceDisclaimer = data.source_disclaimer_text || 'Outside ad linked for response context; original disclaimer remains with source media.';
+
+  await env.ARENA_DB.prepare(
+    `INSERT INTO ad_flights
+     (id, race_id, candidate_id, created_by, title, media_url, media_type, ad_content_text, disclaimer_text,
+      source_type, source_url, source_label, posted_for_rebuttal_by, status, approved_at, activated_at, rebuttal_window_expires, max_rebuttals)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'external', ?, ?, ?, 'active', datetime('now'), datetime('now'), NULL, 1)`
+  ).bind(
+    adId,
+    data.race_id,
+    data.source_candidate_id,
+    request.user.id,
+    data.source_title,
+    data.source_media_url,
+    inferAdMediaType(data.source_media_url),
+    sourceDescription,
+    sourceDisclaimer,
+    data.source_media_url,
+    'Outside ad linked for response',
+    data.posting_candidate_id,
+  ).run();
+
+  auditLog(env.ARENA_DB, ctx, {
+    actorId: request.user.id,
+    action: 'external_ad_source.create',
+    entityType: 'ad_flight',
+    entityId: adId,
+    afterState: {
+      source_candidate_id: data.source_candidate_id,
+      posting_candidate_id: data.posting_candidate_id,
+      source_media_url: data.source_media_url,
+    },
+    ipAddress: getClientIP(request),
+  });
+
+  return successResponse({ ad_id: adId, status: 'active', response_slot_open: true });
 });
 
 // POST /api/ads/external-response — Pair an outside/TV ad with a candidate response.

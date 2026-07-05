@@ -5,6 +5,7 @@
  */
 import { SELF, env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll } from 'vitest';
+import { seedOutsideAdExamples } from '../src/db.js';
 
 const BASE = 'https://example.com';
 const VALID_PASSWORD = 'Str0ng!Passw0rd';
@@ -104,6 +105,35 @@ describe('races & demo seed (test env only)', () => {
     });
   });
 
+  it('serves seeded public press feed link metadata', async () => {
+    const feed = await get('/api/press/feed?limit=10');
+    expect(feed.status).toBe(200);
+    expect(feed.body.data.limit).toBe(10);
+    expect(feed.body.data.items.length).toBeGreaterThanOrEqual(4);
+
+    const publishers = new Set(feed.body.data.items.map(item => item.publisher));
+    expect(publishers.has('Newser')).toBe(true);
+    expect(publishers.has('Straight Arrow News')).toBe(true);
+
+    const item = feed.body.data.items[0];
+    expect(item).toMatchObject({
+      id: expect.any(String),
+      source: expect.any(String),
+      source_type: 'news',
+      title: expect.any(String),
+      url: expect.stringMatching(/^https:\/\//),
+      publisher: expect.any(String),
+      change_status: expect.stringMatching(/^(new|updated|removed)$/),
+    });
+    expect(Object.prototype.hasOwnProperty.call(item, 'first_seen_at')).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(item, 'last_seen_at')).toBe(true);
+
+    const oversight = await get('/api/press/feed?section=Government%20Oversight');
+    expect(oversight.status).toBe(200);
+    expect(oversight.body.data.items.length).toBeGreaterThanOrEqual(1);
+    expect(oversight.body.data.items.every(item => item.section === 'Government Oversight')).toBe(true);
+  });
+
   it('includes challenge recite summaries on race detail', async () => {
     const suffix = Date.now().toString(36);
     const sourceUrl = `https://example.com/race-summary-source-${suffix}`;
@@ -179,6 +209,59 @@ describe('races & demo seed (test env only)', () => {
       source_type: 'press',
       is_top: true,
     });
+  });
+
+  it('seeds real linked TV ad examples with open response slots and source recites', async () => {
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(
+        `INSERT OR IGNORE INTO races (id, name, office, state, district, status)
+         VALUES ('race-2026-NC-S', '2026 NC Senate Race', 'Senate', 'NC', '', 'upcoming')`
+      ),
+      env.ARENA_DB.prepare(
+        `INSERT OR IGNORE INTO races (id, name, office, state, district, status)
+         VALUES ('race-2026-KY-S', '2026 KY Senate Race', 'Senate', 'KY', '', 'upcoming')`
+      ),
+      env.ARENA_DB.prepare(
+        `INSERT OR IGNORE INTO candidates (id, race_id, name, party, verification_status, is_active)
+         VALUES ('cand-fec-s6nc00407', 'race-2026-NC-S', 'COOPER, ROY', 'Democrat', 'pending', 1)`
+      ),
+      env.ARENA_DB.prepare(
+        `INSERT OR IGNORE INTO candidates (id, race_id, name, party, verification_status, is_active)
+         VALUES ('cand-fec-s6ky00286', 'race-2026-KY-S', 'BARR, GARLAND ANDY', 'Republican', 'pending', 1)`
+      ),
+    ]);
+    await seedOutsideAdExamples(env.ARENA_DB);
+
+    const ncRace = await get('/api/races/race-2026-NC-S');
+    expect(ncRace.status).toBe(200);
+    const cooperAd = ncRace.body.data.ads.find(ad => ad.id === 'ad-ext-roy-cooper-easier-2026');
+    expect(cooperAd).toMatchObject({
+      source_type: 'external',
+      media_type: 'video',
+      max_rebuttals: 1,
+      source_label: 'Official campaign TV ad link',
+      ad_recite_summary: {
+        recite_count: expect.any(Number),
+        fact_score: {
+          score: expect.any(Number),
+          label: expect.any(String),
+        },
+        top_source: expect.any(Object),
+      },
+    });
+    expect(ncRace.body.data.rebuttals.filter(rebuttal => rebuttal.parent_ad_id === cooperAd.id)).toHaveLength(0);
+    expect(cooperAd.ad_recite_summary.recite_count).toBeGreaterThanOrEqual(2);
+
+    const kyRace = await get('/api/races/race-2026-KY-S');
+    expect(kyRace.status).toBe(200);
+    const barrAd = kyRace.body.data.ads.find(ad => ad.id === 'ad-ext-andy-barr-stop-dei-2026');
+    expect(barrAd).toMatchObject({
+      source_type: 'external',
+      media_type: 'video',
+      max_rebuttals: 1,
+    });
+    expect(kyRace.body.data.rebuttals.filter(rebuttal => rebuttal.parent_ad_id === barrAd.id)).toHaveLength(0);
+    expect(barrAd.ad_recite_summary.recite_count).toBeGreaterThanOrEqual(2);
   });
 
   it('serves active ads for a race with paired rebuttals', async () => {

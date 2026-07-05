@@ -198,6 +198,29 @@ export async function createExternalAdResponse(data: {
   return result;
 }
 
+export async function createExternalAdSource(data: {
+  race_id: string;
+  source_candidate_id: string;
+  posting_candidate_id: string;
+  source_title: string;
+  source_media_url: string;
+  source_description?: string;
+  source_disclaimer_text?: string;
+}) {
+  const result = unwrap<{ ad_id: string; status: string; response_slot_open: boolean }>(await api.post('/ads/external-source', data));
+  void trackEvents([
+    {
+      event_type: 'external_ad_source_created',
+      race_id: data.race_id,
+      candidate_id: data.posting_candidate_id,
+      content_type: 'ad',
+      content_id: result.ad_id,
+      metadata: { source_candidate_id: data.source_candidate_id, response_slot_open: result.response_slot_open },
+    },
+  ]);
+  return result;
+}
+
 // ---- Challenges ----
 export async function createChallenge(data: {
   race_id: string; challenger_candidate_id: string; target_candidate_id: string;
@@ -524,6 +547,31 @@ export async function registerPress(data: { outlet_name: string; outlet_type: st
 
 export async function getPressStatus() {
   return unwrap<{ credential: any }>(await api.get('/press/my-status'));
+}
+
+export type PressFeedItem = {
+  id: string;
+  source: string;
+  source_type: 'official_record' | 'news' | 'press_release';
+  title: string;
+  url: string;
+  publisher: string;
+  section?: string;
+  published_at?: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  change_status: 'new' | 'updated' | 'removed';
+};
+
+export async function getPressFeed(params?: { source?: string; section?: string; limit?: number }) {
+  const search = new URLSearchParams();
+  if (params?.source) search.set('source', params.source);
+  if (params?.section) search.set('section', params.section);
+  if (params?.limit) search.set('limit', String(params.limit));
+  const query = search.toString();
+  return unwrap<{ items: PressFeedItem[]; sources: any[]; limit: number }>(
+    await api.get(`/press/feed${query ? `?${query}` : ''}`)
+  );
 }
 
 // ---- Credits ----

@@ -240,6 +240,25 @@ describe('production workflow smoke', () => {
     expect(outsideAd.posted_for_rebuttal_by).toBe(candidateB);
     expect(outsideAd.rebuttals.some(item => item.id === outsideResponse.body.data.rebuttal_id && item.candidate_id === candidateB)).toBe(true);
 
+    const outsideSource = await post('/api/ads/external-source', {
+      race_id: raceId,
+      source_candidate_id: candidateA,
+      posting_candidate_id: candidateB,
+      source_title: 'Outside TV Ad With Open Slot',
+      source_media_url: SAMPLE_VIDEO_URL,
+      source_description: 'A linked outside ad that should leave the response slot open.',
+    }, staffB.token);
+    expect(outsideSource.status).toBe(200);
+    expect(outsideSource.body.data.response_slot_open).toBe(true);
+
+    const adsAfterOutsideSource = await get(`/api/ads/races/${raceId}`);
+    expect(adsAfterOutsideSource.status).toBe(200);
+    const openSlotAd = adsAfterOutsideSource.body.data.ads.find(item => item.id === outsideSource.body.data.ad_id);
+    expect(openSlotAd.source_type).toBe('external');
+    expect(openSlotAd.posted_for_rebuttal_by).toBe(candidateB);
+    expect(openSlotAd.max_rebuttals).toBe(1);
+    expect(openSlotAd.rebuttals.length).toBe(0);
+
     const creditsBefore = await get(`/api/credits/${candidateA}`, staffA.token);
     expect(creditsBefore.status).toBe(200);
 

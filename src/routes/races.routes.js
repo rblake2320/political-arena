@@ -27,25 +27,25 @@ function topSourceForRecites(recites) {
   };
 }
 
-async function getChallengeReciteSummaries(db, challenges) {
-  const challengeIds = challenges.map(challenge => challenge.id);
+async function getReciteSummaries(db, items, contentType) {
+  const itemIds = items.map(item => item.id);
   const summaries = new Map();
 
-  for (const challengeId of challengeIds) {
-    summaries.set(challengeId, {
+  for (const itemId of itemIds) {
+    summaries.set(itemId, {
       recite_count: 0,
       fact_score: computeFactScore([]),
       top_source: null,
     });
   }
 
-  if (challengeIds.length === 0) return summaries;
+  if (itemIds.length === 0) return summaries;
 
-  const placeholders = challengeIds.map(() => '?').join(',');
+  const placeholders = itemIds.map(() => '?').join(',');
   const result = await db.prepare(
     `SELECT id, content_id, url, title, publisher, source_type, stance, status, archive_url
      FROM recites
-     WHERE content_type = 'challenge'
+     WHERE content_type = ?
        AND content_id IN (${placeholders})
        AND status != 'rejected'
      ORDER BY
@@ -61,17 +61,17 @@ async function getChallengeReciteSummaries(db, challenges) {
          ELSE 6
        END,
        created_at DESC`
-  ).bind(...challengeIds).all();
+  ).bind(contentType, ...itemIds).all();
 
-  const recitesByChallenge = new Map();
+  const recitesByItem = new Map();
   for (const recite of result.results || []) {
-    const recites = recitesByChallenge.get(recite.content_id) || [];
+    const recites = recitesByItem.get(recite.content_id) || [];
     recites.push(recite);
-    recitesByChallenge.set(recite.content_id, recites);
+    recitesByItem.set(recite.content_id, recites);
   }
 
-  for (const [challengeId, recites] of recitesByChallenge.entries()) {
-    summaries.set(challengeId, {
+  for (const [itemId, recites] of recitesByItem.entries()) {
+    summaries.set(itemId, {
       recite_count: recites.length,
       fact_score: computeFactScore(recites),
       top_source: topSourceForRecites(recites),
@@ -80,6 +80,9 @@ async function getChallengeReciteSummaries(db, challenges) {
 
   return summaries;
 }
+
+const getChallengeReciteSummaries = (db, challenges) => getReciteSummaries(db, challenges, 'challenge');
+const getAdReciteSummaries = (db, ads) => getReciteSummaries(db, ads, 'ad');
 
 // GET /api/races — Public, filterable, with activity counts for trending
 router.get('/', async (request, env) => {
@@ -258,11 +261,20 @@ router.get('/:id', async (request, env) => {
 
   const challenges = challengesResult.results || [];
   const reciteSummaries = await getChallengeReciteSummaries(env.ARENA_DB, challenges);
+  const ads = adsResult.results || [];
+  const adReciteSummaries = await getAdReciteSummaries(env.ARENA_DB, ads);
 
   return successResponse({
     ...race,
     candidates,
-    ads: adsResult.results || [],
+    ads: ads.map(ad => ({
+      ...ad,
+      ad_recite_summary: adReciteSummaries.get(ad.id) || {
+        recite_count: 0,
+        fact_score: computeFactScore([]),
+        top_source: null,
+      },
+    })),
     rebuttals: rebuttalsResult.results || [],
     challenges: challenges.map(challenge => ({
       ...challenge,

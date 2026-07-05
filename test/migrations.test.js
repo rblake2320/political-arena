@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runRuntimeMigrations } from '../src/db.js';
 
-function createFakeD1({ users, adFlights, challenges, recites, issueCategories, voterWriteins, auditLog, missingChallengeSlug = false }) {
+function createFakeD1({ users, adFlights, challenges, recites, issueCategories, voterWriteins, auditLog, pressFeedItems = [], missingChallengeSlug = false }) {
   const userColumns = new Set(users);
   const adColumns = new Set(adFlights);
   const challengeColumns = new Set(challenges);
@@ -9,6 +9,7 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
   const issueCategoryColumns = new Set(issueCategories);
   const voterWriteinColumns = new Set(voterWriteins);
   const auditColumns = new Set(auditLog);
+  const pressFeedColumns = new Set(pressFeedItems);
   let hasMissingChallengeSlug = missingChallengeSlug;
   const auditIndexes = new Set();
   const surveyResponseIndexes = new Set();
@@ -39,6 +40,9 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
           }
           if (sql === 'PRAGMA table_info(audit_log)') {
             return { results: Array.from(auditColumns).map(name => ({ name })) };
+          }
+          if (sql === 'PRAGMA table_info(press_feed_items)') {
+            return { results: Array.from(pressFeedColumns).map(name => ({ name })) };
           }
           if (sql === 'PRAGMA index_list(audit_log)') {
             return { results: Array.from(auditIndexes).map(name => ({ name })) };
@@ -80,6 +84,9 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
         if (auditIndexMatch) auditIndexes.add(auditIndexMatch[1]);
         const surveyResponseIndexMatch = statement.sql.match(/^CREATE UNIQUE INDEX IF NOT EXISTS (idx_vsr_\w+)/);
         if (surveyResponseIndexMatch) surveyResponseIndexes.add(surveyResponseIndexMatch[1]);
+        if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS press_feed_items')) {
+          pressFeedColumns.add('id');
+        }
       }
       return statements.map(() => ({ success: true }));
     },
@@ -90,6 +97,7 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
     issueCategoryColumns,
     voterWriteinColumns,
     auditColumns,
+    pressFeedColumns,
     auditIndexes,
     surveyResponseIndexes,
     executed,
@@ -205,6 +213,7 @@ describe('runtime migrations', () => {
     expect(db.auditColumns.has('chain_seq')).toBe(true);
     expect(db.auditIndexes.has('idx_audit_entity_seq_unique')).toBe(true);
     expect(db.auditIndexes.has('idx_audit_entity_prev_hash_unique')).toBe(true);
+    expect(db.pressFeedColumns.has('id')).toBe(true);
     expect(db.executed).toEqual([
       'ALTER TABLE users ADD COLUMN password_reset_token_hash TEXT',
       'ALTER TABLE users ADD COLUMN password_reset_expires_at TEXT',
@@ -258,6 +267,27 @@ describe('runtime migrations', () => {
          )`,
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_vsr_user_survey_question
          ON voter_survey_responses(user_id, survey_id, question_id)`,
+      `CREATE TABLE IF NOT EXISTS press_feed_items (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        source_type TEXT NOT NULL DEFAULT 'news' CHECK(source_type IN ('official_record','news','press_release')),
+        title TEXT NOT NULL,
+        url TEXT NOT NULL UNIQUE,
+        publisher TEXT NOT NULL,
+        section TEXT,
+        published_at TEXT,
+        first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        content_hash TEXT,
+        change_status TEXT NOT NULL DEFAULT 'new' CHECK(change_status IN ('new','updated','removed')),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_press_feed_active_published
+        ON press_feed_items(is_active, published_at DESC, first_seen_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_press_feed_source
+        ON press_feed_items(source, section)`,
     ]);
 
     db.executed.length = 0;

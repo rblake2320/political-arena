@@ -180,6 +180,33 @@ export async function runRuntimeMigrations(db) {
       ),
     ]);
   }
+
+  const pressFeedResult = await db.prepare(`PRAGMA table_info(press_feed_items)`).all();
+  if ((pressFeedResult.results || []).length === 0) {
+    await db.batch([
+      db.prepare(`CREATE TABLE IF NOT EXISTS press_feed_items (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        source_type TEXT NOT NULL DEFAULT 'news' CHECK(source_type IN ('official_record','news','press_release')),
+        title TEXT NOT NULL,
+        url TEXT NOT NULL UNIQUE,
+        publisher TEXT NOT NULL,
+        section TEXT,
+        published_at TEXT,
+        first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        content_hash TEXT,
+        change_status TEXT NOT NULL DEFAULT 'new' CHECK(change_status IN ('new','updated','removed')),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_feed_active_published
+        ON press_feed_items(is_active, published_at DESC, first_seen_at DESC)`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_feed_source
+        ON press_feed_items(source, section)`),
+    ]);
+  }
 }
 
 export async function initDatabase(db) {
@@ -674,6 +701,25 @@ export async function initDatabase(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
 
+    // ========== PUBLIC PRESS / NEWS FEED ==========
+    db.prepare(`CREATE TABLE IF NOT EXISTS press_feed_items (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      source_type TEXT NOT NULL DEFAULT 'news' CHECK(source_type IN ('official_record','news','press_release')),
+      title TEXT NOT NULL,
+      url TEXT NOT NULL UNIQUE,
+      publisher TEXT NOT NULL,
+      section TEXT,
+      published_at TEXT,
+      first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      content_hash TEXT,
+      change_status TEXT NOT NULL DEFAULT 'new' CHECK(change_status IN ('new','updated','removed')),
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
     // ========== RATE LIMITING ==========
     db.prepare(`CREATE TABLE IF NOT EXISTS auth_rate_limits (
       key TEXT PRIMARY KEY,
@@ -773,6 +819,8 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_question_votes_question ON question_votes(question_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_question_votes_user ON question_votes(user_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_creds_user ON press_credentials(user_id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_feed_active_published ON press_feed_items(is_active, published_at DESC, first_seen_at DESC)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_feed_source ON press_feed_items(source, section)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_credit_tx_candidate ON credit_transactions(candidate_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_challenges_candidate_created ON challenges(challenger_candidate_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_users_password_reset ON users(password_reset_token_hash, password_reset_expires_at)`),
@@ -781,7 +829,7 @@ export async function initDatabase(db) {
   ]);
 
   initializedDbs.add(db);
-  console.log('Arena database initialized: 32 tables + 57 indexes');
+  console.log('Arena database initialized');
 }
 
 // Seed issue categories (idempotent)
@@ -818,6 +866,261 @@ export async function seedIssueCategories(db) {
          is_active = 1`
     ).bind(cat.id, cat.name, cat.slug, cat.description, cat.icon, cat.display_order, cat.parent_category_id || null).run();
   }
+}
+
+export async function seedPressFeedItems(db) {
+  const items = [
+    {
+      id: 'pressfeed-newser-politics-burgum-algae-20260705',
+      source: 'newser',
+      source_type: 'news',
+      title: "Burgum Says Algae Is 'All Gone'",
+      url: 'https://www.newser.com/story/392274/burgum-declares-algae-all-gone-from-reflecting-pool.html',
+      publisher: 'Newser',
+      section: 'Politics',
+      published_at: '2026-07-05T11:37:00-05:00',
+      content_hash: 'newser:392274:Burgum Says Algae Is All Gone',
+    },
+    {
+      id: 'pressfeed-newser-politics-pelosi-hit-run-20260705',
+      source: 'newser',
+      source_type: 'news',
+      title: "Pelosi's Husband Faces Hit-and-Run Charges",
+      url: 'https://www.newser.com/story/392262/pelosis-husband-faces-hit-and-run-charges.html',
+      publisher: 'Newser',
+      section: 'Politics',
+      published_at: '2026-07-05T06:07:00-05:00',
+      content_hash: 'newser:392262:Pelosis Husband Faces Hit-and-Run Charges',
+    },
+    {
+      id: 'pressfeed-newser-politics-epstein-files-20260704',
+      source: 'newser',
+      source_type: 'news',
+      title: 'DOJ Filing Opposes Unredacting Epstein Files',
+      url: 'https://www.newser.com/story/392244/doj-filing-opposes-unredacting-epstein-files.html',
+      publisher: 'Newser',
+      section: 'Politics',
+      published_at: '2026-07-04T13:05:00-05:00',
+      content_hash: 'newser:392244:DOJ Filing Opposes Unredacting Epstein Files',
+    },
+    {
+      id: 'pressfeed-san-politics-student-loans-20260630',
+      source: 'straight_arrow_news',
+      source_type: 'news',
+      title: 'New Trump admin rules tie federal student loans to graduate earnings',
+      url: 'https://san.com/cc/new-trump-admin-rules-tie-federal-student-loans-to-how-much-money-graduates-earn/',
+      publisher: 'Straight Arrow News',
+      section: 'Politics',
+      published_at: '2026-06-30T12:10:00-05:00',
+      content_hash: 'san:student-loans:20260630',
+    },
+    {
+      id: 'pressfeed-san-politics-alaska-senate-ballot-20260705',
+      source: 'straight_arrow_news',
+      source_type: 'news',
+      title: 'Both Dan Sullivans can appear in contested Alaska Senate race',
+      url: 'https://san.com/cc/both-dan-sullivans-can-appear-in-contested-alaska-senate-race-though-their-names-may-look-different/',
+      publisher: 'Straight Arrow News',
+      section: 'Politics',
+      published_at: '2026-07-05T10:00:00-05:00',
+      content_hash: 'san:alaska-senate-ballot:20260705',
+    },
+    {
+      id: 'pressfeed-san-oversight-mk-ultra-20260630',
+      source: 'straight_arrow_news',
+      source_type: 'news',
+      title: "Congress tries to crack open CIA's secret MKUltra program",
+      url: 'https://san.com/cc/congress-tries-to-crack-open-cias-secret-mkultra-program/',
+      publisher: 'Straight Arrow News',
+      section: 'Government Oversight',
+      published_at: '2026-06-30T12:00:00-05:00',
+      content_hash: 'san:mkultra:20260630',
+    },
+    {
+      id: 'pressfeed-san-oversight-ukraine-migs-20260702',
+      source: 'straight_arrow_news',
+      source_type: 'news',
+      title: "Polish minister says Ukraine stalled 'MiGs for drones' deal",
+      url: 'https://san.com/cc/polish-minister-says-ukraine-stalled-migs-for-drones-deal/',
+      publisher: 'Straight Arrow News',
+      section: 'Government Oversight',
+      published_at: '2026-07-02T12:00:00-05:00',
+      content_hash: 'san:ukraine-migs:20260702',
+    },
+  ];
+
+  await db.batch(items.map(item =>
+    db.prepare(
+      `INSERT INTO press_feed_items
+       (id, source, source_type, title, url, publisher, section, published_at, content_hash, change_status, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', 1)
+       ON CONFLICT(url) DO UPDATE SET
+         source = excluded.source,
+         source_type = excluded.source_type,
+         title = excluded.title,
+         publisher = excluded.publisher,
+         section = excluded.section,
+         published_at = excluded.published_at,
+         content_hash = excluded.content_hash,
+         last_seen_at = datetime('now'),
+         change_status = CASE
+           WHEN press_feed_items.content_hash IS NOT excluded.content_hash THEN 'updated'
+           ELSE press_feed_items.change_status
+         END,
+         is_active = 1,
+         updated_at = datetime('now')`
+    ).bind(
+      item.id,
+      item.source,
+      item.source_type,
+      item.title,
+      item.url,
+      item.publisher,
+      item.section,
+      item.published_at,
+      item.content_hash,
+    )
+  ));
+}
+
+export async function seedOutsideAdExamples(db) {
+  const examples = [
+    {
+      id: 'ad-ext-roy-cooper-easier-2026',
+      raceId: 'race-2026-NC-S',
+      candidateId: 'cand-fec-s6nc00407',
+      title: 'Roy Cooper releases first TV ad of Senate campaign',
+      mediaUrl: 'https://www.youtube.com/watch?v=UBZrOCTc4v0',
+      sourceUrl: 'https://roycooper.com/new-tv-ad-roy-cooper-releases-first-tv-ad-of-campaign-highlighting-how-hell-work-to-make-life-more-affordable-for-north-carolinians/',
+      sourceLabel: 'Official campaign TV ad link',
+      description: 'Outside TV/digital ad linked as source context. The original video remains hosted by the campaign; Arena provides an open response slot for eligible opposing campaigns.',
+      disclaimer: 'Outside ad linked for response context; original paid-for disclaimer remains with source media.',
+    },
+    {
+      id: 'ad-ext-andy-barr-stop-dei-2026',
+      raceId: 'race-2026-KY-S',
+      candidateId: 'cand-fec-s6ky00286',
+      title: 'Andy Barr for Senate: Stop DEI Ad',
+      mediaUrl: 'https://www.youtube.com/watch?v=P8dAXjJ-6Eo',
+      sourceUrl: 'https://barrforsenate.com/press-release/barr-stop-dei-ad-inflames-woke-leftists-kicks-off-1m-buy-throughout-the-commonwealth/',
+      sourceLabel: 'Official campaign TV ad link',
+      description: 'Outside TV/digital ad linked as source context. The original video remains hosted by the campaign; Arena provides an open response slot for eligible opposing campaigns.',
+      disclaimer: 'Outside ad linked for response context; original paid-for disclaimer remains with source media.',
+    },
+  ];
+
+  const candidateIds = examples.map(example => example.candidateId);
+  const placeholders = candidateIds.map(() => '?').join(',');
+  const candidates = await db.prepare(
+    `SELECT id FROM candidates WHERE id IN (${placeholders}) AND is_active = 1`
+  ).bind(...candidateIds).all();
+  const existingCandidates = new Set((candidates.results || []).map(candidate => candidate.id));
+  const loadable = examples.filter(example => existingCandidates.has(example.candidateId));
+  if (loadable.length === 0) return;
+
+  await db.batch(loadable.map(example =>
+    db.prepare(
+      `INSERT OR IGNORE INTO ad_flights
+       (id, race_id, candidate_id, created_by, title, media_url, media_type, ad_content_text, disclaimer_text,
+        source_type, source_url, source_label, status, approved_at, activated_at, rebuttal_window_expires, max_rebuttals)
+       VALUES (?, ?, ?, 'system', ?, ?, 'video', ?, ?, 'external', ?, ?, 'active', datetime('now'), datetime('now'), NULL, 1)`
+    ).bind(
+      example.id,
+      example.raceId,
+      example.candidateId,
+      example.title,
+      example.mediaUrl,
+      example.description,
+      example.disclaimer,
+      example.sourceUrl,
+      example.sourceLabel,
+    )
+  ));
+
+  const existingAdIds = new Set();
+  const adResult = await db.prepare(
+    `SELECT id FROM ad_flights WHERE id IN (${loadable.map(() => '?').join(',')})`
+  ).bind(...loadable.map(example => example.id)).all();
+  for (const row of adResult.results || []) existingAdIds.add(row.id);
+
+  const recites = [
+    {
+      id: 'rec-ad-ext-roy-cooper-official-release',
+      contentId: 'ad-ext-roy-cooper-easier-2026',
+      url: 'https://roycooper.com/new-tv-ad-roy-cooper-releases-first-tv-ad-of-campaign-highlighting-how-hell-work-to-make-life-more-affordable-for-north-carolinians/',
+      title: 'Official campaign release for Roy Cooper first TV ad',
+      publisher: 'Cooper for North Carolina',
+      sourceType: 'campaign_material',
+      stance: 'context',
+      claimText: 'The linked media is presented as Roy Cooper campaign advertising in the North Carolina Senate race.',
+      quote: 'The campaign release identifies the ad as a TV, streaming, and digital buy for the Senate campaign.',
+      sourcePublishedAt: '2026-06-01',
+      archiveUrl: 'https://arena.vote/demo-archive/roy-cooper-first-tv-ad',
+    },
+    {
+      id: 'rec-ad-ext-roy-cooper-youtube',
+      contentId: 'ad-ext-roy-cooper-easier-2026',
+      url: 'https://www.youtube.com/watch?v=UBZrOCTc4v0',
+      title: 'Roy Cooper first Senate TV ad video',
+      publisher: 'Roy Cooper campaign YouTube channel',
+      sourceType: 'campaign_material',
+      stance: 'context',
+      claimText: 'The video link is the campaign-hosted media source for the ad.',
+      quote: 'The video page hosts the ad media linked into the race record.',
+      sourcePublishedAt: '2026-06-01',
+      archiveUrl: 'https://arena.vote/demo-archive/roy-cooper-youtube-ad',
+    },
+    {
+      id: 'rec-ad-ext-andy-barr-official-release',
+      contentId: 'ad-ext-andy-barr-stop-dei-2026',
+      url: 'https://barrforsenate.com/press-release/barr-stop-dei-ad-inflames-woke-leftists-kicks-off-1m-buy-throughout-the-commonwealth/',
+      title: 'Official campaign release for Andy Barr Stop DEI ad',
+      publisher: 'Andy Barr for Senate',
+      sourceType: 'campaign_material',
+      stance: 'context',
+      claimText: 'The linked media is presented as Andy Barr campaign advertising in the Kentucky Senate race.',
+      quote: 'The campaign release describes the ad rollout across broadcast, cable, and digital platforms.',
+      sourcePublishedAt: '2026-02-09',
+      archiveUrl: 'https://arena.vote/demo-archive/andy-barr-stop-dei-release',
+    },
+    {
+      id: 'rec-ad-ext-andy-barr-pbs-context',
+      contentId: 'ad-ext-andy-barr-stop-dei-2026',
+      url: 'https://www.pbs.org/video/andy-barr-releases-first-us-senate-campaign-ad-r6jgn5/',
+      title: 'Kentucky Edition segment on Andy Barr Senate campaign ad',
+      publisher: 'PBS Kentucky Edition',
+      sourceType: 'news',
+      stance: 'context',
+      claimText: 'A news segment provides independent context for the ad and public reactions.',
+      quote: 'The segment reports that Barr released his first U.S. Senate campaign ad and describes responses from Democratic candidates.',
+      sourcePublishedAt: '2026-02-09',
+      archiveUrl: 'https://arena.vote/demo-archive/pbs-andy-barr-ad-context',
+    },
+  ].filter(recite => existingAdIds.has(recite.contentId));
+
+  if (recites.length === 0) return;
+
+  await db.batch(recites.map(recite =>
+    db.prepare(
+      `INSERT OR IGNORE INTO recites
+       (id, content_type, content_id, user_id, url, title, publisher, source_type, stance, claim_text, quote,
+        source_published_at, accessed_at, archive_url, status, reviewed_by, reviewed_at, review_note)
+       VALUES (?, 'ad', ?, 'system', ?, ?, ?, ?, ?, ?, ?, ?, '2026-07-05', ?, 'verified', 'system', '2026-07-05T00:00:00.000Z', ?)`
+    ).bind(
+      recite.id,
+      recite.contentId,
+      recite.url,
+      recite.title,
+      recite.publisher,
+      recite.sourceType,
+      recite.stance,
+      recite.claimText,
+      recite.quote,
+      recite.sourcePublishedAt,
+      recite.archiveUrl,
+      'Seeded source metadata for linked outside-ad examples; context only, not a verdict on ad truth.'
+    )
+  ));
 }
 
 async function repairDemoMediaData(db) {

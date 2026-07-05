@@ -7,7 +7,7 @@
  */
 
 import { Router } from 'itty-router';
-import { initDatabase, seedIssueCategories, seedDemoData } from './db.js';
+import { initDatabase, seedIssueCategories, seedPressFeedItems, seedOutsideAdExamples, seedDemoData } from './db.js';
 import { corsHeaders, json } from './middleware.js';
 import { r2MediaResponse } from './media.js';
 
@@ -111,6 +111,8 @@ async function bootstrap(env) {
   if (bootstrappedDbs.has(env.ARENA_DB)) return;
   await initDatabase(env.ARENA_DB);
   await seedIssueCategories(env.ARENA_DB);
+  await seedPressFeedItems(env.ARENA_DB);
+  await seedOutsideAdExamples(env.ARENA_DB);
   if (env.ENVIRONMENT !== 'production' || env.SEED_DEMO_DATA === 'true') {
     await seedDemoData(env.ARENA_DB);
   }

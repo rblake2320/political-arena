@@ -5,6 +5,7 @@ import * as api from "../api";
 import { useArenaStore } from "../store";
 import { useAuth } from "../stores/auth";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { ContentMedia, MediaUploadField } from "../components/Media";
 
 const mono = "'IBM Plex Mono', ui-monospace, monospace";
 const display = "'Space Grotesk', system-ui, sans-serif";
@@ -401,7 +402,7 @@ export function Race() {
             <ActionButton onClick={() => setAction("claim")} variant={isCandidateInRace ? "secondary" : "primary"}>{isCandidateInRace ? "Add profile" : "Claim profile"}</ActionButton>
             <ActionButton onClick={() => setAction("challenge")} disabled={!isCandidateInRace || cands.length < 2} variant="secondary">Issue callout</ActionButton>
             <ActionButton onClick={() => setAction("post-ad")} disabled={!isCandidateInRace} variant="secondary">Post ad</ActionButton>
-            <ActionButton onClick={() => setAction("outside-ad")} disabled={!isCandidateInRace || cands.length < 2} variant="secondary">Answer outside ad</ActionButton>
+            <ActionButton onClick={() => setAction("outside-ad")} disabled={!isCandidateInRace || cands.length < 2} variant="secondary">Link outside ad</ActionButton>
             <ActionButton onClick={() => setAction("question")} variant="ghost">Ask question</ActionButton>
           </div>
         </div>
@@ -427,13 +428,15 @@ export function Race() {
             />
           ))}
           {tab === "ads" && ads.length === 0 && (
-            <EmptyPanel title="No ad pairs yet" detail="Campaign ads and outside-ad responses enter the review pipeline before they appear beside reserved rebuttal slots." action={<ActionButton onClick={() => setAction("post-ad")} disabled={!isCandidateInRace}>Post ad</ActionButton>} />
+            <EmptyPanel title="No ad pairs yet" detail="Campaign ads and linked TV/digital ads appear here with reserved response slots for opposing campaigns." action={<ActionButton onClick={() => setAction("outside-ad")} disabled={!isCandidateInRace || cands.length < 2}>Link outside ad</ActionButton>} />
           )}
           {(tab === "wire" || tab === "ads") && ads.map((ad: any) => {
             const cand = cands.find((c: any) => c.id === ad.candidate_id);
             const pc = partyC(cand?.party);
             const reb = rebuttals.filter((r: any) => r.parent_ad_id === ad.id);
             const canClaimRebuttal = Boolean(isCandidateInRace && activeCandidateId && ad.candidate_id !== activeCandidateId && !reb.some((r: any) => r.candidate_id === activeCandidateId));
+            const slotCount = Math.max(1, Math.min(Number(ad.max_rebuttals || 3), 3));
+            const adSources = ad.ad_recite_summary;
             return (
               <div key={ad.id} style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 16, background: "#0C0C13", overflow: "hidden" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: "1px solid rgba(255,255,255,.07)", background: "rgba(255,255,255,.015)", gap: 12, flexWrap: "wrap" }}>
@@ -447,29 +450,52 @@ export function Race() {
                       <div style={{ display: "flex", flexDirection: "column", gap: 1 }}><span style={{ font: `600 13px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{cand?.name || "Campaign"} campaign</span><span style={{ font: `500 9px ${mono}`, letterSpacing: ".1em", color: pc.text }}>{(cand?.party || "").toUpperCase().slice(0, 3)} · {ad.source_type === "external" ? "OUTSIDE AD" : "VERIFIED"}</span></div>
                     </div>
                     {ad.title && <div style={{ font: `600 19px/1.3 ${display}`, color: "#F2F2F7" }}>{ad.title}</div>}
+                    {ad.media_url && <ContentMedia url={ad.media_url} mediaType={ad.media_type} alt={ad.title || "Campaign ad media"} compact />}
                     <div style={{ font: `400 13.5px/1.65 'Hanken Grotesk',sans-serif`, color: "#C9C9D4" }}>{ad.ad_content_text}</div>
+                    {ad.source_type === "external" && (
+                      <div style={{ border: "1px solid rgba(239,182,67,.26)", background: "rgba(239,182,67,.06)", borderRadius: 10, padding: "10px 12px", font: `400 12px/1.45 'Hanken Grotesk',sans-serif`, color: "#D6B464" }}>
+                        Linked TV/digital ad. This is source context, not a fact-check callout. An opposing verified campaign can claim the response slot with video, image, audio, or text.
+                      </div>
+                    )}
+                    {adSources?.recite_count > 0 && (
+                      <div style={{ border: "1px solid rgba(110,110,247,.25)", background: "rgba(110,110,247,.06)", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                          <span style={{ font: `600 9px ${mono}`, letterSpacing: ".13em", color: "#8F8FF9" }}>SOURCE CHECK · {adSources.recite_count} RECITES</span>
+                          <span style={{ font: `700 10px ${mono}`, color: "#F2F2F7" }}>{adSources.fact_score?.score ?? 0}/100</span>
+                        </div>
+                        {adSources.top_source && (
+                          <a href={adSources.top_source.url} target="_blank" rel="noreferrer" style={{ font: `500 12px/1.35 'Hanken Grotesk',sans-serif`, color: "#C9C9D4", textDecoration: "none" }}>
+                            {adSources.top_source.publisher || "Source"} · {adSources.top_source.title}
+                          </a>
+                        )}
+                      </div>
+                    )}
                     <div style={{ marginTop: "auto", display: "flex", alignItems: "center", gap: 7, border: "1px solid rgba(255,255,255,.1)", background: "rgba(255,255,255,.025)", borderRadius: 8, padding: "8px 12px" }}><span style={{ font: `500 9.5px ${mono}`, letterSpacing: ".1em", color: "#9B9BAB" }}>ⓘ {ad.disclaimer_text || "PAID FOR BY THE CAMPAIGN · MANDATORY DISCLAIMER"}</span></div>
                   </div>
                   <div style={{ padding: 22, background: "rgba(110,110,247,.025)", display: "flex", flexDirection: "column", gap: 10 }}>
-                    <span style={{ font: `600 10px ${mono}`, letterSpacing: ".14em", color: "#8F8FF9" }}>◷ EQUAL TIME · REBUTTAL WINDOW</span>
-                    {[0, 1, 2].map(i => {
+                    <span style={{ font: `600 10px ${mono}`, letterSpacing: ".14em", color: "#8F8FF9" }}>◷ {ad.source_type === "external" ? "OPEN RESPONSE SLOT" : "EQUAL TIME · REBUTTAL WINDOW"}</span>
+                    {Array.from({ length: slotCount }).map((_, i) => {
                       const r = reb[i];
                       const rc = r && cands.find((c: any) => c.id === r.candidate_id);
                       return r ? (
-                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, border: "1px solid rgba(52,195,132,.3)", background: "rgba(52,195,132,.05)", borderRadius: 10, padding: "12px 14px" }}>
-                          <div style={{ width: 26, height: 26, borderRadius: "50%", background: partyC(rc?.party).grad, border: `1.5px solid ${partyC(rc?.party).ring}`, display: "flex", alignItems: "center", justifyContent: "center", font: `600 9.5px ${display}`, color: partyC(rc?.party).soft }}>{initials(rc?.name)}</div>
-                          <span style={{ font: `600 12px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>Slot {i + 1} — {rc?.name?.split(/\s+/).slice(-1)[0]}</span>
-                          <span style={{ marginLeft: "auto", font: `700 8.5px ${mono}`, letterSpacing: ".1em", color: "#34C384" }}>ANSWERED</span>
+                        <div key={i} style={{ display: "flex", flexDirection: "column", gap: 10, border: "1px solid rgba(52,195,132,.3)", background: "rgba(52,195,132,.05)", borderRadius: 10, padding: "12px 14px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div style={{ width: 26, height: 26, borderRadius: "50%", background: partyC(rc?.party).grad, border: `1.5px solid ${partyC(rc?.party).ring}`, display: "flex", alignItems: "center", justifyContent: "center", font: `600 9.5px ${display}`, color: partyC(rc?.party).soft }}>{initials(rc?.name)}</div>
+                            <span style={{ font: `600 12px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>Slot {i + 1} — {rc?.name?.split(/\s+/).slice(-1)[0] || "Campaign"}</span>
+                            <span style={{ marginLeft: "auto", font: `700 8.5px ${mono}`, letterSpacing: ".1em", color: "#34C384" }}>ANSWERED</span>
+                          </div>
+                          <div style={{ font: `400 12.5px/1.55 'Hanken Grotesk',sans-serif`, color: "#C9C9D4" }}>{r.response_text}</div>
+                          {r.media_url && <ContentMedia url={r.media_url} alt="Response media" compact />}
                         </div>
                       ) : (
                         <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, border: "1px dashed rgba(255,255,255,.16)", borderRadius: 10, padding: "12px 14px" }}>
                           <div style={{ width: 26, height: 26, borderRadius: "50%", border: "1.5px dashed rgba(255,255,255,.2)", display: "flex", alignItems: "center", justifyContent: "center", font: `600 11px ${display}`, color: "#5C5C6E" }}>{i + 1}</div>
-                          <span style={{ font: `500 12px 'Hanken Grotesk',sans-serif`, color: "#9B9BAB" }}>Open — any opposing campaign</span>
-                          {canClaimRebuttal ? <ActionButton onClick={() => { setActiveAd(ad); setAction("rebuttal"); }} variant="ghost">Claim</ActionButton> : <span style={{ marginLeft: "auto", font: `600 8.5px ${mono}`, letterSpacing: ".1em", color: "#5C5C6E" }}>OPEN</span>}
+                          <span style={{ font: `500 12px 'Hanken Grotesk',sans-serif`, color: "#9B9BAB" }}>{ad.source_type === "external" ? "Open — respond with video, image, audio, or text" : "Open — any opposing campaign"}</span>
+                          {canClaimRebuttal ? <ActionButton onClick={() => { setActiveAd(ad); setAction("rebuttal"); }} variant="ghost">Respond</ActionButton> : <span style={{ marginLeft: "auto", font: `600 8.5px ${mono}`, letterSpacing: ".1em", color: "#5C5C6E" }}>OPEN</span>}
                         </div>
                       );
                     })}
-                    <div style={{ marginTop: "auto", font: `400 11px/1.55 'Hanken Grotesk',sans-serif`, color: "#5C5C6E" }}>When an Arena ad goes live, opposing candidates get a reserved rebuttal window. Voters always see claim and answer together.</div>
+                    <div style={{ marginTop: "auto", font: `400 11px/1.55 'Hanken Grotesk',sans-serif`, color: "#5C5C6E" }}>{ad.source_type === "external" ? "Outside ads stay attached to the race record as source links. The reply appears beside the original media once a verified opposing campaign submits it." : "When an Arena ad goes live, opposing candidates get a reserved rebuttal window. Voters always see claim and answer together."}</div>
                   </div>
                 </div>
               </div>
@@ -785,8 +811,6 @@ function OutsideAdModal({ raceId, responderId, candidates, onClose }: { raceId: 
   const [sourceTitle, setSourceTitle] = useState("");
   const [sourceMediaUrl, setSourceMediaUrl] = useState("");
   const [sourceDescription, setSourceDescription] = useState("");
-  const [responseText, setResponseText] = useState("");
-  const [disclaimer, setDisclaimer] = useState("");
   const [notice, setNotice] = useState<Notice>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -795,17 +819,15 @@ function OutsideAdModal({ raceId, responderId, candidates, onClose }: { raceId: 
     setSubmitting(true);
     setNotice(null);
     try {
-      await api.createExternalAdResponse({
+      await api.createExternalAdSource({
         race_id: raceId,
         source_candidate_id: sourceCandidateId,
-        responder_candidate_id: responderId,
+        posting_candidate_id: responderId,
         source_title: sourceTitle.trim(),
         source_media_url: sourceMediaUrl.trim(),
         source_description: sourceDescription.trim() || undefined,
-        response_text: responseText.trim(),
-        disclaimer_text: disclaimer.trim(),
       });
-      onClose(true, "Outside-ad response created for moderation.");
+      onClose(true, "Outside ad linked with an open response slot.");
     } catch (err: any) {
       setNotice({ kind: "error", text: errorText(err) });
       setSubmitting(false);
@@ -813,7 +835,7 @@ function OutsideAdModal({ raceId, responderId, candidates, onClose }: { raceId: 
   };
 
   return (
-    <ModalFrame title="Answer outside ad" kicker="Original claim + campaign response" onClose={() => onClose()}>
+    <ModalFrame title="Link outside ad" kicker="Creates public source context with an open response slot" onClose={() => onClose()}>
       <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
         <FormMessage notice={notice} />
         <SelectField label="Candidate behind outside ad" required value={sourceCandidateId} onChange={setSourceCandidateId}>
@@ -822,11 +844,12 @@ function OutsideAdModal({ raceId, responderId, candidates, onClose }: { raceId: 
         <Field label="Outside ad title" required value={sourceTitle} onChange={setSourceTitle} />
         <Field label="Outside ad media/source URL" required type="url" value={sourceMediaUrl} onChange={setSourceMediaUrl} />
         <TextAreaField label="Context / source description" value={sourceDescription} onChange={setSourceDescription} maxLength={5000} rows={4} />
-        <TextAreaField label="Your response" required value={responseText} onChange={setResponseText} maxLength={5000} rows={5} />
-        <TextAreaField label="FEC disclaimer" required value={disclaimer} onChange={setDisclaimer} maxLength={500} rows={3} />
+        <div style={{ border: "1px solid rgba(239,182,67,.28)", background: "rgba(239,182,67,.06)", color: "#D6B464", borderRadius: 10, padding: "10px 12px", font: "400 12.5px/1.5 'Hanken Grotesk', system-ui, sans-serif" }}>
+          This posts the original ad as linked source context only. It does not start a callout clock or write a claim verdict. The opposing campaign can claim the response slot with video, image, audio, or text.
+        </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <ActionButton onClick={() => onClose()} variant="ghost">Cancel</ActionButton>
-          <ActionButton type="submit" disabled={submitting || !sourceCandidateId}>{submitting ? "Creating" : "Create response"}</ActionButton>
+          <ActionButton type="submit" disabled={submitting || !sourceCandidateId || !sourceMediaUrl.trim()}>{submitting ? "Linking" : "Link outside ad"}</ActionButton>
         </div>
       </form>
     </ModalFrame>
@@ -865,8 +888,11 @@ function ClaimRebuttalModal({ ad, raceId, candidateId, onClose }: { ad: any; rac
       <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
         <FormMessage notice={notice} />
         <TextAreaField label="Rebuttal response" required value={responseText} onChange={setResponseText} maxLength={5000} rows={6} />
-        <Field label="Media URL" value={mediaUrl} onChange={setMediaUrl} type="url" placeholder="https://..." />
+        <MediaUploadField label="Response media" candidateId={candidateId} onMediaUrl={setMediaUrl} />
         <TextAreaField label="FEC disclaimer" required value={disclaimer} onChange={setDisclaimer} maxLength={500} rows={3} />
+        <div style={{ font: "400 12px/1.45 'Hanken Grotesk', system-ui, sans-serif", color: "#5C5C6E" }}>
+          Use video for a TV-style response, or attach image/audio/text when that better fits the record.
+        </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <ActionButton onClick={() => onClose()} variant="ghost">Cancel</ActionButton>
           <ActionButton type="submit" disabled={submitting}>{submitting ? "Submitting" : "Submit rebuttal"}</ActionButton>

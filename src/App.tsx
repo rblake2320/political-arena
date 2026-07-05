@@ -414,7 +414,7 @@ function AppContent() {
             <Route path="/my-priorities" element={user ? <MyPrioritiesPage /> : <Navigate to="/login" replace />} />
             <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/login" replace />} />
             <Route path="/moderation" element={user ? <ModerationPage /> : <Navigate to="/login" replace />} />
-            <Route path="/press/register" element={user ? <PressRegistrationPage /> : <Navigate to="/login" replace />} />
+            <Route path="/press/register" element={<PressRegistrationPage />} />
             <Route path="/help" element={<Help />} />
             <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
             <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
