@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runRuntimeMigrations } from '../src/db.js';
 
-function createFakeD1({ users, adFlights, challenges, recites, issueCategories, voterWriteins, auditLog, pressFeedItems = [], missingChallengeSlug = false }) {
+function createFakeD1({ users, adFlights, challenges, recites, issueCategories, voterWriteins, auditLog, pressFeedItems = [], emailDeliveries = [], missingChallengeSlug = false }) {
   const userColumns = new Set(users);
   const adColumns = new Set(adFlights);
   const challengeColumns = new Set(challenges);
@@ -10,6 +10,7 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
   const voterWriteinColumns = new Set(voterWriteins);
   const auditColumns = new Set(auditLog);
   const pressFeedColumns = new Set(pressFeedItems);
+  const emailDeliveryColumns = new Set(emailDeliveries);
   let hasMissingChallengeSlug = missingChallengeSlug;
   const auditIndexes = new Set();
   const surveyResponseIndexes = new Set();
@@ -43,6 +44,9 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
           }
           if (sql === 'PRAGMA table_info(press_feed_items)') {
             return { results: Array.from(pressFeedColumns).map(name => ({ name })) };
+          }
+          if (sql === 'PRAGMA table_info(email_deliveries)') {
+            return { results: Array.from(emailDeliveryColumns).map(name => ({ name })) };
           }
           if (sql === 'PRAGMA index_list(audit_log)') {
             return { results: Array.from(auditIndexes).map(name => ({ name })) };
@@ -87,6 +91,9 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
         if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS press_feed_items')) {
           pressFeedColumns.add('id');
         }
+        if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS email_deliveries')) {
+          emailDeliveryColumns.add('id');
+        }
       }
       return statements.map(() => ({ success: true }));
     },
@@ -98,6 +105,7 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
     voterWriteinColumns,
     auditColumns,
     pressFeedColumns,
+    emailDeliveryColumns,
     auditIndexes,
     surveyResponseIndexes,
     executed,
@@ -214,6 +222,7 @@ describe('runtime migrations', () => {
     expect(db.auditIndexes.has('idx_audit_entity_seq_unique')).toBe(true);
     expect(db.auditIndexes.has('idx_audit_entity_prev_hash_unique')).toBe(true);
     expect(db.pressFeedColumns.has('id')).toBe(true);
+    expect(db.emailDeliveryColumns.has('id')).toBe(true);
     expect(db.executed).toEqual([
       'ALTER TABLE users ADD COLUMN password_reset_token_hash TEXT',
       'ALTER TABLE users ADD COLUMN password_reset_expires_at TEXT',
@@ -288,6 +297,28 @@ describe('runtime migrations', () => {
         ON press_feed_items(is_active, published_at DESC, first_seen_at DESC)`,
       `CREATE INDEX IF NOT EXISTS idx_press_feed_source
         ON press_feed_items(source, section)`,
+      `CREATE TABLE IF NOT EXISTS email_deliveries (
+        id TEXT PRIMARY KEY,
+        provider TEXT,
+        provider_message_id TEXT,
+        recipient_user_id TEXT REFERENCES users(id),
+        recipient_email TEXT,
+        subject TEXT NOT NULL,
+        template_key TEXT,
+        related_entity_type TEXT,
+        related_entity_id TEXT,
+        status TEXT NOT NULL CHECK(status IN ('sent','failed','skipped')),
+        error_message TEXT,
+        metadata TEXT,
+        sent_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_email_deliveries_recipient
+        ON email_deliveries(recipient_user_id, created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_email_deliveries_related
+        ON email_deliveries(related_entity_type, related_entity_id, created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_email_deliveries_status
+        ON email_deliveries(status, created_at)`,
     ]);
 
     db.executed.length = 0;

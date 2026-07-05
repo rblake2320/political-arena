@@ -10,6 +10,7 @@ import { auditLogNow, verifyAuditChain } from '../audit.js';
 import { requireAuth, errorResponse, successResponse, parseBody, parsePagination, getClientIP } from '../middleware.js';
 import { validate, createChallengeSchema, respondToChallengeSchema, refuseChallengeSchema } from '../validation.js';
 import { computeFactScore, getRecitesForContent } from './recites.routes.js';
+import { isTransactionalEmailConfigured, sendAndRecordTransactionalEmail } from '../email.js';
 
 const router = Router({ base: '/api/challenges' });
 
@@ -28,6 +29,130 @@ function calculateBusinessDayDeadline(businessDays) {
   // Set to end of that business day (23:59:59 UTC)
   date.setUTCHours(23, 59, 59, 999);
   return date.toISOString();
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function truncate(value, max = 500) {
+  const text = String(value || '').trim();
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function receiptUrlFor(request, slug) {
+  const origin = new URL(request.url).origin;
+  return `${origin}/challenge/${encodeURIComponent(slug)}`;
+}
+
+function buildChallengeNoticeEmail({ challenge, race, challenger, target, receiptUrl, noticeType }) {
+  const claim = challenge.claim_text || challenge.challenge_text;
+  const subject = noticeType === 'challenge_tagged'
+    ? `Public callout issued to ${target.name}`
+    : `New public callout in ${race.name}`;
+  const text = [
+    subject,
+    '',
+    `Race: ${race.name}`,
+    `Challenger: ${challenger.name}`,
+    `Target: ${target.name}`,
+    `Response deadline: ${challenge.response_deadline}`,
+    '',
+    'Claim or question:',
+    truncate(claim, 1200),
+    '',
+    `Public receipt: ${receiptUrl}`,
+  ].join('\n');
+  const html = `
+    <p><strong>${escapeHtml(subject)}</strong></p>
+    <p>
+      Race: ${escapeHtml(race.name)}<br>
+      Challenger: ${escapeHtml(challenger.name)}<br>
+      Target: ${escapeHtml(target.name)}<br>
+      Response deadline: ${escapeHtml(challenge.response_deadline)}
+    </p>
+    <p><strong>Claim or question</strong></p>
+    <p>${escapeHtml(truncate(claim, 1200))}</p>
+    <p><a href="${escapeHtml(receiptUrl)}">Open the public receipt</a></p>
+  `;
+  return { subject, text, html };
+}
+
+function enqueueChallengeNoticeEmails({ request, env, ctx, challenge, race, challenger, target, directStaff, subscriberRows }) {
+  if (!isTransactionalEmailConfigured(env)) return;
+
+  const receiptUrl = receiptUrlFor(request, challenge.public_receipt_slug);
+  const emailTasks = [];
+  const directUserIds = new Set(directStaff.map(row => row.user_id));
+
+  for (const staff of directStaff) {
+    if (!staff.email) continue;
+    const message = buildChallengeNoticeEmail({
+      challenge,
+      race,
+      challenger,
+      target,
+      receiptUrl,
+      noticeType: 'challenge_tagged',
+    });
+    emailTasks.push(sendAndRecordTransactionalEmail(env.ARENA_DB, env, {
+      to: staff.email,
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
+      tag: 'challenge_tagged',
+      metadata: {
+        challenge_id: challenge.id,
+        race_id: challenge.race_id,
+        target_candidate_id: challenge.target_candidate_id,
+      },
+      idempotencyKey: `challenge-tagged-${challenge.id}-${staff.user_id}`,
+    }, {
+      recipient_user_id: staff.user_id,
+      related_entity_type: 'challenge',
+      related_entity_id: challenge.id,
+      template_key: 'challenge_tagged',
+    }).catch(err => console.error('Challenge tagged email failed:', err)));
+  }
+
+  for (const subscriber of subscriberRows) {
+    if (!subscriber.email || directUserIds.has(subscriber.user_id)) continue;
+    const message = buildChallengeNoticeEmail({
+      challenge,
+      race,
+      challenger,
+      target,
+      receiptUrl,
+      noticeType: 'challenge_issued',
+    });
+    emailTasks.push(sendAndRecordTransactionalEmail(env.ARENA_DB, env, {
+      to: subscriber.email,
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
+      tag: 'challenge_issued',
+      metadata: {
+        challenge_id: challenge.id,
+        race_id: challenge.race_id,
+        subscription_id: subscriber.id,
+      },
+      idempotencyKey: `challenge-issued-${challenge.id}-${subscriber.user_id}`,
+    }, {
+      recipient_user_id: subscriber.user_id,
+      related_entity_type: 'challenge',
+      related_entity_id: challenge.id,
+      template_key: 'challenge_issued',
+    }).catch(err => console.error('Challenge subscriber email failed:', err)));
+  }
+
+  if (emailTasks.length > 0) {
+    ctx.waitUntil(Promise.all(emailTasks));
+  }
 }
 
 // GET /api/challenges/races/:raceId — Public
@@ -221,10 +346,18 @@ router.post('/', async (request, env, ctx) => {
   if (!challengerStaffLink) return errorResponse('Not authorized for this candidate', 403);
 
   // Verify both candidates are in the same race
-  const challenger = await env.ARENA_DB.prepare(`SELECT race_id, verification_status FROM candidates WHERE id = ? AND is_active = 1`).bind(data.challenger_candidate_id).first();
-  const target = await env.ARENA_DB.prepare(`SELECT race_id, verification_status FROM candidates WHERE id = ? AND is_active = 1`).bind(data.target_candidate_id).first();
+  const challenger = await env.ARENA_DB.prepare(
+    `SELECT id, race_id, name, party, verification_status FROM candidates WHERE id = ? AND is_active = 1`
+  ).bind(data.challenger_candidate_id).first();
+  const target = await env.ARENA_DB.prepare(
+    `SELECT id, race_id, name, party, verification_status FROM candidates WHERE id = ? AND is_active = 1`
+  ).bind(data.target_candidate_id).first();
+  const race = await env.ARENA_DB.prepare(
+    `SELECT id, name, office, state, district FROM races WHERE id = ?`
+  ).bind(data.race_id).first();
 
   if (!challenger || !target) return errorResponse('Candidate not found', 404);
+  if (!race) return errorResponse('Race not found', 404);
   if (challenger.race_id !== data.race_id || target.race_id !== data.race_id) return errorResponse('Both candidates must be in the specified race');
   if (data.challenger_candidate_id === data.target_candidate_id) return errorResponse('Cannot challenge yourself');
 
@@ -360,18 +493,24 @@ router.post('/', async (request, env, ctx) => {
   await env.ARENA_DB.batch(challengeBatch);
 
   const targetStaff = await env.ARENA_DB.prepare(
-    `SELECT DISTINCT user_id FROM candidate_staff_links WHERE candidate_id = ? AND is_active = 1`
+    `SELECT DISTINCT u.id as user_id, u.email, u.display_name
+     FROM candidate_staff_links csl
+     JOIN users u ON u.id = csl.user_id
+     WHERE csl.candidate_id = ?
+       AND csl.is_active = 1
+       AND u.is_active = 1`
   ).bind(data.target_candidate_id).all();
 
-  const targetStaffIds = (targetStaff.results || []).map(row => row.user_id).filter(Boolean);
+  const targetStaffRows = targetStaff.results || [];
+  const targetStaffIds = targetStaffRows.map(row => row.user_id).filter(Boolean);
   if (targetStaffIds.length > 0) {
     const notifBody = data.claim_text || data.challenge_text;
-    const directNotifications = targetStaffIds.map(userId => env.ARENA_DB.prepare(
+    const directNotifications = targetStaffRows.map(row => env.ARENA_DB.prepare(
       `INSERT INTO notifications (id, user_id, notification_type, title, body, link_url)
        VALUES (?, ?, 'challenge_tagged', ?, ?, ?)`
     ).bind(
       generateId('notif'),
-      userId,
+      row.user_id,
       'Your campaign was tagged in a public callout',
       notifBody.length > 180 ? `${notifBody.slice(0, 180)}...` : notifBody,
       `/challenge/${receiptSlug}`,
@@ -400,6 +539,39 @@ router.post('/', async (request, env, ctx) => {
       await env.ARENA_DB.batch(notifBatch.slice(i, i + 50));
     }
   }
+
+  const emailSubscribers = isTransactionalEmailConfigured(env)
+    ? await env.ARENA_DB.prepare(
+      `SELECT ns.id, ns.user_id, ns.channel, u.email, u.display_name
+       FROM notification_subscriptions ns
+       JOIN users u ON u.id = ns.user_id
+       WHERE ((ns.subscription_type = 'race' AND ns.target_id = ?) OR (ns.subscription_type = 'candidate' AND ns.target_id = ?))
+         AND ns.is_active = 1
+         AND ns.channel IN ('email','both')
+         AND u.is_active = 1
+       LIMIT 500`
+    ).bind(data.race_id, data.target_candidate_id).all()
+    : { results: [] };
+
+  enqueueChallengeNoticeEmails({
+    request,
+    env,
+    ctx,
+    challenge: {
+      id: challengeId,
+      race_id: data.race_id,
+      target_candidate_id: data.target_candidate_id,
+      public_receipt_slug: receiptSlug,
+      response_deadline: deadline,
+      challenge_text: data.challenge_text,
+      claim_text: data.claim_text || null,
+    },
+    race,
+    challenger,
+    target,
+    directStaff: targetStaffRows,
+    subscriberRows: emailSubscribers.results || [],
+  });
 
   await auditLogNow(env.ARENA_DB, {
     actorId: request.user.id,
