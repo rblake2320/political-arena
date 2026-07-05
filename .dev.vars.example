@@ -4,5 +4,20 @@
 # JWT_SECRET is REQUIRED in production — the worker fails closed without it.
 JWT_SECRET=generate-a-long-random-string-here
 
+# Local development should not inherit production behavior from wrangler.toml.
+ENVIRONMENT=development
+
+# Password reset links default to the incoming request origin. Set this when
+# local URLs should point at a specific frontend/worker host.
+PASSWORD_RESET_BASE_URL=http://127.0.0.1:8787
+
+# Non-production can expose a reset token/link in the API response for local QA.
+PASSWORD_RESET_EXPOSE_DEV_TOKEN=true
+
+# Optional production delivery hook. The worker POSTs a JSON payload with:
+# { type, to, reset_url, expires_in_minutes }
+# PASSWORD_RESET_WEBHOOK_URL=https://email-service.example.com/password-reset
+# PASSWORD_RESET_WEBHOOK_TOKEN=optional-shared-secret
+
 # Optional: force demo data seeding (never enable in production)
 # SEED_DEMO_DATA=true

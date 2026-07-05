@@ -8,9 +8,17 @@ import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
 import { requireAuth, requireRole, errorResponse, successResponse, parseBody, parsePagination, getClientIP } from '../middleware.js';
 import { authenticate } from '../auth.js';
-import { validate, createAdSchema, updateAdSchema, reviewAdSchema, createRebuttalSchema } from '../validation.js';
+import { validate, createAdSchema, updateAdSchema, reviewAdSchema, createRebuttalSchema, createExternalAdResponseSchema } from '../validation.js';
 
 const router = Router({ base: '/api/ads' });
+
+function inferAdMediaType(url) {
+  if (!url) return 'text';
+  if (/(youtube\.com|youtu\.be|vimeo\.com)/i.test(url)) return 'video';
+  if (/\.(mp4|m4v|mov|webm|ogv|ogg|3gp|3g2)(\?|#|$)/i.test(url)) return 'video';
+  if (/\.(jpg|jpeg|png|gif|webp|avif|heic|heif)(\?|#|$)/i.test(url)) return 'image';
+  return 'video';
+}
 
 // GET /api/ads/races/:raceId — Public, with paired rebuttals
 router.get('/races/:raceId', async (request, env) => {
@@ -403,6 +411,102 @@ router.post('/rebuttals', async (request, env, ctx) => {
   });
 
   return successResponse({ id: rebuttalId, status: rebuttalStatus });
+});
+
+// POST /api/ads/external-response — Pair an outside/TV ad with a candidate response.
+// This is the fairness path for attacks that happen off-platform: the responder
+// can post the original ad as context and place their answer next to it.
+router.post('/external-response', async (request, env, ctx) => {
+  const authError = await requireAuth(request, env);
+  if (authError) return authError;
+
+  const body = await parseBody(request);
+  if (!body) return errorResponse('Invalid request body');
+
+  const { valid, errors, data } = validate(createExternalAdResponseSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+
+  if (data.source_candidate_id === data.responder_candidate_id) {
+    return errorResponse('Cannot respond to your own outside ad');
+  }
+
+  const sourceCandidate = await env.ARENA_DB.prepare(
+    `SELECT id, race_id, name FROM candidates WHERE id = ? AND race_id = ? AND is_active = 1`
+  ).bind(data.source_candidate_id, data.race_id).first();
+  if (!sourceCandidate) return errorResponse('Source candidate not found in this race', 404);
+
+  const responderCandidate = await env.ARENA_DB.prepare(
+    `SELECT id, race_id, name, verification_status FROM candidates WHERE id = ? AND race_id = ? AND is_active = 1`
+  ).bind(data.responder_candidate_id, data.race_id).first();
+  if (!responderCandidate) return errorResponse('Responder candidate not found in this race', 404);
+
+  const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
+  if (!isAdmin && responderCandidate.verification_status !== 'verified') {
+    return errorResponse('Responder candidate must be verified');
+  }
+
+  if (!isAdmin) {
+    const link = await env.ARENA_DB.prepare(
+      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+    ).bind(request.user.id, data.responder_candidate_id).first();
+    if (!link) return errorResponse('Not authorized for this candidate', 403);
+  }
+
+  const adId = generateId('ad');
+  const rebuttalId = generateId('reb');
+  const sourceDescription = data.source_description || `Outside ad being answered by ${responderCandidate.name}.`;
+  const sourceDisclaimer = data.source_disclaimer_text || 'Outside ad posted for response context';
+
+  await env.ARENA_DB.batch([
+    env.ARENA_DB.prepare(
+      `INSERT INTO ad_flights
+       (id, race_id, candidate_id, created_by, title, media_url, media_type, ad_content_text, disclaimer_text,
+        source_type, source_url, source_label, posted_for_rebuttal_by, status, approved_at, activated_at, rebuttal_window_expires, max_rebuttals)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'external', ?, ?, ?, 'active', datetime('now'), datetime('now'), NULL, 1)`
+    ).bind(
+      adId,
+      data.race_id,
+      data.source_candidate_id,
+      request.user.id,
+      data.source_title,
+      data.source_media_url,
+      inferAdMediaType(data.source_media_url),
+      sourceDescription,
+      sourceDisclaimer,
+      data.source_media_url,
+      'Outside ad being answered',
+      data.responder_candidate_id,
+    ),
+    env.ARENA_DB.prepare(
+      `INSERT INTO rebuttal_ads
+       (id, parent_ad_id, race_id, candidate_id, created_by, response_text, disclaimer_text, media_url, status, slot_claimed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', datetime('now'))`
+    ).bind(
+      rebuttalId,
+      adId,
+      data.race_id,
+      data.responder_candidate_id,
+      request.user.id,
+      data.response_text,
+      data.disclaimer_text,
+      data.response_media_url || null,
+    ),
+  ]);
+
+  auditLog(env.ARENA_DB, ctx, {
+    actorId: request.user.id,
+    action: 'external_ad_response.create',
+    entityType: 'ad_flight',
+    entityId: adId,
+    afterState: {
+      source_candidate_id: data.source_candidate_id,
+      responder_candidate_id: data.responder_candidate_id,
+      rebuttal_id: rebuttalId,
+    },
+    ipAddress: getClientIP(request),
+  });
+
+  return successResponse({ ad_id: adId, rebuttal_id: rebuttalId, status: 'active' });
 });
 
 export default router;

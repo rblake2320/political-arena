@@ -10,8 +10,11 @@ import {
   optionalAuth, successResponse, errorResponse, parsePagination, parseBody,
 } from '../middleware.js';
 import { validate, submitQuestionSchema } from '../validation.js';
+import { checkRateLimit } from '../ratelimit.js';
 
 const router = Router({ base: '/api/questions' });
+const VOTE_MAX_PER_USER = 20;
+const VOTE_WINDOW_SECONDS = 10 * 60;
 
 /**
  * GET /api/questions/:raceId — List questions for a race (public)
@@ -171,6 +174,15 @@ router.post('/:questionId/vote', async (request, env) => {
   // Auth gate based on source_type (super_admin bypasses)
   const authErr2 = await requireAuth(request, env);
   if (authErr2) return authErr2;
+
+  const voteLimit = await checkRateLimit(
+    env.ARENA_DB,
+    `question-vote:${request.user.id}`,
+    VOTE_MAX_PER_USER,
+    VOTE_WINDOW_SECONDS,
+  );
+  if (voteLimit.limited) return errorResponse('Too many vote changes. Please slow down.', 429);
+
   const isSuperAdmin2 = ['admin', 'super_admin'].includes(request.user.role);
   if (!isSuperAdmin2) {
     if (question.source_type === 'voter') {

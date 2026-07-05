@@ -49,6 +49,10 @@ export interface AdFlight {
   budget_cents: number;
   status: string;
   rebuttal_window_expires: string | null;
+  source_type?: 'platform' | 'external';
+  source_url?: string | null;
+  source_label?: string | null;
+  posted_for_rebuttal_by?: string | null;
 }
 
 export interface RebuttalAd {
@@ -68,6 +72,9 @@ export interface Challenge {
   challenger_candidate_id: string;
   target_candidate_id: string;
   challenge_text: string;
+  claim_text?: string | null;
+  dispute_summary?: string | null;
+  requested_response?: string | null;
   media_url: string | null;
   challenge_type: string;
   created_at: string;
@@ -76,6 +83,7 @@ export interface Challenge {
   expired_at: string | null;
   refused_at: string | null;
   refusal_reason: string | null;
+  public_receipt_slug?: string | null;
   status: string;
 }
 

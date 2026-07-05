@@ -8,7 +8,8 @@
 
 import { Router } from 'itty-router';
 import { initDatabase, seedIssueCategories, seedDemoData } from './db.js';
-import { handleCORS, corsHeaders, json } from './middleware.js';
+import { corsHeaders, json } from './middleware.js';
+import { r2MediaResponse } from './media.js';
 
 // Route modules
 import authRoutes from './routes/auth.routes.js';
@@ -18,6 +19,8 @@ import candidatesRoutes from './routes/candidates.routes.js';
 import adsRoutes from './routes/ads.routes.js';
 import challengesRoutes from './routes/challenges.routes.js';
 import reactionsRoutes from './routes/reactions.routes.js';
+import recitesRoutes from './routes/recites.routes.js';
+import statementsRoutes from './routes/statements.routes.js';
 import notificationsRoutes from './routes/notifications.routes.js';
 import surveysRoutes from './routes/surveys.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
@@ -38,6 +41,8 @@ api.all('/candidates/*', candidatesRoutes.fetch);
 api.all('/ads/*', adsRoutes.fetch);
 api.all('/challenges/*', challengesRoutes.fetch);
 api.all('/reactions/*', reactionsRoutes.fetch);
+api.all('/recites/*', recitesRoutes.fetch);
+api.all('/statements/*', statementsRoutes.fetch);
 api.all('/notifications/*', notificationsRoutes.fetch);
 api.all('/surveys/*', surveysRoutes.fetch);
 api.all('/analytics/*', analyticsRoutes.fetch);
@@ -47,8 +52,9 @@ api.all('/questions/*', questionsRoutes.fetch);
 api.all('/press/*', pressRoutes.fetch);
 api.all('/credits/*', creditsRoutes.fetch);
 
-// Health check
-api.get('/health', () => json({ status: 'ok', version: '1.0.0', timestamp: new Date().toISOString() }));
+// Health check fallback; fetch() handles /api/health directly so bootstrap
+// failures can return degraded health before route dispatch.
+api.get('/health', () => json({ status: 'ok', database: 'ok', version: '1.0.0', timestamp: new Date().toISOString() }));
 
 // 404 for unknown API routes
 api.all('*', () => json({ success: false, error: 'API endpoint not found' }, 404));
@@ -59,6 +65,7 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
 };
 
 // CSP for HTML documents (the React SPA). Media/images may come from R2 or
@@ -84,18 +91,25 @@ function withSecurityHeaders(response, { isHtml = false } = {}) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+function withApiHeaders(response, request) {
+  const headers = new Headers(response.headers);
+  Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+  Object.entries(SECURITY_HEADERS).forEach(([k, v]) => headers.set(k, v));
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 // One-time bootstrap per isolate: schema + reference data. Demo data only
 // seeds outside production (or when SEED_DEMO_DATA=true is set explicitly) —
 // production databases must never receive fictional candidates or ads.
-let bootstrapped = false;
+const bootstrappedDbs = new WeakSet();
 async function bootstrap(env) {
-  if (bootstrapped) return;
+  if (bootstrappedDbs.has(env.ARENA_DB)) return;
   await initDatabase(env.ARENA_DB);
   await seedIssueCategories(env.ARENA_DB);
   if (env.ENVIRONMENT !== 'production' || env.SEED_DEMO_DATA === 'true') {
     await seedDemoData(env.ARENA_DB);
   }
-  bootstrapped = true;
+  bootstrappedDbs.add(env.ARENA_DB);
 }
 
 export default {
@@ -104,28 +118,39 @@ export default {
 
     // CORS preflight
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders(request) });
+      return withApiHeaders(new Response(null, { status: 204 }), request);
     }
 
     // Initialize database once per isolate
+    let bootstrapError = null;
     try {
       await bootstrap(env);
     } catch (err) {
       console.error('DB init error:', err);
+      bootstrapError = err;
+    }
+
+    if (url.pathname === '/api/health') {
+      return withApiHeaders(json({
+        status: bootstrapError ? 'degraded' : 'ok',
+        database: bootstrapError ? 'error' : 'ok',
+        version: '1.0.0',
+        timestamp: new Date().toISOString(),
+      }, bootstrapError ? 503 : 200), request);
     }
 
     // API routes
     if (url.pathname.startsWith('/api/')) {
+      if (bootstrapError) {
+        return withApiHeaders(json({ success: false, error: 'Service unavailable' }, 503), request);
+      }
+
       try {
         const response = await api.fetch(request, env, ctx);
-        // Add CORS + security headers to all API responses
-        const headers = new Headers(response.headers);
-        Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
-        Object.entries(SECURITY_HEADERS).forEach(([k, v]) => headers.set(k, v));
-        return new Response(response.body, { status: response.status, headers });
+        return withApiHeaders(response, request);
       } catch (err) {
         console.error('API error:', err);
-        return json({ success: false, error: 'Internal server error' }, 500);
+        return withApiHeaders(json({ success: false, error: 'Internal server error' }, 500), request);
       }
     }
 
@@ -138,18 +163,16 @@ export default {
       if (!key || !key.startsWith('uploads/')) {
         return json({ success: false, error: 'Invalid media path' }, 403);
       }
-      const object = await env.ARENA_MEDIA.get(key);
-      if (!object) {
+      const response = await r2MediaResponse(env.ARENA_MEDIA, key, request);
+      if (!response) {
         return new Response('Not Found', { status: 404 });
       }
-      const headers = new Headers();
-      headers.set('Content-Type', object.httpMetadata?.contentType || 'application/octet-stream');
-      headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-      headers.set('X-Content-Type-Options', 'nosniff');
+      const headers = new Headers(response.headers);
       headers.set('Content-Security-Policy', "default-src 'none'");
+      Object.entries(SECURITY_HEADERS).forEach(([k, v]) => headers.set(k, v));
       // Add CORS headers (same allowlist as API)
       Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
-      return new Response(object.body, { headers });
+      return new Response(response.body, { status: response.status, headers });
     }
 
     // Serve static assets (the React SPA)

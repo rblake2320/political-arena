@@ -34,9 +34,25 @@ describe('health & headers', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe('ok');
+    expect(body.database).toBe('ok');
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(res.headers.get('X-Frame-Options')).toBe('DENY');
+    expect(res.headers.get('Strict-Transport-Security')).toContain('max-age=31536000');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBeTruthy();
+  });
+
+  it('OPTIONS responses include CORS and security headers', async () => {
+    const res = await SELF.fetch(`${BASE}/api/auth/login`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: BASE,
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeTruthy();
+    expect(res.headers.get('Strict-Transport-Security')).toContain('max-age=31536000');
+    expect(res.headers.get('X-Frame-Options')).toBe('DENY');
   });
 
   it('unknown API route returns JSON 404', async () => {

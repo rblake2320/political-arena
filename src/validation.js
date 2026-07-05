@@ -73,6 +73,11 @@ export const updateCandidateSchema = z.object({
   website_url: z.string().url().max(500).optional(),
 });
 
+export const addCandidateStaffSchema = z.object({
+  user_id: z.string().min(1),
+  role: z.enum(['primary', 'staff', 'viewer']).optional().default('staff'),
+});
+
 // ===== Ad Schemas =====
 
 export const createAdSchema = z.object({
@@ -114,16 +119,65 @@ export const createRebuttalSchema = z.object({
   media_url: z.string().url().max(1000).optional(),
 });
 
+export const createExternalAdResponseSchema = z.object({
+  race_id: z.string().min(1),
+  source_candidate_id: z.string().min(1),
+  responder_candidate_id: z.string().min(1),
+  source_title: z.string().min(1).max(200),
+  source_media_url: z.string().url().max(1000),
+  source_description: z.string().max(5000).optional(),
+  source_disclaimer_text: z.string().max(500).optional(),
+  response_text: z.string().min(1).max(5000),
+  response_media_url: z.string().url().max(1000).optional(),
+  disclaimer_text: z.string().min(1).max(500),
+});
+
 // ===== Challenge Schemas =====
+
+const reciteEvidenceSchema = z.object({
+  url: z.string().url().max(1000).refine(
+    (url) => /^https?:\/\//i.test(url),
+    { message: 'URL must use http or https' }
+  ),
+  title: z.string().min(1).max(240),
+  publisher: z.string().max(120).optional(),
+  source_type: z.enum(['official_record', 'public_document', 'court_record', 'research', 'news', 'campaign_material', 'other']).optional().default('other'),
+  stance: z.enum(['supports', 'refutes', 'context']).optional().default('supports'),
+  claim_text: z.string().max(500).optional(),
+  quote: z.string().max(1000).optional(),
+  source_published_at: z.string().max(50).optional(),
+  accessed_at: z.string().max(50).optional(),
+  archive_url: z.string().url().max(1000).optional(),
+  evidence_media_url: z.string().url().max(1000).optional(),
+});
 
 export const createChallengeSchema = z.object({
   race_id: z.string().min(1),
   target_candidate_id: z.string().min(1),
   challenger_candidate_id: z.string().min(1),
   challenge_text: z.string().min(10).max(2000),
+  claim_text: z.string().max(500).optional(),
+  dispute_summary: z.string().max(1000).optional(),
+  requested_response: z.string().max(500).optional(),
   challenge_type: z.enum(['open', 'debate_request', 'fact_check', 'policy_question']).optional().default('open'),
   media_url: z.string().url().max(1000).optional(),
   deadline_business_days: z.number().int().min(3).max(10).optional().default(3),
+  initial_recites: z.array(reciteEvidenceSchema).max(5).optional().default([]),
+}).superRefine((data, ctx) => {
+  if (data.challenge_type === 'fact_check' && data.initial_recites.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['initial_recites'],
+      message: 'Fact-check callouts require at least one recite',
+    });
+  }
+  if (data.challenge_type === 'fact_check' && (!data.claim_text || data.claim_text.trim().length < 10)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['claim_text'],
+      message: 'Fact-check callouts require a specific claim',
+    });
+  }
 });
 
 export const respondToChallengeSchema = z.object({
@@ -135,12 +189,72 @@ export const refuseChallengeSchema = z.object({
   refusal_reason: z.string().max(1000).optional(),
 });
 
+// ===== Public Statement / Trust Ledger Schemas =====
+
+export const createStatementSchema = z.object({
+  candidate_id: z.string().min(1),
+  race_id: z.string().min(1).optional(),
+  statement_text: z.string().min(5).max(5000),
+  question_text: z.string().max(2000).optional(),
+  response_text: z.string().max(5000).optional(),
+  context_text: z.string().max(5000).optional(),
+  topic: z.string().max(100).optional(),
+  source_type: z.enum(['youtube', 'video', 'audio', 'article', 'debate', 'social', 'press_release', 'other']).optional().default('other'),
+  source_url: z.string().url().max(1000),
+  source_title: z.string().max(240).optional(),
+  transcript_url: z.string().url().max(1000).optional(),
+  transcript_text: z.string().max(20000).optional(),
+  quote_start_seconds: z.number().int().min(0).max(86400).optional(),
+  quote_end_seconds: z.number().int().min(0).max(86400).optional(),
+  statement_at: z.string().max(50).optional(),
+}).superRefine((data, ctx) => {
+  if (data.quote_start_seconds !== undefined && data.quote_end_seconds !== undefined && data.quote_end_seconds < data.quote_start_seconds) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['quote_end_seconds'],
+      message: 'End timestamp must be after start timestamp',
+    });
+  }
+});
+
+export const reviewStatementSchema = z.object({
+  truth_status: z.enum(['unreviewed', 'supported', 'disputed', 'false', 'mixed', 'context_needed']).optional(),
+  answer_status: z.enum(['answered', 'partial', 'dodged', 'not_applicable', 'unclear']).optional(),
+  evasion_score: z.number().int().min(0).max(100).optional(),
+  confidence_score: z.number().int().min(0).max(100).optional(),
+  review_note: z.string().max(1000).optional(),
+});
+
 // ===== Reaction Schemas =====
 
 export const createReactionSchema = z.object({
   content_type: z.enum(['ad', 'rebuttal', 'challenge', 'challenge_response']),
   content_id: z.string().min(1),
   reaction_type: z.enum(['helpful', 'misleading', 'agree', 'disagree', 'important']),
+});
+
+export const createReciteSchema = z.object({
+  content_type: z.enum(['ad', 'rebuttal', 'challenge', 'challenge_response']),
+  content_id: z.string().min(1),
+  url: z.string().url().max(1000).refine(
+    (url) => /^https?:\/\//i.test(url),
+    { message: 'URL must use http or https' }
+  ),
+  title: z.string().min(1).max(240),
+  publisher: z.string().max(120).optional(),
+  source_type: z.enum(['official_record', 'public_document', 'court_record', 'research', 'news', 'campaign_material', 'other']).optional().default('other'),
+  stance: z.enum(['supports', 'refutes', 'context']),
+  claim_text: z.string().max(500).optional(),
+  quote: z.string().max(1000).optional(),
+  source_published_at: z.string().max(50).optional(),
+  accessed_at: z.string().max(50).optional(),
+  archive_url: z.string().url().max(1000).optional(),
+  evidence_media_url: z.string().url().max(1000).optional(),
+});
+
+export const reviewReciteSchema = z.object({
+  status: z.enum(['verified', 'rejected', 'pending']),
+  review_note: z.string().max(1000).optional(),
 });
 
 // ===== Notification Schemas =====
@@ -160,6 +274,28 @@ export const submitPrioritiesSchema = z.object({
     issue_category_id: z.string().min(1),
     priority_rank: z.number().int().min(1).max(5),
   })).min(1).max(5),
+}).superRefine((data, ctx) => {
+  const issueIds = new Set();
+  const ranks = new Set();
+  data.priorities.forEach((priority, index) => {
+    if (issueIds.has(priority.issue_category_id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['priorities', index, 'issue_category_id'],
+        message: 'Issue categories must be unique',
+      });
+    }
+    issueIds.add(priority.issue_category_id);
+
+    if (ranks.has(priority.priority_rank)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['priorities', index, 'priority_rank'],
+        message: 'Priority ranks must be unique',
+      });
+    }
+    ranks.add(priority.priority_rank);
+  });
 });
 
 // ===== Question Schemas =====
@@ -186,6 +322,23 @@ export const registerPressSchema = z.object({
 export const grantCreditsSchema = z.object({
   amount: z.number().int().min(1).max(1000),
   description: z.string().max(500).optional(),
+});
+
+// ===== Admin Survey Schemas =====
+
+export const createSurveySchema = z.object({
+  race_id: z.string().min(1).optional().nullable(),
+  title: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  target_audience: z.enum(['all', 'race_voters', 'party_specific']).optional().default('all'),
+  start_date: z.string().optional(),
+  end_date: z.string().optional(),
+  questions: z.array(z.object({
+    question_text: z.string().min(1).max(2000),
+    question_type: z.enum(['ranking', 'multiple_choice', 'scale', 'free_text']).optional().default('multiple_choice'),
+    options: z.array(z.string().max(500)).max(20).optional(),
+    is_required: z.boolean().optional(),
+  })).max(50).optional(),
 });
 
 // ===== User Profile Schemas =====

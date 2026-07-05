@@ -9,6 +9,7 @@ import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
 import { requireAuth, errorResponse, successResponse, parseBody, parsePagination, getClientIP } from '../middleware.js';
 import { validate, createChallengeSchema, respondToChallengeSchema, refuseChallengeSchema } from '../validation.js';
+import { computeFactScore, getRecitesForContent } from './recites.routes.js';
 
 const router = Router({ base: '/api/challenges' });
 
@@ -87,6 +88,61 @@ router.get('/races/:raceId', async (request, env) => {
 });
 
 // GET /api/challenges/:id — Public single challenge
+router.get('/:id/receipt', async (request, env) => {
+  const { id } = request.params;
+  const challenge = await env.ARENA_DB.prepare(
+    `SELECT ch.*,
+      cc.name as challenger_name, cc.party as challenger_party,
+      tc.name as target_name, tc.party as target_party,
+      r.name as race_name, r.office as race_office, r.state as race_state, r.district as race_district
+     FROM challenges ch
+     JOIN candidates cc ON ch.challenger_candidate_id = cc.id
+     JOIN candidates tc ON ch.target_candidate_id = tc.id
+     JOIN races r ON ch.race_id = r.id
+     WHERE (ch.id = ? OR ch.public_receipt_slug = ?) AND ch.is_visible = 1`
+  ).bind(id, id).first();
+
+  if (!challenge) return errorResponse('Challenge receipt not found', 404);
+
+  if (challenge.status === 'open' && challenge.response_deadline < new Date().toISOString()) {
+    challenge.status = 'expired';
+    challenge.expired_at = new Date().toISOString();
+    await env.ARENA_DB.prepare(
+      `UPDATE challenges SET status = 'expired', expired_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'open'`
+    ).bind(challenge.id).run();
+  }
+
+  const [response, challengeRecites, timelineResult] = await Promise.all([
+    env.ARENA_DB.prepare(
+      `SELECT cr.*, c.name as candidate_name, c.party as candidate_party
+       FROM challenge_responses cr
+       JOIN candidates c ON cr.candidate_id = c.id
+       WHERE cr.challenge_id = ?`
+    ).bind(challenge.id).first(),
+    getRecitesForContent(env.ARENA_DB, 'challenge', challenge.id, false),
+    env.ARENA_DB.prepare(
+      `SELECT action, actor_id, before_state, after_state, created_at
+       FROM audit_log
+       WHERE entity_type = 'challenge' AND entity_id = ?
+       ORDER BY created_at ASC`
+    ).bind(challenge.id).all(),
+  ]);
+
+  const responseRecites = response
+    ? await getRecitesForContent(env.ARENA_DB, 'challenge_response', response.id, false)
+    : [];
+
+  return successResponse({
+    challenge,
+    response: response || null,
+    recites: challengeRecites,
+    response_recites: responseRecites,
+    fact_score: computeFactScore(challengeRecites),
+    response_fact_score: computeFactScore(responseRecites),
+    timeline: timelineResult.results || [],
+  });
+});
+
 router.get('/:id', async (request, env) => {
   const { id } = request.params;
   const challenge = await env.ARENA_DB.prepare(
@@ -147,6 +203,26 @@ router.post('/', async (request, env, ctx) => {
   if (challenger.race_id !== data.race_id || target.race_id !== data.race_id) return errorResponse('Both candidates must be in the specified race');
   if (data.challenger_candidate_id === data.target_candidate_id) return errorResponse('Cannot challenge yourself');
 
+  if (data.challenge_type === 'fact_check') {
+    const duplicate = await env.ARENA_DB.prepare(
+      `SELECT id FROM challenges
+       WHERE race_id = ?
+         AND challenger_candidate_id = ?
+         AND target_candidate_id = ?
+         AND challenge_type = 'fact_check'
+         AND status != 'withdrawn'
+         AND created_at > datetime('now', '-30 days')
+         AND lower(COALESCE(claim_text, challenge_text)) = lower(?)
+       LIMIT 1`
+    ).bind(
+      data.race_id,
+      data.challenger_candidate_id,
+      data.target_candidate_id,
+      data.claim_text || data.challenge_text,
+    ).first();
+    if (duplicate) return errorResponse('A matching fact-check callout is already active for this candidate pair', 409);
+  }
+
   // Cooldown check (24h between same challenger→target pair)
   const cooldownHours = parseInt(env.CHALLENGE_COOLDOWN_HOURS || '24');
   const cooldown = await env.ARENA_DB.prepare(
@@ -194,13 +270,33 @@ router.post('/', async (request, env, ctx) => {
   const cooldownUntil = new Date(Date.now() + cooldownHours * 60 * 60 * 1000).toISOString();
 
   const challengeId = generateId('chal');
+  const receiptSlug = challengeId;
   const cooldownId = generateId('cd');
   const creditTxId = generateId('ctx');
+  const initialRecites = data.initial_recites || [];
 
-  await env.ARENA_DB.batch([
+  const challengeBatch = [
     env.ARENA_DB.prepare(
-      `INSERT INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, media_url, challenge_type, deadline_business_days, response_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(challengeId, data.race_id, data.challenger_candidate_id, data.target_candidate_id, request.user.id, data.challenge_text, data.media_url || null, data.challenge_type, bizDays, deadline),
+      `INSERT INTO challenges
+       (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, claim_text,
+        dispute_summary, requested_response, media_url, challenge_type, deadline_business_days, response_deadline, public_receipt_slug)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      challengeId,
+      data.race_id,
+      data.challenger_candidate_id,
+      data.target_candidate_id,
+      request.user.id,
+      data.challenge_text,
+      data.claim_text || null,
+      data.dispute_summary || null,
+      data.requested_response || null,
+      data.media_url || null,
+      data.challenge_type,
+      bizDays,
+      deadline,
+      receiptSlug,
+    ),
     env.ARENA_DB.prepare(
       `INSERT INTO challenge_cooldowns (id, challenger_candidate_id, target_candidate_id, race_id, cooldown_until) VALUES (?, ?, ?, ?, ?)`
     ).bind(cooldownId, data.challenger_candidate_id, data.target_candidate_id, data.race_id, cooldownUntil),
@@ -208,13 +304,62 @@ router.post('/', async (request, env, ctx) => {
     env.ARENA_DB.prepare(
       `INSERT INTO credit_transactions (id, candidate_id, amount, transaction_type, description, reference_id) VALUES (?, ?, -1, 'deduction', 'Challenge issued', ?)`
     ).bind(creditTxId, data.challenger_candidate_id, challengeId),
-  ]);
+  ];
+
+  for (const recite of initialRecites) {
+    challengeBatch.push(
+      env.ARENA_DB.prepare(
+        `INSERT INTO recites
+         (id, content_type, content_id, user_id, url, title, publisher, source_type, stance, claim_text, quote,
+          source_published_at, accessed_at, archive_url, evidence_media_url)
+         VALUES (?, 'challenge', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        generateId('rec'),
+        challengeId,
+        request.user.id,
+        recite.url,
+        recite.title,
+        recite.publisher || null,
+        recite.source_type,
+        recite.stance,
+        recite.claim_text || data.claim_text || null,
+        recite.quote || null,
+        recite.source_published_at || null,
+        recite.accessed_at || new Date().toISOString(),
+        recite.archive_url || null,
+        recite.evidence_media_url || null,
+      )
+    );
+  }
+
+  await env.ARENA_DB.batch(challengeBatch);
+
+  const targetStaff = await env.ARENA_DB.prepare(
+    `SELECT DISTINCT user_id FROM candidate_staff_links WHERE candidate_id = ? AND is_active = 1`
+  ).bind(data.target_candidate_id).all();
+
+  const targetStaffIds = (targetStaff.results || []).map(row => row.user_id).filter(Boolean);
+  if (targetStaffIds.length > 0) {
+    const notifBody = data.claim_text || data.challenge_text;
+    const directNotifications = targetStaffIds.map(userId => env.ARENA_DB.prepare(
+      `INSERT INTO notifications (id, user_id, notification_type, title, body, link_url)
+       VALUES (?, ?, 'challenge_tagged', ?, ?, ?)`
+    ).bind(
+      generateId('notif'),
+      userId,
+      'Your campaign was tagged in a public callout',
+      notifBody.length > 180 ? `${notifBody.slice(0, 180)}...` : notifBody,
+      `/challenge/${receiptSlug}`,
+    ));
+    await env.ARENA_DB.batch(directNotifications);
+  }
 
   // Create notifications for subscribers
   const subs = await env.ARENA_DB.prepare(
     `SELECT * FROM notification_subscriptions
      WHERE ((subscription_type = 'race' AND target_id = ?) OR (subscription_type = 'candidate' AND target_id = ?))
-     AND is_active = 1`
+     AND is_active = 1
+     LIMIT 500`
   ).bind(data.race_id, data.target_candidate_id).all();
 
   if (subs.results && subs.results.length > 0) {
@@ -223,7 +368,7 @@ router.post('/', async (request, env, ctx) => {
       const bodyText = data.challenge_text.length > 100 ? data.challenge_text.substring(0, 100) + '...' : data.challenge_text;
       return env.ARENA_DB.prepare(
         `INSERT INTO notifications (id, user_id, subscription_id, notification_type, title, body, link_url) VALUES (?, ?, ?, 'challenge_issued', ?, ?, ?)`
-      ).bind(notifId, sub.user_id, sub.id, 'New Challenge Issued', bodyText, `/race/${data.race_id}`);
+      ).bind(notifId, sub.user_id, sub.id, 'New Challenge Issued', bodyText, `/challenge/${receiptSlug}`);
     });
     // Chunk into batches of 50 so large subscriber lists are never dropped
     for (let i = 0; i < notifBatch.length; i += 50) {
@@ -236,16 +381,18 @@ router.post('/', async (request, env, ctx) => {
     action: 'challenge.issue',
     entityType: 'challenge',
     entityId: challengeId,
-    afterState: { challenger: data.challenger_candidate_id, target: data.target_candidate_id, deadline },
+    afterState: { challenger: data.challenger_candidate_id, target: data.target_candidate_id, deadline, initial_recites: initialRecites.length },
     ipAddress: getClientIP(request),
   });
 
   return successResponse({
     id: challengeId,
     status: 'open',
+    public_receipt_slug: receiptSlug,
     response_deadline: deadline,
     deadline_business_days: bizDays,
     media_url: data.media_url || null,
+    initial_recites: initialRecites.length,
     credits_remaining: updatedCandidate?.credit_balance ?? 0,
     rate_limit: {
       daily: { used: dailyCount.cnt + 1, max: maxDaily },
@@ -315,7 +462,11 @@ router.post('/:id/refuse', async (request, env, ctx) => {
 
   const { id } = request.params;
   const body = await parseBody(request);
-  const refusalReason = body?.refusal_reason || null;
+  if (!body) return errorResponse('Invalid request body');
+
+  const { valid, errors, data } = validate(refuseChallengeSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+  const refusalReason = data.refusal_reason || null;
 
   const challenge = await env.ARENA_DB.prepare(`SELECT * FROM challenges WHERE id = ?`).bind(id).first();
   if (!challenge) return errorResponse('Challenge not found', 404);

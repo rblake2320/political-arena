@@ -7,7 +7,7 @@
 import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { requireAuth, requireVerifiedVoter, requireRole, errorResponse, successResponse, parseBody, parsePagination } from '../middleware.js';
-import { validate, submitPrioritiesSchema } from '../validation.js';
+import { validate, submitPrioritiesSchema, createSurveySchema } from '../validation.js';
 
 const router = Router({ base: '/api/surveys' });
 
@@ -29,6 +29,21 @@ router.post('/my-priorities', async (request, env) => {
   if (!valid) return errorResponse(errors.join('; '));
 
   const raceId = data.race_id || null;
+  if (raceId) {
+    const race = await env.ARENA_DB.prepare(`SELECT id FROM races WHERE id = ?`).bind(raceId).first();
+    if (!race) return errorResponse('Race not found', 404);
+  }
+
+  const issueIds = data.priorities.map(p => p.issue_category_id);
+  const placeholders = issueIds.map(() => '?').join(',');
+  const categories = await env.ARENA_DB.prepare(
+    `SELECT id FROM issue_categories WHERE id IN (${placeholders}) AND is_active = 1`
+  ).bind(...issueIds).all();
+  const validIssueIds = new Set((categories.results || []).map(c => c.id));
+  const missingIssueIds = issueIds.filter(id => !validIssueIds.has(id));
+  if (missingIssueIds.length > 0) {
+    return errorResponse(`Unknown issue categories: ${missingIssueIds.join(', ')}`, 400);
+  }
 
   // Delete existing priorities for this user+race combo, then insert new
   await env.ARENA_DB.prepare(
@@ -177,16 +192,24 @@ router.post('/', async (request, env) => {
   if (authError) return authError;
 
   const body = await parseBody(request);
-  if (!body || !body.title) return errorResponse('Title required');
+  if (!body) return errorResponse('Invalid request body');
+
+  const { valid, errors, data } = validate(createSurveySchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+
+  if (data.race_id) {
+    const race = await env.ARENA_DB.prepare(`SELECT id FROM races WHERE id = ?`).bind(data.race_id).first();
+    if (!race) return errorResponse('Race not found', 404);
+  }
 
   const surveyId = generateId('srv');
   await env.ARENA_DB.prepare(
     `INSERT INTO surveys (id, race_id, title, description, created_by, target_audience, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(surveyId, body.race_id || null, body.title, body.description || null, request.user.id, body.target_audience || 'all', body.start_date || null, body.end_date || null).run();
+  ).bind(surveyId, data.race_id || null, data.title, data.description || null, request.user.id, data.target_audience, data.start_date || null, data.end_date || null).run();
 
   // Create questions if provided
-  if (body.questions && Array.isArray(body.questions)) {
-    const questionInserts = body.questions.map((q, i) => {
+  if (data.questions && Array.isArray(data.questions)) {
+    const questionInserts = data.questions.map((q, i) => {
       const qId = generateId('sq');
       return env.ARENA_DB.prepare(
         `INSERT INTO survey_questions (id, survey_id, question_text, question_type, options, display_order, is_required) VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -234,6 +257,9 @@ router.post('/:id/respond', async (request, env) => {
   const body = await parseBody(request);
   if (!body || !body.responses || !Array.isArray(body.responses)) {
     return errorResponse('responses array required');
+  }
+  if (body.responses.length > 100) {
+    return errorResponse('responses array cannot exceed 100 entries', 400);
   }
 
   const inserts = body.responses.map(r => {

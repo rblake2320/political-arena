@@ -70,6 +70,14 @@ export async function login(data: { email: string; password: string }) {
   return unwrap<{ user: any; token: string }>(await api.post('/auth/login', data));
 }
 
+export async function forgotPassword(data: { email: string }) {
+  return unwrap<{ message: string; dev_reset_token?: string; reset_url?: string }>(await api.post('/auth/forgot-password', data));
+}
+
+export async function resetPassword(data: { token: string; password: string }) {
+  return unwrap<{ message: string }>(await api.post('/auth/reset-password', data));
+}
+
 export async function logout() {
   try { await api.post('/auth/logout'); } catch {}
   clearStoredToken();
@@ -102,6 +110,10 @@ export async function getCandidates(raceId?: string) {
   return { candidates: [] };
 }
 
+export async function getCandidatePublicProfile(candidateId: string) {
+  return unwrap<any>(await api.get(`/candidates/${candidateId}/public-profile`));
+}
+
 // ---- Ads ----
 export async function createAd(data: {
   race_id: string; candidate_id: string; title: string; ad_content_text: string;
@@ -118,11 +130,40 @@ export async function createRebuttal(data: {
   return unwrap<any>(await api.post('/ads/rebuttals', data));
 }
 
+export async function createExternalAdResponse(data: {
+  race_id: string;
+  source_candidate_id: string;
+  responder_candidate_id: string;
+  source_title: string;
+  source_media_url: string;
+  source_description?: string;
+  source_disclaimer_text?: string;
+  response_text: string;
+  response_media_url?: string;
+  disclaimer_text: string;
+}) {
+  return unwrap<{ ad_id: string; rebuttal_id: string; status: string }>(await api.post('/ads/external-response', data));
+}
+
 // ---- Challenges ----
 export async function createChallenge(data: {
   race_id: string; challenger_candidate_id: string; target_candidate_id: string;
   challenge_text: string; challenge_type?: string;
+  claim_text?: string; dispute_summary?: string; requested_response?: string;
   media_url?: string; deadline_business_days?: number;
+  initial_recites?: {
+    url: string;
+    title: string;
+    publisher?: string;
+    source_type?: ReciteSourceType;
+    stance?: ReciteStance;
+    claim_text?: string;
+    quote?: string;
+    source_published_at?: string;
+    accessed_at?: string;
+    archive_url?: string;
+    evidence_media_url?: string;
+  }[];
 }) {
   return unwrap<any>(await api.post('/challenges', data));
 }
@@ -134,7 +175,7 @@ export async function respondToChallenge(challengeId: string, data: { response_t
 // ---- Media Uploads ----
 export async function uploadMedia(file: File, candidateId?: string) {
   // First get a presigned key
-  const presign = unwrap<{ key: string; upload_url: string; public_url: string; file_id: string }>(
+  const presign = unwrap<{ key: string; upload_url: string; public_url: string; file_id: string; content_type: string; media_kind: string }>(
     await api.post('/uploads/presign', { filename: file.name, content_type: file.type, candidate_id: candidateId })
   );
   // Then upload via direct endpoint
@@ -142,7 +183,7 @@ export async function uploadMedia(file: File, candidateId?: string) {
   uploadForm.append('file', file);
   uploadForm.append('key', presign.key);
   if (candidateId) uploadForm.append('candidate_id', candidateId);
-  const result = unwrap<{ key: string; url: string; type: string; size: number }>(
+  const result = unwrap<{ key: string; url: string; type: string; media_kind: string; size: number }>(
     await api.post(presign.upload_url, uploadForm)
   );
   return result;
@@ -162,6 +203,80 @@ export async function getMyReactions(contentType?: string, contentId?: string) {
   if (contentType) params.content_type = contentType;
   if (contentId) params.content_id = contentId;
   return unwrap<any>(await api.get('/reactions/mine', { params }));
+}
+
+// ---- Recites / Fact Checks ----
+export type ReciteContentType = 'ad' | 'rebuttal' | 'challenge' | 'challenge_response';
+export type ReciteSourceType = 'official_record' | 'public_document' | 'court_record' | 'research' | 'news' | 'campaign_material' | 'other';
+export type ReciteStance = 'supports' | 'refutes' | 'context';
+
+export async function getRecites(contentType: ReciteContentType, contentId: string) {
+  return unwrap<any>(await api.get('/recites', { params: { content_type: contentType, content_id: contentId } }));
+}
+
+export async function addRecite(data: {
+  content_type: ReciteContentType;
+  content_id: string;
+  url: string;
+  title: string;
+  publisher?: string;
+  source_type?: ReciteSourceType;
+  stance: ReciteStance;
+  claim_text?: string;
+  quote?: string;
+  source_published_at?: string;
+  accessed_at?: string;
+  archive_url?: string;
+  evidence_media_url?: string;
+}) {
+  return unwrap<any>(await api.post('/recites', data));
+}
+
+export async function reviewRecite(id: string, status: 'pending' | 'verified' | 'rejected', review_note?: string) {
+  return unwrap<any>(await api.put(`/recites/${id}/review`, { status, review_note }));
+}
+
+export async function getPendingRecites(params?: { status?: 'pending' | 'verified' | 'rejected'; page?: number }) {
+  return unwrap<any>(await api.get('/recites/pending', { params }));
+}
+
+export async function getChallengeReceipt(id: string) {
+  return unwrap<any>(await api.get(`/challenges/${id}/receipt`));
+}
+
+// ---- Public Statement Ledger ----
+export async function getCandidateStatements(candidateId: string, params?: { topic?: string; page?: number }) {
+  return unwrap<any>(await api.get(`/statements/candidates/${candidateId}`, { params }));
+}
+
+export async function createStatement(data: {
+  candidate_id: string;
+  race_id?: string;
+  statement_text: string;
+  question_text?: string;
+  response_text?: string;
+  context_text?: string;
+  topic?: string;
+  source_type?: 'youtube' | 'video' | 'audio' | 'article' | 'debate' | 'social' | 'press_release' | 'other';
+  source_url: string;
+  source_title?: string;
+  transcript_url?: string;
+  transcript_text?: string;
+  quote_start_seconds?: number;
+  quote_end_seconds?: number;
+  statement_at?: string;
+}) {
+  return unwrap<any>(await api.post('/statements', data));
+}
+
+export async function reviewStatement(id: string, data: {
+  truth_status?: 'unreviewed' | 'supported' | 'disputed' | 'false' | 'mixed' | 'context_needed';
+  answer_status?: 'answered' | 'partial' | 'dodged' | 'not_applicable' | 'unclear';
+  evasion_score?: number;
+  confidence_score?: number;
+  review_note?: string;
+}) {
+  return unwrap<any>(await api.put(`/statements/${id}/review`, data));
 }
 
 // ---- Surveys / What Matters ----

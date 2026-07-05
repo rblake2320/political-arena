@@ -7,9 +7,13 @@ import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
 import { requireAuth, requireRole, errorResponse, successResponse, parseBody, getClientIP } from '../middleware.js';
-import { validate, createCandidateSchema, updateCandidateSchema } from '../validation.js';
+import { validate, createCandidateSchema, updateCandidateSchema, addCandidateStaffSchema } from '../validation.js';
 
 const router = Router({ base: '/api/candidates' });
+
+function clampScore(value) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
 
 // GET /api/candidates/races/:raceId — Public
 router.get('/races/:raceId', async (request, env) => {
@@ -24,6 +28,168 @@ router.get('/races/:raceId', async (request, env) => {
   }));
 
   return successResponse({ candidates });
+});
+
+// GET /api/candidates/:id/public-profile — Public trust ledger profile
+router.get('/:id/public-profile', async (request, env) => {
+  const { id } = request.params;
+  const candidate = await env.ARENA_DB.prepare(
+    `SELECT c.*, r.name as race_name, r.state as race_state, r.office as race_office, r.district as race_district
+     FROM candidates c JOIN races r ON c.race_id = r.id
+     WHERE c.id = ? AND c.is_active = 1`
+  ).bind(id).first();
+
+  if (!candidate) return errorResponse('Candidate not found', 404);
+  candidate.issue_positions = candidate.issue_positions ? JSON.parse(candidate.issue_positions) : [];
+
+  const [
+    targeted,
+    issued,
+    ads,
+    rebuttals,
+    statements,
+    verifiedRecites,
+    recentChallenges,
+    recentAds,
+    recentStatements,
+  ] = await Promise.all([
+    env.ARENA_DB.prepare(
+      `SELECT
+         COUNT(*) as total,
+         SUM(CASE WHEN status = 'responded' THEN 1 ELSE 0 END) as responded,
+         SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) as expired,
+         SUM(CASE WHEN status = 'refused' THEN 1 ELSE 0 END) as refused,
+         SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open
+       FROM challenges WHERE target_candidate_id = ? AND is_visible = 1`
+    ).bind(id).first(),
+    env.ARENA_DB.prepare(
+      `SELECT COUNT(*) as total FROM challenges WHERE challenger_candidate_id = ? AND is_visible = 1`
+    ).bind(id).first(),
+    env.ARENA_DB.prepare(
+      `SELECT COUNT(*) as total FROM ad_flights WHERE candidate_id = ? AND status IN ('approved','active','completed')`
+    ).bind(id).first(),
+    env.ARENA_DB.prepare(
+      `SELECT COUNT(*) as total FROM rebuttal_ads WHERE candidate_id = ? AND status IN ('approved','active','completed')`
+    ).bind(id).first(),
+    env.ARENA_DB.prepare(
+      `SELECT
+         COUNT(*) as total,
+         AVG(evasion_score) as avg_evasion_score,
+         SUM(CASE WHEN answer_status = 'dodged' THEN 1 ELSE 0 END) as dodged,
+         SUM(CASE WHEN truth_status IN ('disputed','false') THEN 1 ELSE 0 END) as disputed_or_false,
+         SUM(CASE WHEN truth_status = 'supported' THEN 1 ELSE 0 END) as supported
+       FROM public_statements WHERE candidate_id = ? AND is_public = 1`
+    ).bind(id).first(),
+    env.ARENA_DB.prepare(
+      `SELECT COUNT(*) as total
+       FROM recites
+       WHERE status = 'verified'
+         AND (
+           (content_type = 'challenge' AND content_id IN (
+             SELECT id FROM challenges WHERE challenger_candidate_id = ? OR target_candidate_id = ?
+           ))
+           OR (content_type = 'challenge_response' AND content_id IN (
+             SELECT cr.id FROM challenge_responses cr
+             JOIN challenges ch ON cr.challenge_id = ch.id
+             WHERE cr.candidate_id = ? OR ch.challenger_candidate_id = ? OR ch.target_candidate_id = ?
+           ))
+           OR (content_type = 'ad' AND content_id IN (
+             SELECT id FROM ad_flights WHERE candidate_id = ?
+           ))
+           OR (content_type = 'rebuttal' AND content_id IN (
+             SELECT id FROM rebuttal_ads WHERE candidate_id = ?
+           ))
+         )`
+    ).bind(id, id, id, id, id, id, id).first(),
+    env.ARENA_DB.prepare(
+      `SELECT id, challenge_text, claim_text, challenge_type, status, response_deadline, public_receipt_slug, created_at
+       FROM challenges
+       WHERE (challenger_candidate_id = ? OR target_candidate_id = ?) AND is_visible = 1
+       ORDER BY created_at DESC LIMIT 12`
+    ).bind(id, id).all(),
+    env.ARENA_DB.prepare(
+      `SELECT id, title, status, source_type, created_at
+       FROM ad_flights
+       WHERE candidate_id = ? AND status IN ('approved','active','completed')
+       ORDER BY created_at DESC LIMIT 8`
+    ).bind(id).all(),
+    env.ARENA_DB.prepare(
+      `SELECT id, statement_text, topic, source_type, source_url, source_title, quote_start_seconds,
+              truth_status, answer_status, evasion_score, confidence_score, statement_at, created_at
+       FROM public_statements
+       WHERE candidate_id = ? AND is_public = 1
+       ORDER BY COALESCE(statement_at, created_at) DESC LIMIT 10`
+    ).bind(id).all(),
+  ]);
+
+  const targetedTotal = targeted.total || 0;
+  const responseRate = targetedTotal > 0 ? (targeted.responded || 0) / targetedTotal : 1;
+  const expiredRate = targetedTotal > 0 ? (targeted.expired || 0) / targetedTotal : 0;
+  const refusedRate = targetedTotal > 0 ? (targeted.refused || 0) / targetedTotal : 0;
+  const avgEvasion = Number.isFinite(statements.avg_evasion_score) ? Number(statements.avg_evasion_score) : 0;
+  const trustScore = clampScore(
+    55
+    + (responseRate * 20)
+    - (expiredRate * 25)
+    - (refusedRate * 10)
+    - (avgEvasion * 0.18)
+    - ((statements.disputed_or_false || 0) * 3)
+    + Math.min(verifiedRecites.total || 0, 10) * 1.5
+    + Math.min(statements.supported || 0, 5) * 2
+  );
+
+  const timeline = [
+    ...(recentChallenges.results || []).map(item => ({
+      type: 'challenge',
+      id: item.id,
+      title: item.claim_text || item.challenge_text,
+      status: item.status,
+      created_at: item.created_at,
+      href: `/challenge/${item.public_receipt_slug || item.id}`,
+    })),
+    ...(recentAds.results || []).map(item => ({
+      type: item.source_type === 'external' ? 'outside_ad_response' : 'ad',
+      id: item.id,
+      title: item.title || 'Campaign ad',
+      status: item.status,
+      created_at: item.created_at,
+      href: `/race/${candidate.race_id}`,
+    })),
+    ...(recentStatements.results || []).map(item => ({
+      type: 'statement',
+      id: item.id,
+      title: item.statement_text,
+      status: item.truth_status,
+      created_at: item.statement_at || item.created_at,
+      href: item.source_url,
+    })),
+  ].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).slice(0, 20);
+
+  return successResponse({
+    candidate,
+    trust: {
+      score: trustScore,
+      response_rate: Number((responseRate * 100).toFixed(1)),
+      avg_evasion_score: Math.round(avgEvasion || 0),
+      verified_recites: verifiedRecites.total || 0,
+    },
+    stats: {
+      challenges_targeted: targetedTotal,
+      challenges_responded: targeted.responded || 0,
+      challenges_expired: targeted.expired || 0,
+      challenges_refused: targeted.refused || 0,
+      challenges_open: targeted.open || 0,
+      challenges_issued: issued.total || 0,
+      ads: ads.total || 0,
+      rebuttals: rebuttals.total || 0,
+      statements: statements.total || 0,
+      statements_dodged: statements.dodged || 0,
+      statements_disputed_or_false: statements.disputed_or_false || 0,
+      statements_supported: statements.supported || 0,
+    },
+    recent_statements: recentStatements.results || [],
+    timeline,
+  });
 });
 
 // GET /api/candidates/:id — Public
@@ -195,6 +361,11 @@ router.post('/:id/staff', async (request, env, ctx) => {
 
   const { id } = request.params;
 
+  const candidate = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidates WHERE id = ? AND is_active = 1`
+  ).bind(id).first();
+  if (!candidate) return errorResponse('Candidate not found', 404);
+
   // Only primary staff or admin can add staff
   const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
   if (!isAdmin) {
@@ -205,17 +376,23 @@ router.post('/:id/staff', async (request, env, ctx) => {
   }
 
   const body = await parseBody(request);
-  if (!body || !body.user_id) return errorResponse('user_id required');
+  if (!body) return errorResponse('Invalid request body');
+
+  const { valid, errors, data } = validate(addCandidateStaffSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+  if (data.role === 'primary' && !isAdmin) {
+    return errorResponse('Only admins can grant primary staff role', 403);
+  }
 
   // Check target user exists
-  const targetUser = await env.ARENA_DB.prepare(`SELECT id FROM users WHERE id = ? AND is_active = 1`).bind(body.user_id).first();
+  const targetUser = await env.ARENA_DB.prepare(`SELECT id FROM users WHERE id = ? AND is_active = 1`).bind(data.user_id).first();
   if (!targetUser) return errorResponse('User not found', 404);
 
   const linkId = generateId('sl');
   try {
     await env.ARENA_DB.prepare(
       `INSERT INTO candidate_staff_links (id, user_id, candidate_id, role, granted_by) VALUES (?, ?, ?, ?, ?)`
-    ).bind(linkId, body.user_id, id, body.role || 'staff', request.user.id).run();
+    ).bind(linkId, data.user_id, id, data.role, request.user.id).run();
   } catch (e) {
     if (e.message?.includes('UNIQUE')) return errorResponse('User is already staff for this candidate', 409);
     throw e;
@@ -226,11 +403,11 @@ router.post('/:id/staff', async (request, env, ctx) => {
     action: 'candidate.add_staff',
     entityType: 'candidate',
     entityId: id,
-    afterState: { user_id: body.user_id, role: body.role || 'staff' },
+    afterState: { user_id: data.user_id, role: data.role },
     ipAddress: getClientIP(request),
   });
 
-  return successResponse({ id: linkId, user_id: body.user_id, candidate_id: id, role: body.role || 'staff' });
+  return successResponse({ id: linkId, user_id: data.user_id, candidate_id: id, role: data.role });
 });
 
 export default router;

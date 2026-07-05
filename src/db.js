@@ -1,13 +1,81 @@
 /**
  * Arena — Database Layer
  * All 25 tables + indexes created upfront via CREATE TABLE IF NOT EXISTS
- * Pattern: AIHangout dbInitialized guard
+ * Pattern: one-time schema bootstrap per D1 binding
  */
 
-let dbInitialized = false;
+const initializedDbs = new WeakSet();
+
+export async function runRuntimeMigrations(db) {
+  // Runtime migrations for databases created by older versions of the worker.
+  const userColumnsResult = await db.prepare(`PRAGMA table_info(users)`).all();
+  const userColumns = new Set((userColumnsResult.results || []).map(c => c.name));
+  const userColumnMigrations = [];
+  if (!userColumns.has('password_reset_token_hash')) {
+    userColumnMigrations.push(db.prepare(`ALTER TABLE users ADD COLUMN password_reset_token_hash TEXT`));
+  }
+  if (!userColumns.has('password_reset_expires_at')) {
+    userColumnMigrations.push(db.prepare(`ALTER TABLE users ADD COLUMN password_reset_expires_at TEXT`));
+  }
+  if (userColumnMigrations.length > 0) await db.batch(userColumnMigrations);
+
+  const adColumnsResult = await db.prepare(`PRAGMA table_info(ad_flights)`).all();
+  const adColumns = new Set((adColumnsResult.results || []).map(c => c.name));
+  const adColumnMigrations = [];
+  if (!adColumns.has('source_type')) {
+    adColumnMigrations.push(db.prepare(`ALTER TABLE ad_flights ADD COLUMN source_type TEXT NOT NULL DEFAULT 'platform'`));
+  }
+  if (!adColumns.has('source_url')) {
+    adColumnMigrations.push(db.prepare(`ALTER TABLE ad_flights ADD COLUMN source_url TEXT`));
+  }
+  if (!adColumns.has('source_label')) {
+    adColumnMigrations.push(db.prepare(`ALTER TABLE ad_flights ADD COLUMN source_label TEXT`));
+  }
+  if (!adColumns.has('posted_for_rebuttal_by')) {
+    adColumnMigrations.push(db.prepare(`ALTER TABLE ad_flights ADD COLUMN posted_for_rebuttal_by TEXT REFERENCES candidates(id)`));
+  }
+  if (adColumnMigrations.length > 0) await db.batch(adColumnMigrations);
+
+  const challengeColumnsResult = await db.prepare(`PRAGMA table_info(challenges)`).all();
+  const challengeColumns = new Set((challengeColumnsResult.results || []).map(c => c.name));
+  const challengeColumnMigrations = [];
+  if (!challengeColumns.has('claim_text')) {
+    challengeColumnMigrations.push(db.prepare(`ALTER TABLE challenges ADD COLUMN claim_text TEXT`));
+  }
+  if (!challengeColumns.has('dispute_summary')) {
+    challengeColumnMigrations.push(db.prepare(`ALTER TABLE challenges ADD COLUMN dispute_summary TEXT`));
+  }
+  if (!challengeColumns.has('requested_response')) {
+    challengeColumnMigrations.push(db.prepare(`ALTER TABLE challenges ADD COLUMN requested_response TEXT`));
+  }
+  if (!challengeColumns.has('public_receipt_slug')) {
+    challengeColumnMigrations.push(db.prepare(`ALTER TABLE challenges ADD COLUMN public_receipt_slug TEXT`));
+  }
+  if (challengeColumnMigrations.length > 0) await db.batch(challengeColumnMigrations);
+
+  const reciteColumnsResult = await db.prepare(`PRAGMA table_info(recites)`).all();
+  const reciteColumns = new Set((reciteColumnsResult.results || []).map(c => c.name));
+  const reciteColumnMigrations = [];
+  if (!reciteColumns.has('source_published_at')) {
+    reciteColumnMigrations.push(db.prepare(`ALTER TABLE recites ADD COLUMN source_published_at TEXT`));
+  }
+  if (!reciteColumns.has('accessed_at')) {
+    reciteColumnMigrations.push(db.prepare(`ALTER TABLE recites ADD COLUMN accessed_at TEXT`));
+  }
+  if (!reciteColumns.has('archive_url')) {
+    reciteColumnMigrations.push(db.prepare(`ALTER TABLE recites ADD COLUMN archive_url TEXT`));
+  }
+  if (!reciteColumns.has('evidence_media_url')) {
+    reciteColumnMigrations.push(db.prepare(`ALTER TABLE recites ADD COLUMN evidence_media_url TEXT`));
+  }
+  if (!reciteColumns.has('review_note')) {
+    reciteColumnMigrations.push(db.prepare(`ALTER TABLE recites ADD COLUMN review_note TEXT`));
+  }
+  if (reciteColumnMigrations.length > 0) await db.batch(reciteColumnMigrations);
+}
 
 export async function initDatabase(db) {
-  if (dbInitialized) return;
+  if (initializedDbs.has(db)) return;
 
   await db.batch([
     // ========== CORE TABLES ==========
@@ -20,6 +88,8 @@ export async function initDatabase(db) {
       role TEXT NOT NULL DEFAULT 'voter' CHECK(role IN ('voter','candidate_staff','moderator','admin','super_admin')),
       email_verified INTEGER NOT NULL DEFAULT 0,
       verification_token TEXT,
+      password_reset_token_hash TEXT,
+      password_reset_expires_at TEXT,
       verification_status TEXT NOT NULL DEFAULT 'unverified' CHECK(verification_status IN ('unverified','pending','verified','rejected')),
       party_affiliation TEXT,
       jurisdiction_state TEXT,
@@ -98,6 +168,10 @@ export async function initDatabase(db) {
       media_type TEXT DEFAULT 'text' CHECK(media_type IN ('image','video','text')),
       ad_content_text TEXT,
       disclaimer_text TEXT NOT NULL,
+      source_type TEXT NOT NULL DEFAULT 'platform' CHECK(source_type IN ('platform','external')),
+      source_url TEXT,
+      source_label TEXT,
+      posted_for_rebuttal_by TEXT REFERENCES candidates(id),
       budget_cents INTEGER DEFAULT 0,
       start_date TEXT,
       end_date TEXT,
@@ -143,6 +217,9 @@ export async function initDatabase(db) {
       target_candidate_id TEXT NOT NULL REFERENCES candidates(id),
       created_by TEXT NOT NULL REFERENCES users(id),
       challenge_text TEXT NOT NULL,
+      claim_text TEXT,
+      dispute_summary TEXT,
+      requested_response TEXT,
       media_url TEXT,
       challenge_type TEXT NOT NULL DEFAULT 'open' CHECK(challenge_type IN ('open','debate_request','fact_check','policy_question')),
       status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','responded','expired','refused','withdrawn')),
@@ -152,6 +229,7 @@ export async function initDatabase(db) {
       expired_at TEXT,
       refused_at TEXT,
       refusal_reason TEXT,
+      public_receipt_slug TEXT UNIQUE,
       is_visible INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -176,6 +254,37 @@ export async function initDatabase(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
 
+    db.prepare(`CREATE TABLE IF NOT EXISTS public_statements (
+      id TEXT PRIMARY KEY,
+      candidate_id TEXT NOT NULL REFERENCES candidates(id),
+      race_id TEXT REFERENCES races(id),
+      created_by TEXT NOT NULL REFERENCES users(id),
+      statement_text TEXT NOT NULL,
+      question_text TEXT,
+      response_text TEXT,
+      context_text TEXT,
+      topic TEXT,
+      claim_key TEXT,
+      source_type TEXT NOT NULL DEFAULT 'other' CHECK(source_type IN ('youtube','video','audio','article','debate','social','press_release','other')),
+      source_url TEXT NOT NULL,
+      source_title TEXT,
+      transcript_url TEXT,
+      transcript_text TEXT,
+      quote_start_seconds INTEGER,
+      quote_end_seconds INTEGER,
+      statement_at TEXT,
+      truth_status TEXT NOT NULL DEFAULT 'unreviewed' CHECK(truth_status IN ('unreviewed','supported','disputed','false','mixed','context_needed')),
+      answer_status TEXT NOT NULL DEFAULT 'not_applicable' CHECK(answer_status IN ('answered','partial','dodged','not_applicable','unclear')),
+      evasion_score INTEGER NOT NULL DEFAULT 0 CHECK(evasion_score BETWEEN 0 AND 100),
+      confidence_score INTEGER NOT NULL DEFAULT 0 CHECK(confidence_score BETWEEN 0 AND 100),
+      reviewed_by TEXT REFERENCES users(id),
+      reviewed_at TEXT,
+      review_note TEXT,
+      is_public INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
     // ========== ENGAGEMENT TABLES ==========
     db.prepare(`CREATE TABLE IF NOT EXISTS reactions (
       id TEXT PRIMARY KEY,
@@ -185,6 +294,31 @@ export async function initDatabase(db) {
       reaction_type TEXT NOT NULL CHECK(reaction_type IN ('helpful','misleading','agree','disagree','important')),
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(user_id, content_type, content_id, reaction_type)
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS recites (
+      id TEXT PRIMARY KEY,
+      content_type TEXT NOT NULL CHECK(content_type IN ('ad','rebuttal','challenge','challenge_response')),
+      content_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      url TEXT NOT NULL,
+      title TEXT NOT NULL,
+      publisher TEXT,
+      source_type TEXT NOT NULL DEFAULT 'other' CHECK(source_type IN ('official_record','public_document','court_record','research','news','campaign_material','other')),
+      stance TEXT NOT NULL CHECK(stance IN ('supports','refutes','context')),
+      claim_text TEXT,
+      quote TEXT,
+      source_published_at TEXT,
+      accessed_at TEXT,
+      archive_url TEXT,
+      evidence_media_url TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','verified','rejected')),
+      reviewed_by TEXT REFERENCES users(id),
+      reviewed_at TEXT,
+      review_note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, content_type, content_id, url)
     )`),
 
     // ========== NOTIFICATION TABLES ==========
@@ -429,7 +563,21 @@ export async function initDatabase(db) {
       reference_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
+
+    // ========== MEDIA UPLOAD INDEX ==========
+    db.prepare(`CREATE TABLE IF NOT EXISTS media_uploads (
+      file_id TEXT PRIMARY KEY,
+      key TEXT NOT NULL UNIQUE,
+      uploaded_by TEXT NOT NULL REFERENCES users(id),
+      candidate_id TEXT REFERENCES candidates(id),
+      content_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      original_name TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
   ]);
+
+  await runRuntimeMigrations(db);
 
   // ========== INDEXES ==========
   await db.batch([
@@ -454,10 +602,17 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_challenges_race ON challenges(race_id, status)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_challenges_target ON challenges(target_candidate_id, status)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_challenges_deadline ON challenges(response_deadline, status)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_challenges_receipt ON challenges(public_receipt_slug)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_challenge_responses_challenge ON challenge_responses(challenge_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_cooldowns_pair ON challenge_cooldowns(challenger_candidate_id, target_candidate_id, race_id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_public_statements_candidate ON public_statements(candidate_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_public_statements_claim ON public_statements(claim_key, candidate_id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_public_statements_review ON public_statements(truth_status, answer_status)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_reactions_content ON reactions(content_type, content_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_reactions_user ON reactions(user_id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_recites_content ON recites(content_type, content_id, status)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_recites_user ON recites(user_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_recites_status ON recites(status, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_notif_subs_user ON notification_subscriptions(user_id, is_active)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_notif_subs_target ON notification_subscriptions(subscription_type, target_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read)`),
@@ -482,10 +637,13 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_creds_user ON press_credentials(user_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_credit_tx_candidate ON credit_transactions(candidate_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_challenges_candidate_created ON challenges(challenger_candidate_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_users_password_reset ON users(password_reset_token_hash, password_reset_expires_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_media_uploads_key ON media_uploads(key)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_media_uploads_candidate ON media_uploads(candidate_id, created_at)`),
   ]);
 
-  dbInitialized = true;
-  console.log('Arena database initialized: 29 tables + 48 indexes');
+  initializedDbs.add(db);
+  console.log('Arena database initialized: 31 tables + 54 indexes');
 }
 
 // Seed issue categories (idempotent)

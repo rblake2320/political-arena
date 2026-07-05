@@ -9,7 +9,7 @@ import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
 import { checkRateLimit, clearRateLimit } from '../ratelimit.js';
 import { json, errorResponse, successResponse, parseBody, getClientIP } from '../middleware.js';
-import { validate, registerSchema, loginSchema } from '../validation.js';
+import { validate, registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../validation.js';
 import { authenticate } from '../auth.js';
 
 const router = Router({ base: '/api/auth' });
@@ -20,6 +20,44 @@ const LOGIN_MAX_PER_EMAIL = 10;     // per 15 min
 const LOGIN_WINDOW_SECONDS = 15 * 60;
 const REGISTER_MAX_PER_IP = 5;      // per hour
 const REGISTER_WINDOW_SECONDS = 60 * 60;
+const VERIFY_EMAIL_MAX_PER_IP = 5;  // per 10 min
+const VERIFY_EMAIL_WINDOW_SECONDS = 10 * 60;
+
+function getPasswordResetUrl(request, env, token) {
+  const requestOrigin = new URL(request.url).origin;
+  const baseUrl = (env.PASSWORD_RESET_BASE_URL || requestOrigin).replace(/\/+$/, '');
+  return `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
+}
+
+async function deliverPasswordReset(request, env, user, token) {
+  const resetUrl = getPasswordResetUrl(request, env, token);
+  const webhookUrl = env.PASSWORD_RESET_WEBHOOK_URL;
+  if (!webhookUrl) {
+    return { delivered: false, resetUrl };
+  }
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (env.PASSWORD_RESET_WEBHOOK_TOKEN) {
+    headers.Authorization = `Bearer ${env.PASSWORD_RESET_WEBHOOK_TOKEN}`;
+  }
+
+  const response = await fetch(webhookUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      type: 'password_reset',
+      to: user.email,
+      reset_url: resetUrl,
+      expires_in_minutes: 60,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Password reset webhook failed with ${response.status}`);
+  }
+
+  return { delivered: true, resetUrl };
+}
 
 // POST /api/auth/register
 router.post('/register', async (request, env, ctx) => {
@@ -197,10 +235,109 @@ router.post('/logout', async (request, env, ctx) => {
   return successResponse({ message: 'Logged out successfully' });
 });
 
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (request, env, ctx) => {
+  const body = await parseBody(request);
+  if (!body) return errorResponse('Invalid request body');
+
+  const { valid, errors, data } = validate(forgotPasswordSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+
+  const generic = { message: 'If an account exists for that email, password reset instructions have been sent.' };
+  const user = await env.ARENA_DB.prepare(
+    `SELECT id, email FROM users WHERE email = ? AND is_active = 1`
+  ).bind(data.email.toLowerCase()).first();
+
+  if (!user) return successResponse(generic);
+
+  const resetToken = generateVerificationToken();
+  const resetHash = await hashToken(resetToken);
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const resetUrl = getPasswordResetUrl(request, env, resetToken);
+
+  await env.ARENA_DB.prepare(
+    `UPDATE users
+     SET password_reset_token_hash = ?, password_reset_expires_at = ?, updated_at = datetime('now')
+     WHERE id = ?`
+  ).bind(resetHash, expiresAt, user.id).run();
+
+  ctx.waitUntil(
+    deliverPasswordReset(request, env, user, resetToken)
+      .catch(err => console.error('Password reset delivery failed:', err)),
+  );
+
+  auditLog(env.ARENA_DB, ctx, {
+    actorId: user.id,
+    action: 'user.password_reset_requested',
+    entityType: 'user',
+    entityId: user.id,
+    metadata: { delivery_configured: !!env.PASSWORD_RESET_WEBHOOK_URL },
+    ipAddress: getClientIP(request),
+  });
+
+  const responseData = { ...generic };
+  if (env.ENVIRONMENT !== 'production' || env.PASSWORD_RESET_EXPOSE_DEV_TOKEN === 'true') {
+    responseData.dev_reset_token = resetToken;
+    responseData.reset_url = resetUrl;
+  }
+
+  return successResponse(responseData);
+});
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (request, env, ctx) => {
+  const body = await parseBody(request);
+  if (!body) return errorResponse('Invalid request body');
+
+  const { valid, errors, data } = validate(resetPasswordSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+
+  const resetHash = await hashToken(data.token);
+  const user = await env.ARENA_DB.prepare(
+    `SELECT id FROM users
+     WHERE password_reset_token_hash = ?
+       AND password_reset_expires_at > datetime('now')
+       AND is_active = 1`
+  ).bind(resetHash).first();
+
+  if (!user) return errorResponse('Invalid or expired reset token', 400);
+
+  const passwordHash = await hashPassword(data.password);
+  await env.ARENA_DB.batch([
+    env.ARENA_DB.prepare(
+      `UPDATE users
+       SET password_hash = ?,
+           password_reset_token_hash = NULL,
+           password_reset_expires_at = NULL,
+           updated_at = datetime('now')
+       WHERE id = ?`
+    ).bind(passwordHash, user.id),
+    env.ARENA_DB.prepare(
+      `UPDATE sessions SET is_active = 0 WHERE user_id = ?`
+    ).bind(user.id),
+  ]);
+
+  auditLog(env.ARENA_DB, ctx, {
+    actorId: user.id,
+    action: 'user.password_reset',
+    entityType: 'user',
+    entityId: user.id,
+    ipAddress: getClientIP(request),
+  });
+
+  return successResponse({ message: 'Password reset successfully' });
+});
+
 // POST /api/auth/verify-email
 router.post('/verify-email', async (request, env, ctx) => {
   const body = await parseBody(request);
   if (!body || !body.token) return errorResponse('Verification token required');
+
+  const verifyIpHash = await hashIP(getClientIP(request));
+  if (verifyIpHash) {
+    const rl = await checkRateLimit(env.ARENA_DB, `verify-email:${verifyIpHash}`, VERIFY_EMAIL_MAX_PER_IP, VERIFY_EMAIL_WINDOW_SECONDS);
+    if (rl.limited) return errorResponse('Too many verification attempts. Please try again later.', 429);
+  }
 
   const user = await env.ARENA_DB.prepare(
     `SELECT id FROM users WHERE verification_token = ? AND email_verified = 0`

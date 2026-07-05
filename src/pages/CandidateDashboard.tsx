@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { useParams } from "react-router";
-import { BarChart3, Plus, ShieldAlert, Video, MessageSquareWarning, X, TrendingUp, Clock, Eye, Upload, Play, Coins } from "lucide-react";
+import { BarChart3, Plus, ShieldAlert, Video, MessageSquareWarning, X, TrendingUp, Clock, Eye, Coins } from "lucide-react";
 import { useArenaStore } from "../store";
 import * as api from "../api";
 import { useAuth } from "../stores/auth";
+import { ContentMedia, MediaUploadField } from "../components/Media";
 
 export function CandidateDashboard() {
   const { id } = useParams();
@@ -50,7 +51,7 @@ export function CandidateDashboard() {
   if (!candidate) return <div className="p-12 text-center text-zinc-500">Candidate not found.</div>;
   if (!raceData) return <div className="p-12 text-center text-zinc-500">Race data not found.</div>;
 
-  const candidateAds = raceData.ads.filter(ad => ad.candidate_id === candidate.id);
+  const candidateAds = raceData.ads.filter(ad => ad.candidate_id === candidate.id && ad.source_type !== 'external');
   const candidateChallenges = raceData.challenges.filter(
     c => c.challenger_candidate_id === candidate.id || c.target_candidate_id === candidate.id,
   );
@@ -178,6 +179,9 @@ export function CandidateDashboard() {
                     {ad.ad_content_text && (
                       <p className="text-sm text-zinc-300 mb-3">{ad.ad_content_text}</p>
                     )}
+                    {ad.media_url && (
+                      <ContentMedia url={ad.media_url} mediaType={ad.media_type} alt="Ad media" />
+                    )}
                     <div className="text-xs text-zinc-500 mb-3">
                       {ad.start_date ? new Date(ad.start_date).toLocaleDateString() : ''} - {ad.end_date ? new Date(ad.end_date).toLocaleDateString() : ''}
                     </div>
@@ -234,6 +238,9 @@ export function CandidateDashboard() {
                       <div className="pl-4 border-l-2 border-indigo-500/30 py-2 mb-4">
                         <p className="text-sm text-zinc-200 font-serif italic">"{challenge.challenge_text}"</p>
                       </div>
+                      {challenge.media_url && (
+                        <ContentMedia url={challenge.media_url} alt="Challenge media" />
+                      )}
                       {!isChallenger && challenge.status === "open" && (
                         <button
                           onClick={() => setRespondingToChallenge(challenge)}
@@ -264,6 +271,9 @@ export function CandidateDashboard() {
                       </span>
                     </div>
                     <p className="text-sm text-zinc-300 mb-4 italic">"{rebuttal.response_text}"</p>
+                    {rebuttal.media_url && (
+                      <ContentMedia url={rebuttal.media_url} alt="Rebuttal media" />
+                    )}
                     <div className="text-[10px] text-zinc-500 uppercase tracking-wider border border-zinc-800 p-2 rounded bg-zinc-950/50">
                       {rebuttal.disclaimer_text}
                     </div>
@@ -424,7 +434,7 @@ function CreateAdModal({ onClose, candidateId, raceId }: { onClose: (refresh?: b
             onChange={e => setFormData({ ...formData, ad_content_text: e.target.value })}
           />
         </div>
-        <MediaUploadField onMediaUrl={url => setFormData({ ...formData, media_url: url })} label="Attach Ad Media (video, image, audio)" />
+        <MediaUploadField candidateId={candidateId} onMediaUrl={url => setFormData({ ...formData, media_url: url })} label="Attach Ad Media (video, image, audio)" />
         <InputField label="FEC Disclaimer" required placeholder="Paid for by..." value={formData.disclaimer_text} onChange={v => setFormData({ ...formData, disclaimer_text: v })} />
         <ModalActions onCancel={() => onClose()} submitLabel={submitting ? 'Creating...' : 'Create Ad Flight'} disabled={submitting} />
       </form>
@@ -473,82 +483,10 @@ function RespondChallengeModal({ onClose, challenge, candidateId }: { onClose: (
             onChange={e => setFormData({ ...formData, response_text: e.target.value })}
           />
         </div>
-        <MediaUploadField onMediaUrl={url => setFormData({ ...formData, media_url: url })} label="Attach Response Media (video, image, audio)" />
+        <MediaUploadField candidateId={candidateId} onMediaUrl={url => setFormData({ ...formData, media_url: url })} label="Attach Response Media (video, image, audio)" />
         <ModalActions onCancel={() => onClose()} submitLabel={submitting ? 'Submitting...' : 'Submit Response'} disabled={submitting} />
       </form>
     </ModalShell>
-  );
-}
-
-// ---- Media Upload ----
-
-function MediaUploadField({ onMediaUrl, label }: { onMediaUrl: (url: string) => void; label?: string }) {
-  const [uploading, setUploading] = useState(false);
-  const [preview, setPreview] = useState<{ name: string; size: string; type: string; url?: string } | null>(null);
-  const [pasteUrl, setPasteUrl] = useState("");
-  const [error, setError] = useState("");
-
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setError("");
-    setUploading(true);
-    const sizeStr = file.size > 1024 * 1024 ? `${(file.size / 1024 / 1024).toFixed(1)}MB` : `${(file.size / 1024).toFixed(0)}KB`;
-    const localUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
-    setPreview({ name: file.name, size: sizeStr, type: file.type, url: localUrl });
-    try {
-      const result = await api.uploadMedia(file);
-      onMediaUrl(result.url);
-    } catch (err: any) {
-      setPreview(null);
-      setError(err?.response?.data?.error || "Upload failed — please try again");
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handlePaste = () => {
-    if (pasteUrl.trim()) {
-      setPreview({ name: "External link", size: "", type: "link", url: pasteUrl });
-      onMediaUrl(pasteUrl.trim());
-    }
-  };
-
-  return (
-    <div>
-      <label className="block text-sm font-medium text-zinc-400 mb-1.5">{label || "Attach Media"}</label>
-      {preview ? (
-        <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-950 border border-zinc-800">
-          {preview.url && preview.type.startsWith("image") ? (
-            <img src={preview.url} alt="" className="w-12 h-12 rounded object-cover" />
-          ) : (
-            <div className="w-12 h-12 rounded bg-zinc-800 flex items-center justify-center">
-              <Play className="w-5 h-5 text-zinc-400" />
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <div className="text-sm text-white truncate">{preview.name}</div>
-            {preview.size && <div className="text-xs text-zinc-500">{preview.size}</div>}
-          </div>
-          <button type="button" onClick={() => { setPreview(null); onMediaUrl(""); }} className="text-zinc-500 hover:text-white">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-zinc-950 border border-dashed border-zinc-700 hover:border-indigo-500/50 cursor-pointer transition-colors">
-            <Upload className="w-4 h-4 text-zinc-400" />
-            <span className="text-sm text-zinc-400">{uploading ? "Uploading..." : "Upload video, image, or audio"}</span>
-            <input type="file" accept="video/*,image/*,audio/*" className="hidden" onChange={handleFile} disabled={uploading} />
-          </label>
-          <div className="flex gap-2">
-            <input type="url" placeholder="Or paste media URL..." className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors" value={pasteUrl} onChange={e => setPasteUrl(e.target.value)} />
-            <button type="button" onClick={handlePaste} disabled={!pasteUrl.trim()} className="px-3 py-1.5 text-xs font-medium text-indigo-400 hover:text-indigo-300 disabled:text-zinc-600 transition-colors">Use</button>
-          </div>
-        </div>
-      )}
-      {error && <div className="text-xs text-amber-400 mt-1">{error}</div>}
-    </div>
   );
 }
 

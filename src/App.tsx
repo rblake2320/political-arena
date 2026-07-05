@@ -8,12 +8,17 @@ import { MyPrioritiesPage } from "./pages/MyPrioritiesPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { PressRegistrationPage } from "./pages/PressRegistrationPage";
 import { Help } from "./pages/Help";
+import { ChallengeReceiptPage } from "./pages/ChallengeReceiptPage";
+import { ModerationPage } from "./pages/ModerationPage";
+import { CandidateProfilePage } from "./pages/CandidateProfilePage";
 import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
+import { ForgotPassword } from "./pages/ForgotPassword";
+import { ResetPassword } from "./pages/ResetPassword";
 import { useAuth } from "./stores/auth";
 import { useArenaStore } from "./store";
 import * as api from "./api";
-import { Menu, X, LogOut, User, Bell, BarChart3, Newspaper, HelpCircle } from "lucide-react";
+import { Menu, X, LogOut, User, Bell, BarChart3, Newspaper, HelpCircle, ShieldCheck } from "lucide-react";
 
 interface CandidateContextType {
   candidates: ReturnType<typeof useArenaStore.getState>["allCandidates"];
@@ -34,6 +39,7 @@ function Navigation() {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const canModerate = Boolean(user && ["moderator", "admin", "super_admin"].includes(user.role));
 
   useEffect(() => {
     if (!user) {
@@ -85,6 +91,12 @@ function Navigation() {
             <Link to="/press/register" className="text-zinc-400 hover:text-white transition-colors flex items-center gap-1">
               <Newspaper className="w-3.5 h-3.5" />
               Press
+            </Link>
+          )}
+          {canModerate && (
+            <Link to="/moderation" className="text-zinc-400 hover:text-white transition-colors flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              Moderation
             </Link>
           )}
           <Link to="/help" className="text-zinc-400 hover:text-white transition-colors flex items-center gap-1">
@@ -176,6 +188,11 @@ function Navigation() {
           {user && (
             <Link to="/press/register" className="block text-zinc-300 hover:text-white py-2 text-lg font-medium transition-colors">
               Press Credentials
+            </Link>
+          )}
+          {canModerate && (
+            <Link to="/moderation" className="block text-zinc-300 hover:text-white py-2 text-lg font-medium transition-colors">
+              Moderation
             </Link>
           )}
           <Link to="/help" className="block text-zinc-300 hover:text-white py-2 text-lg font-medium transition-colors">
@@ -303,15 +320,20 @@ function AppContent() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/race/:id" element={<Race />} />
+            <Route path="/challenge/:id" element={<ChallengeReceiptPage />} />
+            <Route path="/profile/candidate/:id" element={<CandidateProfilePage />} />
             <Route path="/candidate/:id" element={user ? <CandidateDashboard /> : <Navigate to="/login" replace />} />
             <Route path="/candidate" element={<Navigate to="/" replace />} />
             <Route path="/what-matters" element={<WhatMattersPage />} />
             <Route path="/my-priorities" element={user ? <MyPrioritiesPage /> : <Navigate to="/login" replace />} />
             <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/login" replace />} />
+            <Route path="/moderation" element={user ? <ModerationPage /> : <Navigate to="/login" replace />} />
             <Route path="/press/register" element={user ? <PressRegistrationPage /> : <Navigate to="/login" replace />} />
             <Route path="/help" element={<Help />} />
             <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
             <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
+            <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPassword />} />
+            <Route path="/reset-password" element={user ? <Navigate to="/" replace /> : <ResetPassword />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </main>

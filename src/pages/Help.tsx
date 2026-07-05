@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import {
   Swords, Megaphone, MessageSquare, Shield, Users, ChevronDown, ChevronRight,
   Vote, Newspaper, BarChart3, AlertTriangle, CheckCircle2, Clock, Flame,
+  FileCheck2,
 } from "lucide-react";
 
 interface SectionProps {
@@ -44,7 +45,7 @@ export function Help() {
         </h1>
         <p className="text-zinc-400 text-lg leading-relaxed">
           Arena is a structured, transparent platform where political candidates debate issues publicly.
-          Every claim gets challenged. Every ad gets a rebuttal. Voters decide what matters.
+          Every claim can be challenged, answered, and backed by recites. Voters decide what matters.
         </p>
       </div>
 
@@ -83,16 +84,20 @@ export function Help() {
         <Section icon={<Swords className="w-4 h-4 text-amber-400" />} title="Challenges">
           <p>
             <strong className="text-white">Challenges</strong> are the core of Arena. One candidate publicly challenges
-            another on a specific issue — with evidence, media, or data to back it up.
+            another on a specific issue. Fact-check callouts must start with a recite so the claim is sourced before the countdown starts.
           </p>
           <div className="space-y-2 mt-2">
             <div className="flex items-start gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
-              <span>Candidates can attach YouTube videos, images, or documents as evidence</span>
+              <span>Fact-check callouts require at least one source link, such as an official record, public document, reporting, or research</span>
             </div>
             <div className="flex items-start gap-2">
               <Clock className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
               <span>The target has <strong className="text-white">3 business days</strong> to respond publicly</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <FileCheck2 className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
+              <span>Each callout gets a public receipt showing the claim, recites, deadline, response status, and audit timeline</span>
             </div>
             <div className="flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-orange-400 mt-0.5 flex-shrink-0" />
@@ -101,6 +106,10 @@ export function Help() {
             <div className="flex items-start gap-2">
               <Shield className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
               <span>Cooldown limits prevent spam: one challenge per candidate pair per 24 hours</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <MessageSquare className="w-4 h-4 text-sky-400 mt-0.5 flex-shrink-0" />
+              <span>Candidates can still attach uploaded or linked video, audio, and images for additional context</span>
             </div>
           </div>
         </Section>
@@ -114,7 +123,7 @@ export function Help() {
           <div className="space-y-2 mt-2">
             <div className="flex items-start gap-2">
               <Megaphone className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
-              <span>Candidates create ads with text, media (YouTube, images), and required FEC disclaimers</span>
+              <span>Candidates can answer outside TV or digital ads by placing the original claim beside their response</span>
             </div>
             <div className="flex items-start gap-2">
               <Swords className="w-4 h-4 text-purple-400 mt-0.5 flex-shrink-0" />
@@ -123,6 +132,10 @@ export function Help() {
             <div className="flex items-start gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
               <span>Voters see both the original ad and the rebuttal together — no one gets the last word unchallenged</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <FileCheck2 className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
+              <span>Each side can add recites so claims are tied back to official records, documents, reporting, or research</span>
             </div>
           </div>
         </Section>
@@ -144,15 +157,15 @@ export function Help() {
             </div>
             <div className="flex items-start gap-2">
               <MessageSquare className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
-              <span>You can attach media (YouTube videos, images) to questions for context</span>
+              <span>You can attach uploaded or linked video, audio, and images to questions for context</span>
             </div>
           </div>
         </Section>
 
         {/* Reactions */}
-        <Section icon={<Flame className="w-4 h-4 text-orange-400" />} title="Reactions & Engagement">
+        <Section icon={<Flame className="w-4 h-4 text-orange-400" />} title="Reactions, Recites & Fact Scores">
           <p>
-            React to challenges, ads, and responses to signal what resonates with you. Reactions drive the trending algorithm.
+            React to challenges, ads, and responses to signal what resonates with you. Add recites when a claim needs a public source.
           </p>
           <div className="flex flex-wrap gap-2 mt-2">
             {[
@@ -170,6 +183,37 @@ export function Help() {
           <p className="mt-2">
             Reactions are anonymous and visible to everyone. They help surface impactful content and flag misleading claims.
           </p>
+          <div className="space-y-2 mt-2">
+            <div className="flex items-start gap-2">
+              <FileCheck2 className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
+              <span><strong className="text-white">Recites</strong> are source links that support, refute, or add context to a claim.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <BarChart3 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+              <span>The fact score weighs recite stance, source type, and moderation status; moderators and admins can verify or reject pending recites.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <Shield className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
+              <span>Recites can include publication dates, access dates, archive links, and review notes so sources remain accountable over time.</span>
+            </div>
+          </div>
+        </Section>
+
+        <Section icon={<BarChart3 className="w-4 h-4 text-indigo-400" />} title="Trust Ledger Profiles">
+          <p>
+            Candidate public profiles collect the historical record voters need: public callouts, responses, no-response events,
+            reviewed statements, source links, transcript links, and evasion scores.
+          </p>
+          <div className="space-y-2 mt-2">
+            <div className="flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+              <span>Statements can link to exact timestamps in video or transcript sources so voters can inspect context.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+              <span>Evasion scores flag answers that are partial, unclear, or dodge the question over time.</span>
+            </div>
+          </div>
         </Section>
 
         {/* Trending */}
@@ -199,7 +243,7 @@ export function Help() {
           <div className="space-y-2 mt-2">
             <div className="flex items-start gap-2">
               <Users className="w-4 h-4 text-zinc-400 mt-0.5 flex-shrink-0" />
-              <span><strong className="text-white">Voter</strong> — basic account. Can view all content. Verified voters can submit questions and reactions.</span>
+              <span><strong className="text-white">Voter</strong> — basic account. Can view all content. Verified voters can submit questions and reactions; signed-in users can add recites.</span>
             </div>
             <div className="flex items-start gap-2">
               <Newspaper className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />

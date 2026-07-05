@@ -1,17 +1,19 @@
 import React, { useState, useContext, useEffect } from "react";
-import { useParams } from "react-router";
-import { Shield, ShieldAlert, AlertCircle, ThumbsUp, ThumbsDown, MessageSquare, Play, Plus, X, Upload, Clock, ArrowBigUp, HelpCircle } from "lucide-react";
+import { Link, useParams } from "react-router";
+import { Shield, ShieldAlert, AlertCircle, ThumbsUp, ThumbsDown, MessageSquare, Plus, X, Clock, ArrowBigUp, HelpCircle, FileCheck2, ExternalLink } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { CandidateContext } from "../App";
 import { useArenaStore, type RaceDetail } from "../store";
 import * as api from "../api";
 import { useAuth } from "../stores/auth";
+import { ContentMedia, MediaUploadField } from "../components/Media";
 
 export function Race() {
   const { id } = useParams();
   const [activeTab, setActiveTab] = useState<"ads" | "challenges" | "questions">("ads");
   const { activeCandidateId } = useContext(CandidateContext);
   const [isIssueChallengeModalOpen, setIsIssueChallengeModalOpen] = useState(false);
+  const [isOutsideAdModalOpen, setIsOutsideAdModalOpen] = useState(false);
   const [claimingRebuttalForAd, setClaimingRebuttalForAd] = useState<string | null>(null);
   const { user } = useAuth();
 
@@ -55,7 +57,7 @@ export function Race() {
         {/* Candidates Overview */}
         <div className="flex gap-4 overflow-x-auto pb-4 -mx-4 px-4">
           {raceData.candidates.map(c => (
-            <div key={c.id} className="flex-shrink-0 w-64 p-4 rounded-xl border border-zinc-800 bg-zinc-900/30">
+            <Link key={c.id} to={`/profile/candidate/${c.id}`} className="flex-shrink-0 w-64 p-4 rounded-xl border border-zinc-800 bg-zinc-900/30 hover:border-zinc-700 transition-colors">
               <div className="flex items-center gap-3 mb-3">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white ${
                   c.party === "Democrat" ? "bg-blue-600" : c.party === "Republican" ? "bg-red-600" : "bg-zinc-700"
@@ -68,7 +70,7 @@ export function Race() {
                 </div>
               </div>
               <div className="text-xs text-zinc-500 line-clamp-2">{c.biography}</div>
-            </div>
+            </Link>
           ))}
         </div>
       </div>
@@ -113,8 +115,19 @@ export function Race() {
       {/* Ads Tab */}
       {activeTab === "ads" && (
         <div className="space-y-8">
+          {isCandidateInRace && activeCandidateId && (
+            <div className="flex justify-end">
+              <button
+                onClick={() => setIsOutsideAdModalOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors text-sm"
+              >
+                <Plus className="w-4 h-4" />
+                Respond to Outside Ad
+              </button>
+            </div>
+          )}
           {raceData.ads.length === 0 ? (
-            <EmptyState title="No ads yet" description="Be the first to run an ad in this race." />
+            <EmptyState title="No ads yet" description="Post an ad, or answer an outside TV/digital ad with a side-by-side response." />
           ) : (
             raceData.ads.map(ad => {
               const candidate = raceData.candidates.find(c => c.id === ad.candidate_id);
@@ -131,8 +144,16 @@ export function Race() {
                         {candidate?.name?.charAt(0) ?? "?"}
                       </div>
                       <div>
-                        <div className="text-sm font-medium text-white">{candidate?.name}</div>
-                        <div className="text-xs text-zinc-500">{ad.title || 'Sponsored Ad'}</div>
+                        {candidate ? (
+                          <Link to={`/profile/candidate/${candidate.id}`} className="text-sm font-medium text-white hover:text-indigo-200">
+                            {candidate.name}
+                          </Link>
+                        ) : (
+                          <div className="text-sm font-medium text-white">Unknown candidate</div>
+                        )}
+                        <div className="text-xs text-zinc-500">
+                          {ad.source_type === 'external' ? 'Outside ad being answered' : (ad.title || 'Sponsored Ad')}
+                        </div>
                       </div>
                     </div>
                     <div className="text-xs text-zinc-500">
@@ -150,10 +171,23 @@ export function Race() {
                           {candidate?.name?.charAt(0) ?? "?"}
                         </div>
                         <div>
-                          <div className="text-sm font-medium text-white">{candidate?.name}</div>
-                          <div className="text-xs text-indigo-400">Original Ad</div>
+                          {candidate ? (
+                            <Link to={`/profile/candidate/${candidate.id}`} className="text-sm font-medium text-white hover:text-indigo-200">
+                              {candidate.name}
+                            </Link>
+                          ) : (
+                            <div className="text-sm font-medium text-white">Unknown candidate</div>
+                          )}
+                          <div className="text-xs text-indigo-400">
+                            {ad.source_type === 'external' ? 'Outside TV/Digital Ad' : 'Original Ad'}
+                          </div>
                         </div>
                       </div>
+                      {ad.source_type === 'external' && (
+                        <div className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                          Shared as context so the response can be seen beside the original claim.
+                        </div>
+                      )}
                       {ad.media_url ? (
                         <ContentMedia url={ad.media_url} mediaType={ad.media_type} alt="Ad media" />
                       ) : ad.ad_content_text ? (
@@ -177,7 +211,13 @@ export function Race() {
                             {rebuttalCandidate?.name?.charAt(0) ?? "?"}
                           </div>
                           <div>
-                            <div className="text-sm font-medium text-white">{rebuttalCandidate?.name}</div>
+                            {rebuttalCandidate ? (
+                              <Link to={`/profile/candidate/${rebuttalCandidate.id}`} className="text-sm font-medium text-white hover:text-indigo-200">
+                                {rebuttalCandidate.name}
+                              </Link>
+                            ) : (
+                              <div className="text-sm font-medium text-white">Unknown candidate</div>
+                            )}
                             <div className="text-xs text-emerald-400">Rebuttal</div>
                           </div>
                         </div>
@@ -248,19 +288,27 @@ export function Race() {
                       <span className="text-zinc-500">challenged</span>
                       <span className="font-medium text-white">{target?.name}</span>
                     </div>
-                    <span className={`px-2 py-1 rounded text-[10px] font-medium uppercase tracking-wider ${
-                      challenge.status === "open"
-                        ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                        : challenge.status === "responded"
-                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                        : challenge.status === "expired"
-                        ? "bg-red-500/10 text-red-400 border border-red-500/20"
-                        : challenge.status === "refused"
-                        ? "bg-orange-500/10 text-orange-400 border border-orange-500/20"
-                        : "bg-zinc-800 text-zinc-400"
-                    }`}>
-                      {challenge.status === "expired" ? "NO RESPONSE" : challenge.status === "refused" ? "REFUSED" : challenge.status}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        to={`/challenge/${challenge.public_receipt_slug || challenge.id}`}
+                        className="text-xs font-medium text-indigo-300 hover:text-indigo-200 transition-colors"
+                      >
+                        Receipt
+                      </Link>
+                      <span className={`px-2 py-1 rounded text-[10px] font-medium uppercase tracking-wider ${
+                        challenge.status === "open"
+                          ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                          : challenge.status === "responded"
+                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                          : challenge.status === "expired"
+                          ? "bg-red-500/10 text-red-400 border border-red-500/20"
+                          : challenge.status === "refused"
+                          ? "bg-orange-500/10 text-orange-400 border border-orange-500/20"
+                          : "bg-zinc-800 text-zinc-400"
+                      }`}>
+                        {challenge.status === "expired" ? "NO RESPONSE" : challenge.status === "refused" ? "REFUSED" : challenge.status}
+                      </span>
+                    </div>
                   </div>
 
                   {challenge.status === "open" ? (
@@ -316,6 +364,9 @@ export function Race() {
                           <ContentMedia url={response.media_url} alt="Response media" />
                         ) : null}
                         <p className="text-sm text-zinc-300">"{response.response_text}"</p>
+                        <div className="mt-4">
+                          <ReactionButtons contentId={response.id} contentType="challenge_response" />
+                        </div>
                       </div>
                     </div>
                   ) : challenge.status === "expired" ? (
@@ -357,6 +408,9 @@ export function Race() {
                       <p className="text-lg text-zinc-200 font-serif italic">"{challenge.challenge_text}"</p>
                     </div>
                   )}
+                  <div className="mt-4">
+                    <ReactionButtons contentId={challenge.id} contentType="challenge" />
+                  </div>
                 </div>
               );
             })
@@ -378,6 +432,19 @@ export function Race() {
           }}
           raceId={id!}
           challengerId={activeCandidateId!}
+          candidates={raceData.candidates.filter(c => c.id !== activeCandidateId)}
+        />
+      )}
+
+      {/* Outside Ad Response Modal */}
+      {isOutsideAdModalOpen && activeCandidateId && (
+        <OutsideAdResponseModal
+          onClose={(refresh) => {
+            setIsOutsideAdModalOpen(false);
+            if (refresh) refreshRace();
+          }}
+          raceId={id!}
+          responderCandidateId={activeCandidateId}
           candidates={raceData.candidates.filter(c => c.id !== activeCandidateId)}
         />
       )}
@@ -464,190 +531,6 @@ function ChallengeCountdown({ deadline, businessDays }: { deadline: string; busi
   );
 }
 
-function MediaUploadField({ onMediaUrl, label }: { onMediaUrl: (url: string) => void; label?: string }) {
-  const [uploading, setUploading] = useState(false);
-  const [preview, setPreview] = useState<{ name: string; size: string; type: string; url?: string } | null>(null);
-  const [pasteUrl, setPasteUrl] = useState("");
-  const [error, setError] = useState("");
-
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setError("");
-    // Per-type size limits matching backend
-    const sizeLimits: Record<string, number> = { video: 50, image: 10, audio: 20 };
-    const category = file.type.split("/")[0];
-    const maxMB = sizeLimits[category] || 10;
-    const maxSize = maxMB * 1024 * 1024;
-    if (file.size > maxSize) {
-      setError(`File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum for ${category} is ${maxMB}MB.`);
-      return;
-    }
-    setUploading(true);
-
-    // Show local preview immediately
-    const sizeStr = file.size > 1024 * 1024 ? `${(file.size / 1024 / 1024).toFixed(1)}MB` : `${(file.size / 1024).toFixed(0)}KB`;
-    const localUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
-    setPreview({ name: file.name, size: sizeStr, type: file.type, url: localUrl });
-
-    try {
-      const result = await api.uploadMedia(file);
-      onMediaUrl(result.url);
-    } catch (err: any) {
-      setPreview(null);
-      setError(err?.response?.data?.error || "Upload failed — please try again");
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handlePaste = () => {
-    const url = pasteUrl.trim();
-    if (url) {
-      try {
-        const parsed = new URL(url);
-        if (!['http:', 'https:'].includes(parsed.protocol)) {
-          setError("Only http/https URLs are allowed");
-          return;
-        }
-        setError("");
-        setPreview({ name: "External link", size: "", type: "link", url });
-        onMediaUrl(url);
-      } catch {
-        setError("Invalid URL format");
-      }
-    }
-  };
-
-  return (
-    <div>
-      <label className="block text-sm font-medium text-zinc-400 mb-1.5">{label || "Attach Media"}</label>
-      {preview ? (
-        <div className={`flex items-center gap-3 p-3 rounded-lg bg-zinc-950 border ${uploading ? 'border-indigo-500/50 animate-pulse' : 'border-zinc-800'}`}>
-          {preview.url && preview.type.startsWith("image") ? (
-            <img src={preview.url} alt="" className="w-12 h-12 rounded object-cover" />
-          ) : (
-            <div className="w-12 h-12 rounded bg-zinc-800 flex items-center justify-center">
-              <Play className="w-5 h-5 text-zinc-400" />
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <div className="text-sm text-white truncate">{preview.name}</div>
-            <div className="text-xs text-zinc-500">{uploading ? "Uploading..." : preview.size}</div>
-          </div>
-          {!uploading && (
-            <button type="button" onClick={() => { setPreview(null); onMediaUrl(""); }} className="text-zinc-500 hover:text-white">
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-zinc-950 border border-dashed border-zinc-700 hover:border-indigo-500/50 cursor-pointer transition-colors">
-            <Upload className="w-4 h-4 text-zinc-400" />
-            <span className="text-sm text-zinc-400">{uploading ? "Uploading..." : "Upload video, image, or audio"}</span>
-            <input type="file" accept="video/*,image/*,audio/*" className="hidden" onChange={handleFile} disabled={uploading} />
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="url"
-              placeholder="Or paste media URL..."
-              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
-              value={pasteUrl}
-              onChange={e => setPasteUrl(e.target.value)}
-            />
-            <button type="button" onClick={handlePaste} disabled={!pasteUrl.trim()} className="px-3 py-1.5 text-xs font-medium text-indigo-400 hover:text-indigo-300 disabled:text-zinc-600 transition-colors">
-              Use
-            </button>
-          </div>
-        </div>
-      )}
-      {error && <div className="text-xs text-amber-400 mt-1">{error}</div>}
-    </div>
-  );
-}
-
-/** Smart media display: renders YouTube embed, <video>, or <img> with onError fallback */
-function ContentMedia({ url, mediaType, alt }: { url: string; mediaType?: string; alt?: string }) {
-  const [errored, setErrored] = useState(false);
-
-  // Detect YouTube URLs and extract video ID
-  const youtubeMatch = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-  const youtubeId = youtubeMatch ? youtubeMatch[1] : null;
-
-  // Detect actual content type from URL extension
-  const isVideoUrl = /\.(mp4|webm|ogg|mov)(\?|$)/i.test(url);
-  const isAudioUrl = /\.(mp3|wav|ogg|m4a|aac)(\?|$)/i.test(url);
-  const shouldRenderVideo = (mediaType === 'video' && isVideoUrl) || isVideoUrl;
-
-  if (errored) {
-    return (
-      <div className="aspect-video bg-zinc-950 rounded-lg mb-4 flex items-center justify-center border border-zinc-800">
-        <div className="text-center">
-          <AlertCircle className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-          <div className="text-xs text-zinc-500">Media unavailable</div>
-        </div>
-      </div>
-    );
-  }
-
-  // YouTube embed
-  if (youtubeId) {
-    return (
-      <div className="aspect-video bg-zinc-950 rounded-lg mb-4 overflow-hidden border border-zinc-800">
-        <iframe
-          src={`https://www.youtube-nocookie.com/embed/${youtubeId}`}
-          title={alt || "YouTube video"}
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-          className="w-full h-full"
-        />
-      </div>
-    );
-  }
-
-  // Native video
-  if (shouldRenderVideo) {
-    return (
-      <div className="aspect-video bg-zinc-950 rounded-lg mb-4 overflow-hidden border border-zinc-800">
-        <video
-          src={url}
-          controls
-          preload="metadata"
-          className="w-full h-full object-cover"
-          onError={() => setErrored(true)}
-        />
-      </div>
-    );
-  }
-
-  // Audio
-  if (isAudioUrl) {
-    return (
-      <div className="bg-zinc-950 rounded-lg mb-4 p-4 border border-zinc-800">
-        <audio src={url} controls preload="metadata" className="w-full" onError={() => setErrored(true)} />
-      </div>
-    );
-  }
-
-  // Default: render as image
-  return (
-    <div className="aspect-video bg-zinc-950 rounded-lg mb-4 relative group overflow-hidden border border-zinc-800">
-      <img
-        src={url}
-        alt={alt || "Media"}
-        className="w-full h-full object-cover opacity-70 group-hover:opacity-90 transition-opacity"
-        onError={() => setErrored(true)}
-      />
-      {mediaType === 'video' && (
-        <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/60 text-[10px] text-zinc-400">
-          Image preview
-        </div>
-      )}
-    </div>
-  );
-}
-
 function EmptyState({ title, description }: { title: string; description: string }) {
   return (
     <div className="p-12 text-center border border-zinc-800 rounded-2xl bg-zinc-900/30">
@@ -657,7 +540,73 @@ function EmptyState({ title, description }: { title: string; description: string
   );
 }
 
-function ReactionButtons({ contentId, contentType }: { contentId: string; contentType: string }) {
+type Recite = {
+  id: string;
+  url: string;
+  title: string;
+  publisher?: string | null;
+  source_type: api.ReciteSourceType;
+  stance: api.ReciteStance;
+  status: "pending" | "verified" | "rejected";
+  quote?: string | null;
+  source_published_at?: string | null;
+  accessed_at?: string | null;
+  archive_url?: string | null;
+  evidence_media_url?: string | null;
+  review_note?: string | null;
+  author_name?: string | null;
+  created_at?: string;
+};
+
+type FactScore = {
+  score: number;
+  label: string;
+  confidence: number;
+  verified_count: number;
+  pending_count: number;
+};
+
+const RECITE_SOURCE_OPTIONS: { value: api.ReciteSourceType; label: string }[] = [
+  { value: "official_record", label: "Official record" },
+  { value: "court_record", label: "Court record" },
+  { value: "public_document", label: "Public document" },
+  { value: "research", label: "Research" },
+  { value: "news", label: "News report" },
+  { value: "campaign_material", label: "Campaign material" },
+  { value: "other", label: "Other" },
+];
+
+const RECITE_STANCE_OPTIONS: { value: api.ReciteStance; label: string }[] = [
+  { value: "supports", label: "Supports" },
+  { value: "refutes", label: "Refutes" },
+  { value: "context", label: "Adds context" },
+];
+
+function factScoreLabel(label?: string) {
+  if (label === "source-supported") return "Source-supported";
+  if (label === "source-disputed") return "Source-disputed";
+  if (label === "mixed") return "Mixed recites";
+  return "Under-recited";
+}
+
+function factScoreClass(label?: string) {
+  if (label === "source-supported") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+  if (label === "source-disputed") return "border-red-500/30 bg-red-500/10 text-red-300";
+  if (label === "mixed") return "border-amber-500/30 bg-amber-500/10 text-amber-300";
+  return "border-zinc-700 bg-zinc-900 text-zinc-300";
+}
+
+function stanceClass(stance: string) {
+  if (stance === "supports") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+  if (stance === "refutes") return "border-red-500/30 bg-red-500/10 text-red-300";
+  return "border-sky-500/30 bg-sky-500/10 text-sky-300";
+}
+
+function sourceLabel(value: string) {
+  return RECITE_SOURCE_OPTIONS.find(option => option.value === value)?.label || "Other";
+}
+
+function ReactionButtons({ contentId, contentType }: { contentId: string; contentType: api.ReciteContentType }) {
   const { user } = useAuth();
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [activeReaction, setActiveReaction] = useState<string | null>(null);
@@ -699,35 +648,374 @@ function ReactionButtons({ contentId, contentType }: { contentId: string; conten
   };
 
   return (
-    <div className="flex gap-3">
-      <button
-        onClick={() => handleReact("helpful")}
-        disabled={!user}
-        title={!user ? "Sign in to react" : "Mark as helpful"}
-        aria-label={`Mark as helpful (${counts["helpful"] || 0} votes)`}
-        className={`flex items-center gap-2 text-xs font-medium transition-colors px-3 py-1.5 rounded-full border ${
-          activeReaction === "helpful"
-            ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
-            : "text-zinc-400 hover:text-white bg-zinc-950 border-zinc-800 hover:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-zinc-400"
-        }`}
-      >
-        <ThumbsUp className="w-4 h-4" />
-        <span>{counts["helpful"] || 0}</span>
-      </button>
-      <button
-        onClick={() => handleReact("misleading")}
-        disabled={!user}
-        title={!user ? "Sign in to react" : "Mark as misleading"}
-        aria-label={`Mark as misleading (${counts["misleading"] || 0} votes)`}
-        className={`flex items-center gap-2 text-xs font-medium transition-colors px-3 py-1.5 rounded-full border ${
-          activeReaction === "misleading"
-            ? "bg-red-500/20 text-red-400 border-red-500/30"
-            : "text-zinc-400 hover:text-white bg-zinc-950 border-zinc-800 hover:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-zinc-400"
-        }`}
-      >
-        <ThumbsDown className="w-4 h-4" />
-        <span>{counts["misleading"] || 0}</span>
-      </button>
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-3">
+        <button
+          onClick={() => handleReact("helpful")}
+          disabled={!user}
+          title={!user ? "Sign in to react" : "Mark as helpful"}
+          aria-label={`Mark as helpful (${counts["helpful"] || 0} votes)`}
+          className={`flex items-center gap-2 text-xs font-medium transition-colors px-3 py-1.5 rounded-full border ${
+            activeReaction === "helpful"
+              ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+              : "text-zinc-400 hover:text-white bg-zinc-950 border-zinc-800 hover:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-zinc-400"
+          }`}
+        >
+          <ThumbsUp className="w-4 h-4" />
+          <span>{counts["helpful"] || 0}</span>
+        </button>
+        <button
+          onClick={() => handleReact("misleading")}
+          disabled={!user}
+          title={!user ? "Sign in to react" : "Mark as misleading"}
+          aria-label={`Mark as misleading (${counts["misleading"] || 0} votes)`}
+          className={`flex items-center gap-2 text-xs font-medium transition-colors px-3 py-1.5 rounded-full border ${
+            activeReaction === "misleading"
+              ? "bg-red-500/20 text-red-400 border-red-500/30"
+              : "text-zinc-400 hover:text-white bg-zinc-950 border-zinc-800 hover:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-zinc-400"
+          }`}
+        >
+          <ThumbsDown className="w-4 h-4" />
+          <span>{counts["misleading"] || 0}</span>
+        </button>
+      </div>
+      <RecitePanel contentId={contentId} contentType={contentType} />
+    </div>
+  );
+}
+
+function RecitePanel({ contentId, contentType }: { contentId: string; contentType: api.ReciteContentType }) {
+  const { user } = useAuth();
+  const [recites, setRecites] = useState<Recite[]>([]);
+  const [factScore, setFactScore] = useState<FactScore | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [formData, setFormData] = useState({
+    url: "",
+    title: "",
+    publisher: "",
+    source_type: "news" as api.ReciteSourceType,
+    stance: "supports" as api.ReciteStance,
+    claim_text: "",
+    quote: "",
+    source_published_at: "",
+    accessed_at: new Date().toISOString().slice(0, 10),
+    archive_url: "",
+  });
+
+  const refreshRecites = async () => {
+    const data = await api.getRecites(contentType, contentId);
+    setRecites(data.recites || []);
+    setFactScore(data.fact_score || null);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getRecites(contentType, contentId).then((data: any) => {
+      if (cancelled) return;
+      setRecites(data.recites || []);
+      setFactScore(data.fact_score || null);
+    }).catch(() => {
+      if (cancelled) return;
+      setRecites([]);
+      setFactScore(null);
+    });
+    return () => { cancelled = true; };
+  }, [contentId, contentType]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await api.addRecite({
+        content_type: contentType,
+        content_id: contentId,
+        url: formData.url.trim(),
+        title: formData.title.trim(),
+        publisher: formData.publisher.trim() || undefined,
+        source_type: formData.source_type,
+        stance: formData.stance,
+        claim_text: formData.claim_text.trim() || undefined,
+        quote: formData.quote.trim() || undefined,
+        source_published_at: formData.source_published_at || undefined,
+        accessed_at: formData.accessed_at || undefined,
+        archive_url: formData.archive_url.trim() || undefined,
+      });
+      setFormData({
+        url: "",
+        title: "",
+        publisher: "",
+        source_type: "news",
+        stance: "supports",
+        claim_text: "",
+        quote: "",
+        source_published_at: "",
+        accessed_at: new Date().toISOString().slice(0, 10),
+        archive_url: "",
+      });
+      await refreshRecites();
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || "Failed to add recite");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReview = async (reciteId: string, status: "pending" | "verified" | "rejected") => {
+    setReviewingId(reciteId);
+    setError("");
+    try {
+      await api.reviewRecite(reciteId, status);
+      await refreshRecites();
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || "Failed to review recite");
+    } finally {
+      setReviewingId(null);
+    }
+  };
+
+  const score = factScore?.score ?? 50;
+  const label = factScoreLabel(factScore?.label);
+  const confidence = factScore?.confidence ?? 0;
+  const canSubmit = Boolean(user && formData.url.trim() && formData.title.trim());
+  const canReview = Boolean(user && ["moderator", "admin", "super_admin"].includes(user.role));
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 text-xs font-medium text-zinc-300">
+          <FileCheck2 className="w-4 h-4 text-indigo-300" />
+          <span>Fact score</span>
+        </div>
+        <span className={`px-2 py-1 rounded-full border text-xs font-semibold ${factScoreClass(factScore?.label)}`}>
+          {score}/100
+        </span>
+        <span className="text-xs text-zinc-400">{label}</span>
+        <span className="text-xs text-zinc-600">Confidence {confidence}%</span>
+        <span className="text-xs text-zinc-600">{recites.length} recite{recites.length === 1 ? "" : "s"}</span>
+        <button
+          type="button"
+          onClick={() => setExpanded(value => !value)}
+          className="ml-auto text-xs font-medium text-indigo-300 hover:text-indigo-200 transition-colors"
+        >
+          {expanded ? "Close" : user ? "Add or view recites" : "View recites"}
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="mt-3 border-t border-zinc-800 pt-3 space-y-3">
+          {recites.length > 0 ? (
+            <div className="space-y-2">
+              {recites.slice(0, 5).map(recite => (
+                <div
+                  key={recite.id}
+                  className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3"
+                >
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider ${stanceClass(recite.stance)}`}>
+                      {recite.stance}
+                    </span>
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{sourceLabel(recite.source_type)}</span>
+                    <span className="text-[10px] text-zinc-500">{recite.status}</span>
+                    {recite.created_at && (
+                      <span className="text-[10px] text-zinc-600">
+                        {formatDistanceToNow(new Date(recite.created_at), { addSuffix: true })}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-start gap-2 min-w-0">
+                    <div className="flex-1 min-w-0">
+                      <a
+                        href={recite.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-start gap-1 text-xs font-medium text-zinc-100 hover:text-indigo-200 break-words"
+                      >
+                        <span>{recite.title}</span>
+                        <ExternalLink className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0 mt-0.5" />
+                      </a>
+                      {recite.publisher && <div className="text-[11px] text-zinc-500 break-words">{recite.publisher}</div>}
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-zinc-600">
+                        {recite.source_published_at && <span>Published {recite.source_published_at}</span>}
+                        {recite.accessed_at && <span>Accessed {recite.accessed_at.slice(0, 10)}</span>}
+                        {recite.archive_url && (
+                          <a href={recite.archive_url} target="_blank" rel="noreferrer" className="text-indigo-300 hover:text-indigo-200">
+                            Archived copy
+                          </a>
+                        )}
+                      </div>
+                      {recite.quote && <div className="mt-1 text-[11px] text-zinc-400 line-clamp-2 break-words">"{recite.quote}"</div>}
+                    </div>
+                  </div>
+                  {canReview && (
+                    <div className="mt-3 flex flex-wrap gap-2 border-t border-zinc-800 pt-2">
+                      {recite.status !== "verified" && (
+                        <button
+                          type="button"
+                          disabled={reviewingId === recite.id}
+                          onClick={() => handleReview(recite.id, "verified")}
+                          className="px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[11px] font-medium hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
+                        >
+                          Verify
+                        </button>
+                      )}
+                      {recite.status !== "pending" && (
+                        <button
+                          type="button"
+                          disabled={reviewingId === recite.id}
+                          onClick={() => handleReview(recite.id, "pending")}
+                          className="px-2 py-1 rounded-md bg-zinc-800 text-zinc-300 border border-zinc-700 text-[11px] font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                        >
+                          Mark pending
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={reviewingId === recite.id}
+                        onClick={() => handleReview(recite.id, "rejected")}
+                        className="px-2 py-1 rounded-md bg-red-500/10 text-red-300 border border-red-500/20 text-[11px] font-medium hover:bg-red-500/20 disabled:opacity-50 transition-colors"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-xs text-zinc-500">
+              No recites yet. Add a link to an official record, article, document, or other source that supports, refutes, or adds context.
+            </div>
+          )}
+
+          {user ? (
+            <form onSubmit={handleSubmit} className="space-y-3">
+              {error && (
+                <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                  {error}
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Recite URL</label>
+                  <input
+                    required
+                    inputMode="url"
+                    type="url"
+                    maxLength={1000}
+                    placeholder="https://..."
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    value={formData.url}
+                    onChange={e => setFormData({ ...formData, url: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Title</label>
+                  <input
+                    required
+                    type="text"
+                    maxLength={240}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    value={formData.title}
+                    onChange={e => setFormData({ ...formData, title: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Publisher</label>
+                  <input
+                    type="text"
+                    maxLength={120}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    value={formData.publisher}
+                    onChange={e => setFormData({ ...formData, publisher: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">How it applies</label>
+                  <select
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    value={formData.stance}
+                    onChange={e => setFormData({ ...formData, stance: e.target.value as api.ReciteStance })}
+                  >
+                    {RECITE_STANCE_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Source type</label>
+                  <select
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    value={formData.source_type}
+                    onChange={e => setFormData({ ...formData, source_type: e.target.value as api.ReciteSourceType })}
+                  >
+                    {RECITE_SOURCE_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Relevant quote or note</label>
+                  <textarea
+                    rows={2}
+                    maxLength={1000}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
+                    value={formData.quote}
+                    onChange={e => setFormData({ ...formData, quote: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Publication date</label>
+                  <input
+                    type="date"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    value={formData.source_published_at}
+                    onChange={e => setFormData({ ...formData, source_published_at: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Accessed date</label>
+                  <input
+                    type="date"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    value={formData.accessed_at}
+                    onChange={e => setFormData({ ...formData, accessed_at: e.target.value })}
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Archive URL</label>
+                  <input
+                    inputMode="url"
+                    type="url"
+                    maxLength={1000}
+                    placeholder="https://web.archive.org/..."
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                    value={formData.archive_url}
+                    onChange={e => setFormData({ ...formData, archive_url: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={submitting || !canSubmit}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-xs font-medium rounded-lg transition-colors"
+                >
+                  {submitting ? "Adding..." : "Add recite"}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <a href="/login" className="inline-block text-xs text-indigo-300 hover:text-indigo-200 transition-colors">
+              Sign in to add a recite
+            </a>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -742,25 +1030,65 @@ function IssueChallengeModal({
 }) {
   const [formData, setFormData] = useState({
     target_candidate_id: candidates.length > 0 ? candidates[0].id : "",
+    challenge_type: "fact_check",
+    claim_text: "",
+    dispute_summary: "",
+    requested_response: "",
     challenge_text: "",
     media_url: "",
     deadline_business_days: 3,
+    recite_url: "",
+    recite_title: "",
+    recite_publisher: "",
+    recite_source_type: "official_record" as api.ReciteSourceType,
+    recite_quote: "",
+    recite_source_published_at: "",
+    recite_accessed_at: new Date().toISOString().slice(0, 10),
+    recite_archive_url: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const isFactCheck = formData.challenge_type === "fact_check";
+    if (isFactCheck && (!formData.recite_url.trim() || !formData.recite_title.trim())) {
+      setError("Fact-check callouts need at least one recite URL and title.");
+      return;
+    }
+    if (isFactCheck && formData.claim_text.trim().length < 10) {
+      setError("Fact-check callouts need the specific claim being disputed.");
+      return;
+    }
     setSubmitting(true);
     setError('');
+    const initialRecites = formData.recite_url.trim() && formData.recite_title.trim()
+      ? [{
+          url: formData.recite_url.trim(),
+          title: formData.recite_title.trim(),
+          publisher: formData.recite_publisher.trim() || undefined,
+          source_type: formData.recite_source_type,
+          stance: "supports" as api.ReciteStance,
+          claim_text: formData.claim_text.trim() || undefined,
+          quote: formData.recite_quote.trim() || undefined,
+          source_published_at: formData.recite_source_published_at || undefined,
+          accessed_at: formData.recite_accessed_at || undefined,
+          archive_url: formData.recite_archive_url.trim() || undefined,
+        }]
+      : undefined;
     try {
       await api.createChallenge({
         race_id: raceId,
         challenger_candidate_id: challengerId,
         target_candidate_id: formData.target_candidate_id,
         challenge_text: formData.challenge_text,
+        challenge_type: formData.challenge_type,
+        claim_text: formData.claim_text.trim() || undefined,
+        dispute_summary: formData.dispute_summary.trim() || undefined,
+        requested_response: formData.requested_response.trim() || undefined,
         media_url: formData.media_url || undefined,
         deadline_business_days: formData.deadline_business_days,
+        initial_recites: initialRecites,
       });
       onClose(true);
     } catch (err: any) {
@@ -777,7 +1105,7 @@ function IssueChallengeModal({
 
   return (
     <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => onClose()}>
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-zinc-800">
           <h2 className="text-lg font-semibold text-white">Issue Challenge</h2>
           <button onClick={() => onClose()} className="text-zinc-400 hover:text-white p-1 rounded-md hover:bg-zinc-800 transition-colors">
@@ -806,6 +1134,33 @@ function IssueChallengeModal({
             </select>
           </div>
           <div>
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Challenge Type</label>
+            <select
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+              value={formData.challenge_type}
+              onChange={e => setFormData({ ...formData, challenge_type: e.target.value })}
+            >
+              <option value="fact_check">Fact-check callout</option>
+              <option value="policy_question">Policy question</option>
+              <option value="debate_request">Debate request</option>
+              <option value="open">Open challenge</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Specific Claim</label>
+            <textarea
+              required={formData.challenge_type === "fact_check"}
+              rows={2}
+              minLength={formData.challenge_type === "fact_check" ? 10 : undefined}
+              maxLength={500}
+              placeholder="Quote or summarize the exact claim being disputed."
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
+              value={formData.claim_text}
+              onChange={e => setFormData({ ...formData, claim_text: e.target.value })}
+            />
+            <div className="text-xs text-zinc-500 mt-1">{formData.claim_text.length}/500</div>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-zinc-400 mb-1.5">Challenge Statement</label>
             <textarea
               required
@@ -813,14 +1168,134 @@ function IssueChallengeModal({
               rows={4}
               minLength={10}
               maxLength={2000}
-              placeholder="Type your challenge here..."
+              placeholder="Name the claim and what the other candidate needs to answer."
               className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
               value={formData.challenge_text}
               onChange={e => setFormData({ ...formData, challenge_text: e.target.value })}
             />
             <div className="text-xs text-zinc-500 mt-1">{formData.challenge_text.length}/2000</div>
           </div>
-          <MediaUploadField onMediaUrl={url => setFormData({ ...formData, media_url: url })} label="Attach Evidence (video, image, audio)" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Why it's disputed</label>
+              <textarea
+                rows={3}
+                maxLength={1000}
+                placeholder="Explain how the source contradicts or clarifies the claim."
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
+                value={formData.dispute_summary}
+                onChange={e => setFormData({ ...formData, dispute_summary: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Requested response</label>
+              <textarea
+                rows={3}
+                maxLength={500}
+                placeholder="What should the tagged campaign answer?"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
+                value={formData.requested_response}
+                onChange={e => setFormData({ ...formData, requested_response: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-white">
+              <FileCheck2 className="w-4 h-4 text-indigo-300" />
+              Initial Recite
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 mb-1">Recite URL</label>
+              <input
+                required={formData.challenge_type === "fact_check"}
+                inputMode="url"
+                type="url"
+                maxLength={1000}
+                placeholder="https://..."
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                value={formData.recite_url}
+                onChange={e => setFormData({ ...formData, recite_url: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Title</label>
+                <input
+                  required={formData.challenge_type === "fact_check"}
+                  type="text"
+                  maxLength={240}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                  value={formData.recite_title}
+                  onChange={e => setFormData({ ...formData, recite_title: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Publisher</label>
+                <input
+                  type="text"
+                  maxLength={120}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                  value={formData.recite_publisher}
+                  onChange={e => setFormData({ ...formData, recite_publisher: e.target.value })}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 mb-1">Source type</label>
+              <select
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                value={formData.recite_source_type}
+                onChange={e => setFormData({ ...formData, recite_source_type: e.target.value as api.ReciteSourceType })}
+              >
+                {RECITE_SOURCE_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 mb-1">Relevant quote or note</label>
+              <textarea
+                rows={2}
+                maxLength={1000}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
+                value={formData.recite_quote}
+                onChange={e => setFormData({ ...formData, recite_quote: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Publication date</label>
+                <input
+                  type="date"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                  value={formData.recite_source_published_at}
+                  onChange={e => setFormData({ ...formData, recite_source_published_at: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Accessed date</label>
+                <input
+                  type="date"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                  value={formData.recite_accessed_at}
+                  onChange={e => setFormData({ ...formData, recite_accessed_at: e.target.value })}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 mb-1">Archive URL</label>
+              <input
+                inputMode="url"
+                type="url"
+                maxLength={1000}
+                placeholder="https://web.archive.org/..."
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                value={formData.recite_archive_url}
+                onChange={e => setFormData({ ...formData, recite_archive_url: e.target.value })}
+              />
+            </div>
+          </div>
+          <MediaUploadField candidateId={challengerId} onMediaUrl={url => setFormData({ ...formData, media_url: url })} label="Attach Evidence (video, image, audio)" />
           <div>
             <label className="block text-sm font-medium text-zinc-400 mb-1.5">Response Deadline</label>
             <select
@@ -845,6 +1320,175 @@ function IssueChallengeModal({
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-sm font-medium rounded-lg transition-colors"
             >
               {submitting ? 'Submitting...' : 'Issue Challenge'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function OutsideAdResponseModal({
+  onClose, raceId, responderCandidateId, candidates
+}: {
+  onClose: (refresh?: boolean) => void;
+  raceId: string;
+  responderCandidateId: string;
+  candidates: { id: string; name: string }[];
+}) {
+  const [formData, setFormData] = useState({
+    source_candidate_id: candidates.length > 0 ? candidates[0].id : "",
+    source_title: "",
+    source_media_url: "",
+    source_description: "",
+    response_text: "",
+    response_media_url: "",
+    disclaimer_text: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.source_media_url) {
+      setError("Attach or link the outside ad first");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      await api.createExternalAdResponse({
+        race_id: raceId,
+        source_candidate_id: formData.source_candidate_id,
+        responder_candidate_id: responderCandidateId,
+        source_title: formData.source_title,
+        source_media_url: formData.source_media_url,
+        source_description: formData.source_description || undefined,
+        response_text: formData.response_text,
+        response_media_url: formData.response_media_url || undefined,
+        disclaimer_text: formData.disclaimer_text,
+      });
+      onClose(true);
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message || "Failed to publish response");
+      setSubmitting(false);
+    }
+  };
+
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => onClose()}>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+          <h2 className="text-lg font-semibold text-white">Respond to Outside Ad</h2>
+          <button onClick={() => onClose()} className="text-zinc-400 hover:text-white p-1 rounded-md hover:bg-zinc-800 transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {error && (
+          <div className="mx-6 mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            Use this when an ad is running on TV, streaming, or social media outside Arena and your campaign needs a lower-cost answer beside it.
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Candidate Behind the Outside Ad</label>
+            <select
+              required
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+              value={formData.source_candidate_id}
+              onChange={e => setFormData({ ...formData, source_candidate_id: e.target.value })}
+            >
+              {candidates.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Outside Ad Title</label>
+            <input
+              required
+              type="text"
+              maxLength={200}
+              placeholder="e.g. TV ad about taxes"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+              value={formData.source_title}
+              onChange={e => setFormData({ ...formData, source_title: e.target.value })}
+            />
+          </div>
+
+          <MediaUploadField
+            candidateId={responderCandidateId}
+            onMediaUrl={url => setFormData({ ...formData, source_media_url: url })}
+            label="Upload or link the outside ad"
+          />
+
+          <div>
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">What claim are you answering?</label>
+            <textarea
+              rows={3}
+              maxLength={5000}
+              placeholder="Briefly describe the claim, attack, or context for voters."
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
+              value={formData.source_description}
+              onChange={e => setFormData({ ...formData, source_description: e.target.value })}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Your Response</label>
+            <textarea
+              required
+              rows={4}
+              maxLength={5000}
+              placeholder="Answer the claim directly with your explanation, evidence, or correction."
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
+              value={formData.response_text}
+              onChange={e => setFormData({ ...formData, response_text: e.target.value })}
+            />
+          </div>
+
+          <MediaUploadField
+            candidateId={responderCandidateId}
+            onMediaUrl={url => setFormData({ ...formData, response_media_url: url })}
+            label="Upload or link your response video/audio"
+          />
+
+          <div>
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Your Disclaimer</label>
+            <input
+              required
+              type="text"
+              maxLength={500}
+              placeholder="Paid for by..."
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+              value={formData.disclaimer_text}
+              onChange={e => setFormData({ ...formData, disclaimer_text: e.target.value })}
+            />
+          </div>
+
+          <div className="pt-2 flex justify-end gap-3">
+            <button type="button" onClick={() => onClose()} className="px-4 py-2 text-sm font-medium text-zinc-300 hover:text-white transition-colors">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting || !formData.source_media_url || candidates.length === 0}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              {submitting ? "Publishing..." : "Publish Side-by-Side Response"}
             </button>
           </div>
         </form>
@@ -1232,7 +1876,7 @@ function ClaimRebuttalModal({
               onChange={e => setResponseText(e.target.value)}
             />
           </div>
-          <MediaUploadField onMediaUrl={setMediaUrl} label="Attach Rebuttal Media (video, image, audio)" />
+          <MediaUploadField candidateId={candidateId} onMediaUrl={setMediaUrl} label="Attach Rebuttal Media (video, image, audio)" />
           <div>
             <label className="block text-sm font-medium text-zinc-400 mb-1.5">FEC Disclaimer</label>
             <input

@@ -7,26 +7,64 @@
 import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { requireAuth, requireRole, errorResponse, successResponse, parseBody, parsePagination, getClientIP } from '../middleware.js';
-import { hashIP } from '../auth.js';
+import { authenticate, hashIP, verifyJWT } from '../auth.js';
+import { checkRateLimit } from '../ratelimit.js';
 
 const router = Router({ base: '/api/analytics' });
+const ANALYTICS_MAX_PER_IP = 30;
+const ANALYTICS_WINDOW_SECONDS = 60;
+const MAX_METADATA_CHARS = 1000;
+
+function boundedMetadata(metadata) {
+  if (metadata === undefined || metadata === null) return null;
+  let serialized;
+  try {
+    serialized = typeof metadata === 'string' ? metadata : JSON.stringify(metadata);
+  } catch {
+    return null;
+  }
+  return serialized.length > MAX_METADATA_CHARS ? serialized.slice(0, MAX_METADATA_CHARS) : serialized;
+}
 
 // POST /api/analytics/events — Non-blocking batch event ingestion
 router.post('/events', async (request, env, ctx) => {
+  const ip = getClientIP(request);
+  const ipHash = await hashIP(ip);
+  if (ipHash) {
+    const rl = await checkRateLimit(env.ARENA_DB, `analytics:${ipHash}`, ANALYTICS_MAX_PER_IP, ANALYTICS_WINDOW_SECONDS);
+    if (rl.limited) return errorResponse('Too many analytics events. Please slow down.', 429);
+  }
+
   const body = await parseBody(request);
   if (!body || !body.events || !Array.isArray(body.events)) {
     return successResponse({ accepted: 0 }); // Don't error on analytics
   }
 
-  const ip = getClientIP(request);
-  const ipHash = await hashIP(ip);
+  const user = await authenticate(request, env);
+  let sessionId = null;
+  if (user) {
+    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+    const payload = token ? await verifyJWT(token, env) : null;
+    sessionId = payload?.sessionId || null;
+  }
   const events = body.events.slice(0, 50); // Cap at 50 per batch
 
   const inserts = events.map(e => {
     const id = generateId('evt');
     return env.ARENA_DB.prepare(
       `INSERT INTO analytics_events (id, event_type, user_id, session_id, race_id, candidate_id, content_type, content_id, metadata, ip_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(id, e.event_type || 'unknown', e.user_id || null, e.session_id || null, e.race_id || null, e.candidate_id || null, e.content_type || null, e.content_id || null, e.metadata ? JSON.stringify(e.metadata) : null, ipHash);
+    ).bind(
+      id,
+      e.event_type || 'unknown',
+      user?.id || null,
+      sessionId,
+      e.race_id || null,
+      e.candidate_id || null,
+      e.content_type || null,
+      e.content_id || null,
+      boundedMetadata(e.metadata),
+      ipHash,
+    );
   });
 
   // Non-blocking write

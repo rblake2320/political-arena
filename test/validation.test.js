@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  validate, registerSchema, createChallengeSchema, createAdSchema, grantCreditsSchema,
+  validate, registerSchema, createChallengeSchema, createAdSchema, grantCreditsSchema, createStatementSchema,
 } from '../src/validation.js';
 
 describe('registerSchema', () => {
@@ -56,6 +56,22 @@ describe('createChallengeSchema', () => {
     expect(validate(createChallengeSchema, { ...base, deadline_business_days: 11 }).valid).toBe(false);
     expect(validate(createChallengeSchema, { ...base, deadline_business_days: 10 }).valid).toBe(true);
   });
+
+  it('requires a recite for fact-check callouts', () => {
+    expect(validate(createChallengeSchema, { ...base, challenge_type: 'fact_check' }).valid).toBe(false);
+    const result = validate(createChallengeSchema, {
+      ...base,
+      challenge_type: 'fact_check',
+      claim_text: 'The city budget doubled last year.',
+      initial_recites: [{
+        url: 'https://example.com/source',
+        title: 'Official source',
+        source_type: 'official_record',
+      }],
+    });
+    expect(result.valid).toBe(true);
+    expect(result.data.initial_recites[0].stance).toBe('supports');
+  });
 });
 
 describe('createAdSchema', () => {
@@ -81,5 +97,34 @@ describe('grantCreditsSchema', () => {
     expect(validate(grantCreditsSchema, { amount: 1001 }).valid).toBe(false);
     expect(validate(grantCreditsSchema, { amount: 2.5 }).valid).toBe(false);
     expect(validate(grantCreditsSchema, { amount: 500 }).valid).toBe(true);
+  });
+});
+
+describe('createStatementSchema', () => {
+  const base = {
+    candidate_id: 'cand-1',
+    statement_text: 'We reduced property taxes by ten percent.',
+    source_url: 'https://www.youtube.com/watch?v=abc123',
+    source_type: 'youtube',
+  };
+
+  it('accepts timestamped source-backed statements', () => {
+    const result = validate(createStatementSchema, {
+      ...base,
+      question_text: 'What did you do on taxes?',
+      quote_start_seconds: 61,
+      quote_end_seconds: 75,
+      transcript_url: 'https://example.com/transcript',
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects invalid source timestamps', () => {
+    const result = validate(createStatementSchema, {
+      ...base,
+      quote_start_seconds: 80,
+      quote_end_seconds: 40,
+    });
+    expect(result.valid).toBe(false);
   });
 });

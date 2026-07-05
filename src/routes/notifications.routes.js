@@ -10,6 +10,23 @@ import { validate, subscribeSchema } from '../validation.js';
 
 const router = Router({ base: '/api/notifications' });
 
+async function subscriptionTargetExists(env, subscriptionType, targetId) {
+  if (subscriptionType === 'race') {
+    return !!(await env.ARENA_DB.prepare(`SELECT id FROM races WHERE id = ?`).bind(targetId).first());
+  }
+  if (subscriptionType === 'candidate') {
+    return !!(await env.ARENA_DB.prepare(
+      `SELECT id FROM candidates WHERE id = ? AND is_active = 1`
+    ).bind(targetId).first());
+  }
+  if (subscriptionType === 'challenge') {
+    return !!(await env.ARENA_DB.prepare(
+      `SELECT id FROM challenges WHERE id = ? AND is_visible = 1`
+    ).bind(targetId).first());
+  }
+  return false;
+}
+
 // POST /api/notifications/subscribe — Subscribe to events
 router.post('/subscribe', async (request, env) => {
   const authError = await requireAuth(request, env);
@@ -18,6 +35,9 @@ router.post('/subscribe', async (request, env) => {
   const body = await parseBody(request);
   const { valid, errors, data } = validate(subscribeSchema, body);
   if (!valid) return errorResponse(errors.join('; '));
+
+  const targetExists = await subscriptionTargetExists(env, data.subscription_type, data.target_id);
+  if (!targetExists) return errorResponse('Subscription target not found', 404);
 
   // Check for existing subscription
   const existing = await env.ARENA_DB.prepare(

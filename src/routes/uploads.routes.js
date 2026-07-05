@@ -18,25 +18,9 @@ import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { requireAuth, errorResponse, successResponse, parseBody, getClientIP } from '../middleware.js';
 import { auditLog } from '../audit.js';
+import { resolveUploadType, r2MediaResponse, supportedMediaTypes } from '../media.js';
 
 const router = Router({ base: '/api/uploads' });
-
-// Allowed MIME types
-const ALLOWED_TYPES = {
-  // Video (YouTube Shorts-style)
-  'video/mp4': { ext: 'mp4', maxSize: 50 * 1024 * 1024 }, // 50MB (Worker memory limit)
-  'video/webm': { ext: 'webm', maxSize: 50 * 1024 * 1024 },
-  'video/quicktime': { ext: 'mov', maxSize: 50 * 1024 * 1024 },
-  // Images
-  'image/jpeg': { ext: 'jpg', maxSize: 10 * 1024 * 1024 }, // 10MB
-  'image/png': { ext: 'png', maxSize: 10 * 1024 * 1024 },
-  'image/gif': { ext: 'gif', maxSize: 10 * 1024 * 1024 },
-  'image/webp': { ext: 'webp', maxSize: 10 * 1024 * 1024 },
-  // Audio (for challenge responses etc.)
-  'audio/mpeg': { ext: 'mp3', maxSize: 20 * 1024 * 1024 }, // 20MB
-  'audio/wav': { ext: 'wav', maxSize: 20 * 1024 * 1024 },
-  'audio/webm': { ext: 'weba', maxSize: 20 * 1024 * 1024 },
-};
 
 // POST /api/uploads/presign — Get presigned URL for R2 upload (candidate staff only)
 router.post('/presign', async (request, env, ctx) => {
@@ -47,12 +31,13 @@ router.post('/presign', async (request, env, ctx) => {
   if (!body) return errorResponse('Invalid request body');
 
   const { filename, content_type, candidate_id } = body;
-  if (!filename || !content_type) return errorResponse('filename and content_type required');
+  if (!filename) return errorResponse('filename required');
 
-  // Verify content type
-  const typeConfig = ALLOWED_TYPES[content_type];
+  // Verify content type. Some mobile browsers provide an empty MIME type, so
+  // infer from filename extension when needed.
+  const typeConfig = resolveUploadType(content_type, filename);
   if (!typeConfig) {
-    return errorResponse(`Unsupported file type. Allowed: ${Object.keys(ALLOWED_TYPES).join(', ')}`);
+    return errorResponse(`Unsupported file type. Allowed: ${supportedMediaTypes().map(t => t.mime).join(', ')}`);
   }
 
   // Verify candidate staff authorization
@@ -76,6 +61,8 @@ router.post('/presign', async (request, env, ctx) => {
       method: 'PUT',
       key,
       max_size: typeConfig.maxSize,
+      content_type: typeConfig.mime,
+      media_kind: typeConfig.kind,
       public_url: `/media/${key}`,
       file_id: fileId,
     });
@@ -87,6 +74,8 @@ router.post('/presign', async (request, env, ctx) => {
     method: 'POST',
     key,
     max_size: typeConfig.maxSize,
+    content_type: typeConfig.mime,
+    media_kind: typeConfig.kind,
     public_url: `/api/uploads/serve/${fileId}`,
     file_id: fileId,
     note: 'R2 not enabled — using direct upload fallback',
@@ -108,6 +97,7 @@ async function handleDirectUpload(request, env, ctx) {
   const file = formData.get('file');
   const key = formData.get('key');
   const candidateId = formData.get('candidate_id');
+  const candidateIdStr = candidateId ? String(candidateId) : '';
 
   if (!file || !key) return errorResponse('file and key required');
 
@@ -120,12 +110,16 @@ async function handleDirectUpload(request, env, ctx) {
   // Verify the key belongs to this user or their candidate
   const keyOwner = keyStr.split('/')[1];
   const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isAdmin && keyOwner !== request.user.id && keyOwner !== candidateId) {
+  if (candidateIdStr && keyOwner !== candidateIdStr) {
+    return errorResponse('Upload key does not match candidate', 403);
+  }
+  if (!isAdmin && keyOwner !== request.user.id && keyOwner !== candidateIdStr) {
     return errorResponse('Upload key does not match your identity', 403);
   }
 
-  // Verify content type
-  const typeConfig = ALLOWED_TYPES[file.type];
+  // Verify content type. Fall back to filename/key extension for mobile files
+  // that arrive without a MIME type.
+  const typeConfig = resolveUploadType(file.type, file.name || keyStr);
   if (!typeConfig) return errorResponse('Unsupported file type');
 
   // Verify size
@@ -134,12 +128,12 @@ async function handleDirectUpload(request, env, ctx) {
   }
 
   // Verify candidate staff
-  if (candidateId) {
+  if (candidateIdStr) {
     const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
     if (!isAdmin) {
       const link = await env.ARENA_DB.prepare(
         `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-      ).bind(request.user.id, candidateId).first();
+      ).bind(request.user.id, candidateIdStr).first();
       if (!link) return errorResponse('Only registered candidate staff can upload media', 403);
     }
   }
@@ -149,28 +143,37 @@ async function handleDirectUpload(request, env, ctx) {
     const arrayBuffer = await file.arrayBuffer();
     await env.ARENA_MEDIA.put(key, arrayBuffer, {
       httpMetadata: {
-        contentType: file.type,
+        contentType: typeConfig.mime,
       },
       customMetadata: {
         uploadedBy: request.user.id,
-        candidateId: candidateId || '',
+        candidateId: candidateIdStr,
         originalName: file.name || 'unknown',
       },
     });
+
+    const filename = keyStr.split('/').pop() || '';
+    const fileId = filename.split('.')[0];
+    await env.ARENA_DB.prepare(
+      `INSERT OR REPLACE INTO media_uploads
+       (file_id, key, uploaded_by, candidate_id, content_type, size_bytes, original_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(fileId, keyStr, request.user.id, candidateIdStr || null, typeConfig.mime, file.size, file.name || 'unknown').run();
 
     auditLog(env.ARENA_DB, ctx, {
       actorId: request.user.id,
       action: 'media.upload',
       entityType: 'media',
       entityId: key,
-      afterState: { type: file.type, size: file.size, candidate: candidateId },
+      afterState: { type: typeConfig.mime, size: file.size, candidate: candidateIdStr || null },
       ipAddress: getClientIP(request),
     });
 
     return successResponse({
       key,
       url: `/media/${key}`,
-      type: file.type,
+      type: typeConfig.mime,
+      media_kind: typeConfig.kind,
       size: file.size,
     });
   }
@@ -184,36 +187,25 @@ router.get('/serve/:fileId', async (request, env) => {
   if (!env.ARENA_MEDIA) return errorResponse('Media storage not available', 503);
 
   const { fileId } = request.params;
+  if (!/^media_[a-zA-Z0-9_-]+$/.test(fileId)) {
+    return errorResponse('Invalid file id', 400);
+  }
 
-  // Search for file in R2 by prefix (exact filename match, not substring)
-  const list = await env.ARENA_MEDIA.list({ prefix: `uploads/`, limit: 1000 });
-  const match = list.objects.find(o => {
-    const filename = o.key.split('/').pop() || '';
-    return filename === fileId || filename.startsWith(`${fileId}.`);
-  });
+  const upload = await env.ARENA_DB.prepare(
+    `SELECT key, content_type FROM media_uploads WHERE file_id = ?`
+  ).bind(fileId).first();
+  if (!upload) return errorResponse('File not found', 404);
 
-  if (!match) return errorResponse('File not found', 404);
-
-  const object = await env.ARENA_MEDIA.get(match.key);
-  if (!object) return errorResponse('File not found', 404);
-
-  return new Response(object.body, {
-    headers: {
-      'Content-Type': object.httpMetadata?.contentType || 'application/octet-stream',
-      'Cache-Control': 'public, max-age=31536000',
-    },
-  });
+  const response = await r2MediaResponse(env.ARENA_MEDIA, upload.key, request, upload.content_type, 'public, max-age=31536000');
+  if (!response) return errorResponse('File not found', 404);
+  return response;
 });
 
 // GET /api/uploads/info — Get upload limits and supported types
 router.get('/info', async (request, env) => {
   return successResponse({
     r2_enabled: !!env.ARENA_MEDIA,
-    supported_types: Object.entries(ALLOWED_TYPES).map(([mime, config]) => ({
-      mime,
-      extension: config.ext,
-      max_size_mb: Math.round(config.maxSize / 1024 / 1024),
-    })),
+    supported_types: supportedMediaTypes(),
     video_guidelines: {
       recommended_format: 'mp4 (H.264)',
       max_duration_seconds: 60,

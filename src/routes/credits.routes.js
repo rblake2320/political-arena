@@ -72,19 +72,24 @@ router.post('/:candidateId/grant', async (request, env, ctx) => {
     ).bind(txId, candidateId, data.amount, data.description || `Admin grant by ${request.user.display_name}`),
   ]);
 
+  const updatedCandidate = await env.ARENA_DB.prepare(
+    `SELECT credit_balance FROM candidates WHERE id = ?`
+  ).bind(candidateId).first();
+  const updatedBalance = updatedCandidate?.credit_balance ?? candidate.credit_balance + data.amount;
+
   auditLog(env.ARENA_DB, ctx, {
     actorId: request.user.id,
     action: 'credits.grant',
     entityType: 'candidate',
     entityId: candidateId,
     beforeState: { credit_balance: candidate.credit_balance },
-    afterState: { credit_balance: candidate.credit_balance + data.amount, amount: data.amount },
+    afterState: { credit_balance: updatedBalance, amount: data.amount },
     ipAddress: getClientIP(request),
   });
 
   return successResponse({
     candidate_id: candidateId,
-    credit_balance: candidate.credit_balance + data.amount,
+    credit_balance: updatedBalance,
     transaction_id: txId,
   });
 });
