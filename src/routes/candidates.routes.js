@@ -155,11 +155,17 @@ router.get('/:id/public-profile', async (request, env) => {
        ORDER BY created_at DESC LIMIT 8`
     ).bind(id).all(),
     env.ARENA_DB.prepare(
-      `SELECT id, statement_text, topic, source_type, source_url, source_title, quote_start_seconds,
-              truth_status, answer_status, evasion_score, confidence_score, statement_at, created_at
-       FROM public_statements
-       WHERE candidate_id = ? AND is_public = 1
-       ORDER BY COALESCE(statement_at, created_at) DESC LIMIT 10`
+      `SELECT ps.id, ps.statement_text, ps.topic, ps.source_type, ps.source_url, ps.source_title, ps.quote_start_seconds,
+              ps.truth_status, ps.answer_status, ps.evasion_score, ps.confidence_score,
+              ps.review_status, ps.review_rubric_version, ps.review_note,
+              ps.statement_at, ps.created_at, ps.reviewed_at, ps.second_reviewed_at,
+              reviewer.display_name as reviewer_name,
+              second_reviewer.display_name as second_reviewer_name
+       FROM public_statements ps
+       LEFT JOIN users reviewer ON reviewer.id = ps.reviewed_by
+       LEFT JOIN users second_reviewer ON second_reviewer.id = ps.second_reviewed_by
+       WHERE ps.candidate_id = ? AND ps.is_public = 1
+       ORDER BY COALESCE(ps.statement_at, ps.created_at) DESC LIMIT 10`
     ).bind(id).all(),
   ]);
 

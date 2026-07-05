@@ -109,6 +109,26 @@ export async function runRuntimeMigrations(db) {
     ]);
   }
 
+  const statementColumnsResult = await db.prepare(`PRAGMA table_info(public_statements)`).all();
+  const statementColumns = new Set((statementColumnsResult.results || []).map(c => c.name));
+  const statementColumnMigrations = [];
+  if (!statementColumns.has('review_status')) {
+    statementColumnMigrations.push(db.prepare(`ALTER TABLE public_statements ADD COLUMN review_status TEXT NOT NULL DEFAULT 'unreviewed'`));
+  }
+  if (!statementColumns.has('second_reviewed_by')) {
+    statementColumnMigrations.push(db.prepare(`ALTER TABLE public_statements ADD COLUMN second_reviewed_by TEXT REFERENCES users(id)`));
+  }
+  if (!statementColumns.has('second_reviewed_at')) {
+    statementColumnMigrations.push(db.prepare(`ALTER TABLE public_statements ADD COLUMN second_reviewed_at TEXT`));
+  }
+  if (!statementColumns.has('review_rubric_version')) {
+    statementColumnMigrations.push(db.prepare(`ALTER TABLE public_statements ADD COLUMN review_rubric_version TEXT`));
+  }
+  if (!statementColumns.has('latest_review_version_id')) {
+    statementColumnMigrations.push(db.prepare(`ALTER TABLE public_statements ADD COLUMN latest_review_version_id TEXT`));
+  }
+  if (statementColumnMigrations.length > 0) await db.batch(statementColumnMigrations);
+
   const auditColumnsResult = await db.prepare(`PRAGMA table_info(audit_log)`).all();
   const auditColumns = new Set((auditColumnsResult.results || []).map(c => c.name));
   const auditColumnMigrations = [];
@@ -385,12 +405,66 @@ export async function initDatabase(db) {
       answer_status TEXT NOT NULL DEFAULT 'not_applicable' CHECK(answer_status IN ('answered','partial','dodged','not_applicable','unclear')),
       evasion_score INTEGER NOT NULL DEFAULT 0 CHECK(evasion_score BETWEEN 0 AND 100),
       confidence_score INTEGER NOT NULL DEFAULT 0 CHECK(confidence_score BETWEEN 0 AND 100),
+      review_status TEXT NOT NULL DEFAULT 'unreviewed' CHECK(review_status IN ('unreviewed','pending_second_review','published','disputed','revised','upheld')),
       reviewed_by TEXT REFERENCES users(id),
       reviewed_at TEXT,
+      second_reviewed_by TEXT REFERENCES users(id),
+      second_reviewed_at TEXT,
+      review_rubric_version TEXT,
+      latest_review_version_id TEXT,
       review_note TEXT,
       is_public INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS statement_review_versions (
+      id TEXT PRIMARY KEY,
+      statement_id TEXT NOT NULL REFERENCES public_statements(id),
+      reviewer_id TEXT NOT NULL REFERENCES users(id),
+      second_reviewer_id TEXT REFERENCES users(id),
+      version_number INTEGER NOT NULL,
+      truth_status TEXT NOT NULL CHECK(truth_status IN ('unreviewed','supported','disputed','false','mixed','context_needed')),
+      answer_status TEXT NOT NULL CHECK(answer_status IN ('answered','partial','dodged','not_applicable','unclear')),
+      evasion_score INTEGER NOT NULL CHECK(evasion_score BETWEEN 0 AND 100),
+      confidence_score INTEGER NOT NULL CHECK(confidence_score BETWEEN 0 AND 100),
+      review_note TEXT,
+      second_review_note TEXT,
+      rubric_version TEXT NOT NULL DEFAULT '2026-07-05',
+      status TEXT NOT NULL DEFAULT 'pending_second_review' CHECK(status IN ('pending_second_review','published','rejected','superseded')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      second_reviewed_at TEXT,
+      published_at TEXT,
+      UNIQUE(statement_id, version_number)
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS correction_requests (
+      id TEXT PRIMARY KEY,
+      content_type TEXT NOT NULL CHECK(content_type IN ('statement','challenge','recite','candidate_profile')),
+      content_id TEXT NOT NULL,
+      submitted_by TEXT NOT NULL REFERENCES users(id),
+      candidate_id TEXT REFERENCES candidates(id),
+      request_text TEXT NOT NULL,
+      requested_change TEXT,
+      evidence_url TEXT,
+      status TEXT NOT NULL DEFAULT 'submitted' CHECK(status IN ('submitted','under_review','upheld','revised','rejected','withdrawn')),
+      public_note TEXT,
+      reviewed_by TEXT REFERENCES users(id),
+      reviewed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS correction_request_events (
+      id TEXT PRIMARY KEY,
+      correction_request_id TEXT NOT NULL REFERENCES correction_requests(id),
+      actor_id TEXT NOT NULL REFERENCES users(id),
+      action_type TEXT NOT NULL CHECK(action_type IN ('submitted','status_changed','note_added','reviewed','revised','upheld','rejected','withdrawn')),
+      note TEXT,
+      previous_status TEXT,
+      new_status TEXT,
+      metadata TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
 
     // ========== ENGAGEMENT TABLES ==========
@@ -749,6 +823,12 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_public_statements_candidate ON public_statements(candidate_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_public_statements_claim ON public_statements(claim_key, candidate_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_public_statements_review ON public_statements(truth_status, answer_status)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_public_statements_review_status ON public_statements(review_status, reviewed_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_statement_review_versions_statement ON statement_review_versions(statement_id, status, version_number)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_statement_review_versions_status ON statement_review_versions(status, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_correction_requests_target ON correction_requests(content_type, content_id, status)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_correction_requests_candidate ON correction_requests(candidate_id, status, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_correction_request_events_request ON correction_request_events(correction_request_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_reactions_content ON reactions(content_type, content_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_reactions_user ON reactions(user_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_recites_content ON recites(content_type, content_id, status)`),

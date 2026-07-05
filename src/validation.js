@@ -227,6 +227,26 @@ export const reviewStatementSchema = z.object({
   evasion_score: z.number().int().min(0).max(100).optional(),
   confidence_score: z.number().int().min(0).max(100).optional(),
   review_note: z.string().max(1000).optional(),
+  rubric_version: z.string().max(40).optional(),
+});
+
+export const secondReviewStatementSchema = z.object({
+  decision: z.enum(['approve', 'reject']),
+  review_note: z.string().max(1000).optional(),
+});
+
+export const createCorrectionRequestSchema = z.object({
+  content_type: z.enum(['statement', 'challenge', 'recite', 'candidate_profile']),
+  content_id: z.string().min(1).max(120),
+  request_text: z.string().trim().min(10).max(2000),
+  requested_change: z.string().trim().min(3).max(1000).optional(),
+  evidence_url: z.string().url().max(1000).optional(),
+});
+
+export const reviewCorrectionRequestSchema = z.object({
+  status: z.enum(['under_review', 'upheld', 'revised', 'rejected']),
+  public_note: z.string().trim().min(5).max(1500),
+  internal_note: z.string().max(1500).optional(),
 });
 
 // ===== Reaction Schemas =====

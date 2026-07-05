@@ -359,6 +359,7 @@ export async function reviewStatement(id: string, data: {
   evasion_score?: number;
   confidence_score?: number;
   review_note?: string;
+  rubric_version?: string;
 }) {
   const result = unwrap<any>(await api.put(`/statements/${id}/review`, data));
   void trackEvent({
@@ -373,6 +374,51 @@ export async function reviewStatement(id: string, data: {
     },
   });
   return result;
+}
+
+export async function secondReviewStatement(statementId: string, reviewVersionId: string, data: {
+  decision: 'approve' | 'reject';
+  review_note?: string;
+}) {
+  return unwrap<any>(await api.put(`/statements/${statementId}/review/${reviewVersionId}/second-review`, data));
+}
+
+export async function getStatementReviewRubric() {
+  return unwrap<any>(await api.get('/statements/review-rubric'));
+}
+
+export async function getPendingStatementReviews(params?: { page?: number }) {
+  return unwrap<any>(await api.get('/statements/reviews/pending', { params }));
+}
+
+// ---- Corrections / Appeals ----
+export async function submitCorrectionRequest(data: {
+  content_type: 'statement' | 'challenge' | 'recite' | 'candidate_profile';
+  content_id: string;
+  request_text: string;
+  requested_change?: string;
+  evidence_url?: string;
+}) {
+  return unwrap<any>(await api.post('/corrections', data));
+}
+
+export async function getCorrections(params: {
+  content_type: 'statement' | 'challenge' | 'recite' | 'candidate_profile';
+  content_id: string;
+}) {
+  return unwrap<any>(await api.get('/corrections', { params }));
+}
+
+export async function getPendingCorrections(params?: { status?: 'submitted' | 'under_review' | 'upheld' | 'revised' | 'rejected'; page?: number }) {
+  return unwrap<any>(await api.get('/corrections/pending', { params }));
+}
+
+export async function reviewCorrectionRequest(id: string, data: {
+  status: 'under_review' | 'upheld' | 'revised' | 'rejected';
+  public_note: string;
+  internal_note?: string;
+}) {
+  return unwrap<any>(await api.put(`/corrections/${id}/review`, data));
 }
 
 // ---- Surveys / What Matters ----

@@ -493,6 +493,7 @@ describe('edge-case regressions', () => {
   it('logs timestamped statements and reflects review data on public candidate profiles', async () => {
     const staff = await registerUser('statementstaff');
     const admin = await makeAdmin('statementadmin');
+    const secondAdmin = await makeAdmin('statementsecond');
     const suffix = Date.now().toString(36);
     const raceId = `edge-stmt-race-${suffix}`;
     const candidateId = `edge-stmt-cand-${suffix}`;
@@ -538,16 +539,65 @@ describe('edge-case regressions', () => {
       review_note: 'Answer partially addressed the question.',
     }, admin.token);
     expect(reviewed.status).toBe(200);
+    expect(reviewed.body.data.review_status).toBe('pending_second_review');
+    expect(reviewed.body.data.requires_second_review).toBe(true);
+
+    const pendingProfile = await get(`/api/candidates/${candidateId}/public-profile`);
+    expect(pendingProfile.status).toBe(200);
+    expect(pendingProfile.body.data.trust.avg_evasion_score).toBe(0);
+
+    const selfApproval = await put(`/api/statements/${created.body.data.id}/review/${reviewed.body.data.review_version_id}/second-review`, {
+      decision: 'approve',
+    }, admin.token);
+    expect(selfApproval.status).toBe(400);
+
+    const published = await put(`/api/statements/${created.body.data.id}/review/${reviewed.body.data.review_version_id}/second-review`, {
+      decision: 'approve',
+      review_note: 'Second reviewer agrees the answer was materially partial.',
+    }, secondAdmin.token);
+    expect(published.status).toBe(200);
+    expect(published.body.data.review_status).toBe('published');
 
     const profile = await get(`/api/candidates/${candidateId}/public-profile`);
     expect(profile.status).toBe(200);
     expect(profile.body.data.stats.statements).toBe(1);
     expect(profile.body.data.trust.avg_evasion_score).toBe(45);
     expect(profile.body.data.recent_statements[0].truth_status).toBe('disputed');
+    expect(profile.body.data.recent_statements[0].reviewer_name).toBe('Edge statementadmin');
+    expect(profile.body.data.recent_statements[0].second_reviewer_name).toBe('Edge statementsecond');
 
     const search = await get('/api/statements/search?q=property%20taxes');
     expect(search.status).toBe(200);
     expect(search.body.data.statements.some(item => item.id === created.body.data.id)).toBe(true);
+
+    const correction = await post('/api/corrections', {
+      content_type: 'statement',
+      content_id: created.body.data.id,
+      request_text: 'The score should reflect that the answer included a direct percentage and a source citation.',
+      requested_change: 'Please revise the evasion score or add a public note explaining why it remains partial.',
+      evidence_url: `https://example.com/corrections/stmt-${suffix}`,
+    }, staff.token);
+    expect(correction.status).toBe(200);
+    expect(correction.body.data.status).toBe('submitted');
+
+    const publicCorrections = await get(`/api/corrections?content_type=statement&content_id=${created.body.data.id}`);
+    expect(publicCorrections.status).toBe(200);
+    expect(publicCorrections.body.data.corrections).toHaveLength(1);
+    expect(publicCorrections.body.data.corrections[0].events[0].action_type).toBe('submitted');
+
+    const resolved = await put(`/api/corrections/${correction.body.data.id}/review`, {
+      status: 'upheld',
+      public_note: 'Reviewed under the published rubric. The partial-answer score is upheld because the source did not address the full question.',
+    }, secondAdmin.token);
+    expect(resolved.status).toBe(200);
+    expect(resolved.body.data.status).toBe('upheld');
+
+    const statement = await get(`/api/statements/${created.body.data.id}`);
+    expect(statement.status).toBe(200);
+    expect(statement.body.data.statement.review_status).toBe('upheld');
+    expect(statement.body.data.review_history[0].status).toBe('published');
+    expect(statement.body.data.corrections[0].public_note).toContain('partial-answer score is upheld');
+    expect(statement.body.data.rubric.version).toBe('2026-07-05');
   });
 
   it('rejects direct uploads when the key owner and candidate metadata differ', async () => {
