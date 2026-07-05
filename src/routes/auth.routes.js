@@ -20,8 +20,8 @@ const LOGIN_MAX_PER_EMAIL = 10;     // per 15 min
 const LOGIN_WINDOW_SECONDS = 15 * 60;
 const REGISTER_MAX_PER_IP = 5;      // per hour
 const REGISTER_WINDOW_SECONDS = 60 * 60;
-const VERIFY_MAX_PER_IP = 5;        // per 10 min
-const VERIFY_WINDOW_SECONDS = 10 * 60;
+const VERIFY_EMAIL_MAX_PER_IP = 5;  // per 10 min
+const VERIFY_EMAIL_WINDOW_SECONDS = 10 * 60;
 const FORGOT_MAX_PER_IP = 5;        // per 15 min
 const FORGOT_WINDOW_SECONDS = 15 * 60;
 const RESET_MAX_PER_IP = 10;        // per 15 min
@@ -211,7 +211,7 @@ router.post('/verify-email', async (request, env, ctx) => {
   // Rate limit to prevent token enumeration
   const verifyIpHash = await hashIP(getClientIP(request));
   if (verifyIpHash) {
-    const rl = await checkRateLimit(env.ARENA_DB, `verify:${verifyIpHash}`, VERIFY_MAX_PER_IP, VERIFY_WINDOW_SECONDS);
+    const rl = await checkRateLimit(env.ARENA_DB, `verify:${verifyIpHash}`, VERIFY_EMAIL_MAX_PER_IP, VERIFY_EMAIL_WINDOW_SECONDS);
     if (rl.limited) return errorResponse('Too many verification attempts. Please try again later.', 429);
   }
 
@@ -271,7 +271,7 @@ router.post('/forgot-password', async (request, env, ctx) => {
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
 
   await env.ARENA_DB.prepare(
-    `UPDATE users SET password_reset_token = ?, password_reset_expires = ?, updated_at = datetime('now') WHERE id = ?`
+    `UPDATE users SET password_reset_token_hash = ?, password_reset_expires_at = ?, updated_at = datetime('now') WHERE id = ?`
   ).bind(tokenHash, expiresAt, user.id).run();
 
   auditLog(env.ARENA_DB, ctx, {
@@ -308,7 +308,7 @@ router.post('/reset-password', async (request, env, ctx) => {
   const tokenHash = await hashToken(data.token);
 
   const user = await env.ARENA_DB.prepare(
-    `SELECT id FROM users WHERE password_reset_token = ? AND password_reset_expires > datetime('now') AND is_active = 1`
+    `SELECT id FROM users WHERE password_reset_token_hash = ? AND password_reset_expires_at > datetime('now') AND is_active = 1`
   ).bind(tokenHash).first();
 
   if (!user) return errorResponse('Invalid or expired reset token', 400);
@@ -318,7 +318,7 @@ router.post('/reset-password', async (request, env, ctx) => {
   // Atomically: update password, clear reset token, invalidate all sessions
   await env.ARENA_DB.batch([
     env.ARENA_DB.prepare(
-      `UPDATE users SET password_hash = ?, password_reset_token = NULL, password_reset_expires = NULL, updated_at = datetime('now') WHERE id = ?`
+      `UPDATE users SET password_hash = ?, password_reset_token_hash = NULL, password_reset_expires_at = NULL, updated_at = datetime('now') WHERE id = ?`
     ).bind(newHash, user.id),
     env.ARENA_DB.prepare(
       `UPDATE sessions SET is_active = 0 WHERE user_id = ? AND is_active = 1`

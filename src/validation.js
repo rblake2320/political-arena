@@ -73,6 +73,11 @@ export const updateCandidateSchema = z.object({
   website_url: z.string().url().max(500).optional(),
 });
 
+export const addCandidateStaffSchema = z.object({
+  user_id: z.string().min(1),
+  role: z.enum(['primary', 'staff', 'viewer']).optional().default('staff'),
+});
+
 // ===== Ad Schemas =====
 
 export const createAdSchema = z.object({
@@ -160,6 +165,19 @@ export const submitPrioritiesSchema = z.object({
     issue_category_id: z.string().min(1),
     priority_rank: z.number().int().min(1).max(5),
   })).min(1).max(5),
+}).superRefine((data, ctx) => {
+  const issueIds = new Set();
+  const ranks = new Set();
+  data.priorities.forEach((priority, index) => {
+    if (issueIds.has(priority.issue_category_id)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['priorities', index, 'issue_category_id'], message: 'Issue categories must be unique' });
+    }
+    issueIds.add(priority.issue_category_id);
+    if (ranks.has(priority.priority_rank)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['priorities', index, 'priority_rank'], message: 'Priority ranks must be unique' });
+    }
+    ranks.add(priority.priority_rank);
+  });
 });
 
 // ===== Question Schemas =====

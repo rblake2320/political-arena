@@ -315,7 +315,11 @@ router.post('/:id/refuse', async (request, env, ctx) => {
 
   const { id } = request.params;
   const body = await parseBody(request);
-  const refusalReason = body?.refusal_reason || null;
+  if (!body) return errorResponse('Invalid request body');
+
+  const { valid, errors, data } = validate(refuseChallengeSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+  const refusalReason = data.refusal_reason || null;
 
   const challenge = await env.ARENA_DB.prepare(`SELECT * FROM challenges WHERE id = ?`).bind(id).first();
   if (!challenge) return errorResponse('Challenge not found', 404);

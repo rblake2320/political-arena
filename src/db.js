@@ -20,6 +20,8 @@ export async function initDatabase(db) {
       role TEXT NOT NULL DEFAULT 'voter' CHECK(role IN ('voter','candidate_staff','moderator','admin','super_admin')),
       email_verified INTEGER NOT NULL DEFAULT 0,
       verification_token TEXT,
+      password_reset_token_hash TEXT,
+      password_reset_expires_at TEXT,
       verification_status TEXT NOT NULL DEFAULT 'unverified' CHECK(verification_status IN ('unverified','pending','verified','rejected')),
       party_affiliation TEXT,
       jurisdiction_state TEXT,
@@ -421,13 +423,13 @@ export async function initDatabase(db) {
 
     // ========== MEDIA UPLOAD TRACKING ==========
     db.prepare(`CREATE TABLE IF NOT EXISTS media_uploads (
-      id TEXT PRIMARY KEY,
-      file_id TEXT NOT NULL UNIQUE,
-      r2_key TEXT NOT NULL,
-      owner_id TEXT NOT NULL REFERENCES users(id),
+      file_id TEXT PRIMARY KEY,
+      key TEXT NOT NULL UNIQUE,
+      uploaded_by TEXT NOT NULL REFERENCES users(id),
       candidate_id TEXT REFERENCES candidates(id),
-      file_type TEXT NOT NULL,
-      file_size INTEGER NOT NULL,
+      content_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      original_name TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
 
@@ -494,17 +496,25 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_creds_user ON press_credentials(user_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_credit_tx_candidate ON credit_transactions(candidate_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_challenges_candidate_created ON challenges(challenger_candidate_id, created_at)`),
-    db.prepare(`CREATE INDEX IF NOT EXISTS idx_media_uploads_file_id ON media_uploads(file_id)`),
-    db.prepare(`CREATE INDEX IF NOT EXISTS idx_media_uploads_owner ON media_uploads(owner_id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_users_password_reset ON users(password_reset_token_hash, password_reset_expires_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_media_uploads_key ON media_uploads(key)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_media_uploads_candidate ON media_uploads(candidate_id, created_at)`),
   ]);
 
-  // Password reset columns: ALTER TABLE is used because the table already exists in deployed DBs.
-  // D1/SQLite doesn't support IF NOT EXISTS on ALTER TABLE, so we catch the "already exists" error.
-  try { await db.prepare(`ALTER TABLE users ADD COLUMN password_reset_token TEXT`).run(); } catch {}
-  try { await db.prepare(`ALTER TABLE users ADD COLUMN password_reset_expires TEXT`).run(); } catch {}
+  // Runtime migrations — PRAGMA-based so they're idempotent and don't spam error logs.
+  const userColsResult = await db.prepare(`PRAGMA table_info(users)`).all();
+  const userCols = new Set((userColsResult.results || []).map(c => c.name));
+  const userMigrations = [];
+  if (!userCols.has('password_reset_token_hash')) {
+    userMigrations.push(db.prepare(`ALTER TABLE users ADD COLUMN password_reset_token_hash TEXT`));
+  }
+  if (!userCols.has('password_reset_expires_at')) {
+    userMigrations.push(db.prepare(`ALTER TABLE users ADD COLUMN password_reset_expires_at TEXT`));
+  }
+  if (userMigrations.length > 0) await db.batch(userMigrations);
 
   dbInitialized = true;
-  console.log('Arena database initialized: 30 tables + 50 indexes');
+  console.log('Arena database initialized: 30 tables + 51 indexes');
 }
 
 // Seed issue categories (idempotent)

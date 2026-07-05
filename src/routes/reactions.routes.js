@@ -10,6 +10,30 @@ import { validate, createReactionSchema } from '../validation.js';
 
 const router = Router({ base: '/api/reactions' });
 
+async function reactionTargetExists(env, contentType, contentId) {
+  if (contentType === 'ad') {
+    return !!(await env.ARENA_DB.prepare(
+      `SELECT id FROM ad_flights WHERE id = ? AND status IN ('approved','active','completed')`
+    ).bind(contentId).first());
+  }
+  if (contentType === 'rebuttal') {
+    return !!(await env.ARENA_DB.prepare(
+      `SELECT id FROM rebuttal_ads WHERE id = ? AND status IN ('approved','active','completed')`
+    ).bind(contentId).first());
+  }
+  if (contentType === 'challenge') {
+    return !!(await env.ARENA_DB.prepare(
+      `SELECT id FROM challenges WHERE id = ? AND is_visible = 1`
+    ).bind(contentId).first());
+  }
+  if (contentType === 'challenge_response') {
+    return !!(await env.ARENA_DB.prepare(
+      `SELECT cr.id FROM challenge_responses cr JOIN challenges ch ON cr.challenge_id = ch.id WHERE cr.id = ? AND ch.is_visible = 1`
+    ).bind(contentId).first());
+  }
+  return false;
+}
+
 // POST /api/reactions — Add reaction (verified voters only)
 router.post('/', async (request, env) => {
   const authError = await requireVerifiedVoter(request, env);
@@ -18,6 +42,9 @@ router.post('/', async (request, env) => {
   const body = await parseBody(request);
   const { valid, errors, data } = validate(createReactionSchema, body);
   if (!valid) return errorResponse(errors.join('; '));
+
+  const targetExists = await reactionTargetExists(env, data.content_type, data.content_id);
+  if (!targetExists) return errorResponse('Reaction target not found', 404);
 
   const reactionId = generateId('rx');
   try {

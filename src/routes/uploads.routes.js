@@ -108,6 +108,7 @@ async function handleDirectUpload(request, env, ctx) {
   const file = formData.get('file');
   const key = formData.get('key');
   const candidateId = formData.get('candidate_id');
+  const candidateIdStr = candidateId ? String(candidateId) : '';
 
   if (!file || !key) return errorResponse('file and key required');
 
@@ -120,7 +121,10 @@ async function handleDirectUpload(request, env, ctx) {
   // Verify the key belongs to this user or their candidate
   const keyOwner = keyStr.split('/')[1];
   const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isAdmin && keyOwner !== request.user.id && keyOwner !== candidateId) {
+  if (candidateIdStr && keyOwner !== candidateIdStr) {
+    return errorResponse('Upload key does not match candidate', 403);
+  }
+  if (!isAdmin && keyOwner !== request.user.id && keyOwner !== candidateIdStr) {
     return errorResponse('Upload key does not match your identity', 403);
   }
 
@@ -134,12 +138,12 @@ async function handleDirectUpload(request, env, ctx) {
   }
 
   // Verify candidate staff
-  if (candidateId) {
+  if (candidateIdStr) {
     const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
     if (!isAdmin) {
       const link = await env.ARENA_DB.prepare(
         `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-      ).bind(request.user.id, candidateId).first();
+      ).bind(request.user.id, candidateIdStr).first();
       if (!link) return errorResponse('Only registered candidate staff can upload media', 403);
     }
   }
@@ -164,11 +168,10 @@ async function handleDirectUpload(request, env, ctx) {
     const trackedFileId = filename.replace(/\.[^.]+$/, '');
 
     // Track in D1 so serve endpoint can look up by fileId without listing R2
-    const uploadRecordId = generateId('mu');
     await env.ARENA_DB.prepare(
-      `INSERT OR IGNORE INTO media_uploads (id, file_id, r2_key, owner_id, candidate_id, file_type, file_size)
+      `INSERT OR IGNORE INTO media_uploads (file_id, key, uploaded_by, candidate_id, content_type, size_bytes, original_name)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(uploadRecordId, trackedFileId, keyStr, request.user.id, candidateId || null, file.type, file.size).run();
+    ).bind(trackedFileId, keyStr, request.user.id, candidateIdStr || null, file.type, file.size, file.name || null).run();
 
     auditLog(env.ARENA_DB, ctx, {
       actorId: request.user.id,
@@ -205,17 +208,17 @@ router.get('/serve/:fileId', async (request, env) => {
 
   // Look up the R2 key from the DB index — O(1), no listing required
   const record = await env.ARENA_DB.prepare(
-    `SELECT r2_key, file_type FROM media_uploads WHERE file_id = ?`
+    `SELECT key, content_type FROM media_uploads WHERE file_id = ?`
   ).bind(fileId).first();
 
   if (!record) return errorResponse('File not found', 404);
 
-  const object = await env.ARENA_MEDIA.get(record.r2_key);
+  const object = await env.ARENA_MEDIA.get(record.key);
   if (!object) return errorResponse('File not found', 404);
 
   return new Response(object.body, {
     headers: {
-      'Content-Type': object.httpMetadata?.contentType || record.file_type || 'application/octet-stream',
+      'Content-Type': object.httpMetadata?.contentType || record.content_type || 'application/octet-stream',
       'Cache-Control': 'public, max-age=31536000, immutable',
       'X-Content-Type-Options': 'nosniff',
     },

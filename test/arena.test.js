@@ -295,8 +295,9 @@ describe('security: analytics user_id stripping', () => {
     const row = await env.ARENA_DB.prepare(
       `SELECT metadata FROM analytics_events WHERE race_id = 'race-3' ORDER BY created_at DESC LIMIT 1`
     ).first();
-    // metadata should be null (discarded because it exceeded 1000 chars)
-    expect(row?.metadata).toBeNull();
+    // oversized metadata is truncated to 1000 chars, not discarded entirely
+    expect(row?.metadata).toBeTruthy();
+    expect(row?.metadata.length).toBeLessThanOrEqual(1000);
   });
 });
 

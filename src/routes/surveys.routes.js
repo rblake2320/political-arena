@@ -29,6 +29,21 @@ router.post('/my-priorities', async (request, env) => {
   if (!valid) return errorResponse(errors.join('; '));
 
   const raceId = data.race_id || null;
+  if (raceId) {
+    const race = await env.ARENA_DB.prepare(`SELECT id FROM races WHERE id = ?`).bind(raceId).first();
+    if (!race) return errorResponse('Race not found', 404);
+  }
+
+  const issueIds = data.priorities.map(p => p.issue_category_id);
+  const placeholders = issueIds.map(() => '?').join(',');
+  const categories = await env.ARENA_DB.prepare(
+    `SELECT id FROM issue_categories WHERE id IN (${placeholders}) AND is_active = 1`
+  ).bind(...issueIds).all();
+  const validIssueIds = new Set((categories.results || []).map(c => c.id));
+  const missingIssueIds = issueIds.filter(id => !validIssueIds.has(id));
+  if (missingIssueIds.length > 0) {
+    return errorResponse(`Unknown issue categories: ${missingIssueIds.join(', ')}`, 400);
+  }
 
   // Delete existing priorities for this user+race combo, then insert new
   await env.ARENA_DB.prepare(
@@ -235,8 +250,11 @@ router.post('/:id/respond', async (request, env) => {
   if (!body || !body.responses || !Array.isArray(body.responses)) {
     return errorResponse('responses array required');
   }
+  if (body.responses.length > 100) {
+    return errorResponse('responses array cannot exceed 100 entries', 400);
+  }
 
-  const responses = body.responses.slice(0, 100); // cap to prevent unbounded inserts
+  const responses = body.responses;
 
   const inserts = responses.map(r => {
     const respId = generateId('vsr');
@@ -248,7 +266,7 @@ router.post('/:id/respond', async (request, env) => {
 
   if (inserts.length > 0) await env.ARENA_DB.batch(inserts);
 
-  return successResponse({ submitted: inserts.length, capped: responses.length < body.responses.length });
+  return successResponse({ submitted: inserts.length });
 });
 
 export default router;

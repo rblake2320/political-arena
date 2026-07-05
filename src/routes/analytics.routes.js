@@ -11,16 +11,26 @@ import { authenticate, hashIP } from '../auth.js';
 import { checkRateLimit } from '../ratelimit.js';
 
 const router = Router({ base: '/api/analytics' });
+const MAX_METADATA_CHARS = 1000;
+
+function boundedMetadata(metadata) {
+  if (metadata === undefined || metadata === null) return null;
+  let serialized;
+  try {
+    serialized = typeof metadata === 'string' ? metadata : JSON.stringify(metadata);
+  } catch { return null; }
+  return serialized.length > MAX_METADATA_CHARS ? serialized.slice(0, MAX_METADATA_CHARS) : serialized;
+}
 
 // POST /api/analytics/events — Non-blocking batch event ingestion
 router.post('/events', async (request, env, ctx) => {
   const ip = getClientIP(request);
   const ipHash = await hashIP(ip);
 
-  // Rate limit: 30 batches per minute per IP (silently drop — don't reveal rate limit to scrapers)
+  // Rate limit: 30 batches per minute per IP
   if (ipHash) {
     const rl = await checkRateLimit(env.ARENA_DB, `analytics:${ipHash}`, 30, 60);
-    if (rl.limited) return successResponse({ accepted: 0 });
+    if (rl.limited) return errorResponse('Too many analytics events. Please slow down.', 429);
   }
 
   const body = await parseBody(request);
@@ -37,12 +47,6 @@ router.post('/events', async (request, env, ctx) => {
     const id = generateId('evt');
     // Strip client-controlled user_id/session_id — use only authenticated identity
     const safeUserId = user?.id ?? null;
-    // Cap metadata at 1 000 chars to prevent DB bloat
-    let metadata = null;
-    if (e.metadata != null) {
-      const metaStr = JSON.stringify(e.metadata);
-      if (metaStr.length <= 1000) metadata = metaStr;
-    }
     // Sanitize event_type: no control characters, max 100 chars
     const eventType = typeof e.event_type === 'string'
       ? e.event_type.replace(/[\x00-\x1f\x7f]/g, '').substring(0, 100) || 'unknown'
@@ -56,7 +60,7 @@ router.post('/events', async (request, env, ctx) => {
       null, // session_id never trusted from client
       e.race_id || null, e.candidate_id || null,
       e.content_type || null, e.content_id || null,
-      metadata, ipHash,
+      boundedMetadata(e.metadata), ipHash,
     );
   });
 
