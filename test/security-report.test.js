@@ -5,6 +5,7 @@
 import { SELF, env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { HTML_CSP } from '../src/worker.js';
+import assetHeaders from '../public/_headers?raw';
 
 const BASE = 'https://example.com';
 const VALID_PASSWORD = 'Str0ng!Passw0rd';
@@ -89,9 +90,11 @@ describe('red-team report regressions', () => {
   });
 
   it('allows only scoped video embed hosts in the HTML CSP', async () => {
-    expect(HTML_CSP).toContain('frame-src https://www.youtube-nocookie.com https://player.vimeo.com');
-    expect(HTML_CSP).toContain('child-src https://www.youtube-nocookie.com https://player.vimeo.com');
-    expect(HTML_CSP).not.toContain('frame-src *');
+    for (const source of [HTML_CSP, assetHeaders]) {
+      expect(source).toContain('frame-src https://www.youtube-nocookie.com https://player.vimeo.com');
+      expect(source).toContain('child-src https://www.youtube-nocookie.com https://player.vimeo.com');
+      expect(source).not.toContain('frame-src *');
+    }
   });
 
   it('strips analytics user impersonation and caps metadata', async () => {
