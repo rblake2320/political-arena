@@ -124,6 +124,7 @@ export interface RaceDetail extends Race {
 interface ArenaStore {
   // Cached data
   races: (Race & { candidate_count: number })[];
+  raceTotal: number;
   raceDetails: Record<string, RaceDetail>;
   allCandidates: (Candidate & { race_name: string; race_state: string })[];
   loading: boolean;
@@ -143,6 +144,7 @@ interface ArenaStore {
 
 export const useArenaStore = create<ArenaStore>((set, get) => ({
   races: [],
+  raceTotal: 0,
   raceDetails: {},
   allCandidates: [],
   loading: false,
@@ -150,8 +152,8 @@ export const useArenaStore = create<ArenaStore>((set, get) => ({
 
   fetchRaces: async (sort?: string) => {
     try {
-      const { races } = await api.getRaces(sort);
-      set({ races: races as any[] });
+      const { races, total } = await api.getRaces(sort);
+      set({ races: races as any[], raceTotal: total ?? races.length });
     } catch (err) {
       console.error('Failed to fetch races:', err);
     }

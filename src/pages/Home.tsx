@@ -45,7 +45,9 @@ function RaceCard({ race, days }: { race: any; days: number }) {
     ? { label: 'CALLOUT OPEN', color: '#EFB643', bg: 'rgba(239,182,67,.08)', bd: 'rgba(239,182,67,.35)' }
     : hot
       ? { label: 'HOT', color: '#FFB224', bg: 'rgba(255,178,36,.1)', bd: 'rgba(255,178,36,.35)' }
-      : { label: 'TRENDING', color: '#8F8FF9', bg: 'rgba(110,110,247,.1)', bd: 'rgba(110,110,247,.35)' };
+      : score > 0
+        ? { label: 'TRENDING', color: '#8F8FF9', bg: 'rgba(110,110,247,.1)', bd: 'rgba(110,110,247,.35)' }
+        : { label: 'LISTED', color: '#9B9BAB', bg: 'rgba(255,255,255,.04)', bd: 'rgba(255,255,255,.12)' };
 
   const highlight = hot || !!open;
   return (
@@ -59,7 +61,7 @@ function RaceCard({ race, days }: { race: any; days: number }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ font: `600 9.5px ${mono}`, letterSpacing: '.16em', color: '#8F8FF9' }}>{officeLine}</span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, font: `700 9px ${mono}`, letterSpacing: '.12em', color: status.color, background: status.bg, border: `1px solid ${status.bd}`, padding: '4px 9px', borderRadius: 99, whiteSpace: 'nowrap' }}>
-            {status.label === 'CALLOUT OPEN' ? <Clock size={10} /> : status.label === 'HOT' ? <Flame size={10} /> : <TrendingUp size={10} />}
+            {status.label === 'CALLOUT OPEN' ? <Clock size={10} /> : status.label === 'HOT' ? <Flame size={10} /> : status.label === 'TRENDING' ? <TrendingUp size={10} /> : null}
             {status.label}
           </span>
         </div>
@@ -147,7 +149,7 @@ function LedgerRow({ label, value, color, last }: { label: string; value: React.
 }
 
 export function Home() {
-  const { races, fetchRaces } = useArenaStore();
+  const { races, raceTotal, fetchRaces } = useArenaStore();
   const isMobile = useIsMobile();
   const [loaded, setLoaded] = useState(races.length > 0);
   const [sort, setSort] = useState<SortMode>('trending');
@@ -196,7 +198,10 @@ export function Home() {
       {/* section head + sort + search */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, padding: isMobile ? '6px 20px 18px' : '6px 40px 22px', maxWidth: 1440, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <span style={{ font: `600 20px ${display}`, color: '#F2F2F7' }}>Active arenas</span>
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ font: `600 20px ${display}`, color: '#F2F2F7' }}>2026 race directory</span>
+            <span style={{ font: `500 10px ${mono}`, letterSpacing: '.1em', color: '#5C5C6E' }}>SHOWING {races.length} OF {raceTotal || races.length} RACES</span>
+          </span>
           <div style={{ display: 'flex', gap: 6 }}>
             {([['trending', 'Trending'], ['newest', 'Newest'], ['name', 'A–Z']] as [SortMode, string][]).map(([key, label]) => {
               const active = sort === key;
@@ -228,8 +233,8 @@ export function Home() {
           </div>
         ) : races.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', border: '1px solid rgba(255,255,255,.09)', borderRadius: 16, background: '#0C0C13' }}>
-            <div style={{ color: '#9B9BAB', marginBottom: 6 }}>No active arenas yet</div>
-            <div style={{ font: `400 12px ${mono}`, color: '#5C5C6E' }}>Check back soon.</div>
+            <div style={{ color: '#9B9BAB', marginBottom: 6 }}>No races loaded yet</div>
+            <div style={{ font: `400 12px ${mono}`, color: '#5C5C6E' }}>Load the race directory or adjust filters.</div>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 18 }}>
