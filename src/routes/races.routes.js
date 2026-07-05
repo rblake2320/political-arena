@@ -8,8 +8,78 @@ import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
 import { requireAuth, requireRole, errorResponse, successResponse, parseBody, parsePagination, getClientIP, optionalAuth } from '../middleware.js';
 import { validate, createRaceSchema, updateRaceSchema } from '../validation.js';
+import { computeFactScore } from './recites.routes.js';
 
 const router = Router({ base: '/api/races' });
+
+function topSourceForRecites(recites) {
+  const top = recites[0];
+  if (!top) return null;
+
+  return {
+    title: top.title,
+    publisher: top.publisher || null,
+    source_type: top.source_type,
+    stance: top.stance,
+    status: top.status,
+    url: top.url,
+    archive_url: top.archive_url || null,
+  };
+}
+
+async function getChallengeReciteSummaries(db, challenges) {
+  const challengeIds = challenges.map(challenge => challenge.id);
+  const summaries = new Map();
+
+  for (const challengeId of challengeIds) {
+    summaries.set(challengeId, {
+      recite_count: 0,
+      fact_score: computeFactScore([]),
+      top_source: null,
+    });
+  }
+
+  if (challengeIds.length === 0) return summaries;
+
+  const placeholders = challengeIds.map(() => '?').join(',');
+  const result = await db.prepare(
+    `SELECT id, content_id, url, title, publisher, source_type, stance, status, archive_url
+     FROM recites
+     WHERE content_type = 'challenge'
+       AND content_id IN (${placeholders})
+       AND status != 'rejected'
+     ORDER BY
+       content_id,
+       CASE status WHEN 'verified' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
+       CASE source_type
+         WHEN 'official_record' THEN 0
+         WHEN 'court_record' THEN 1
+         WHEN 'public_document' THEN 2
+         WHEN 'research' THEN 3
+         WHEN 'news' THEN 4
+         WHEN 'campaign_material' THEN 5
+         ELSE 6
+       END,
+       created_at DESC`
+  ).bind(...challengeIds).all();
+
+  const recitesByChallenge = new Map();
+  for (const recite of result.results || []) {
+    const recites = recitesByChallenge.get(recite.content_id) || [];
+    recites.push(recite);
+    recitesByChallenge.set(recite.content_id, recites);
+  }
+
+  for (const [challengeId, recites] of recitesByChallenge.entries()) {
+    summaries.set(challengeId, {
+      recite_count: recites.length,
+      fact_score: computeFactScore(recites),
+      top_source: topSourceForRecites(recites),
+    });
+  }
+
+  return summaries;
+}
 
 // GET /api/races — Public, filterable, with activity counts for trending
 router.get('/', async (request, env) => {
@@ -172,12 +242,22 @@ router.get('/:id', async (request, env) => {
     expiredChallenges.forEach(c => { c.status = 'expired'; c.expired_at = now; });
   }
 
+  const challenges = challengesResult.results || [];
+  const reciteSummaries = await getChallengeReciteSummaries(env.ARENA_DB, challenges);
+
   return successResponse({
     ...race,
     candidates,
     ads: adsResult.results || [],
     rebuttals: rebuttalsResult.results || [],
-    challenges: challengesResult.results || [],
+    challenges: challenges.map(challenge => ({
+      ...challenge,
+      challenge_recite_summary: reciteSummaries.get(challenge.id) || {
+        recite_count: 0,
+        fact_score: computeFactScore([]),
+        top_source: null,
+      },
+    })),
     challengeResponses: responsesResult.results || [],
   });
 });

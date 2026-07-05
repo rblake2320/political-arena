@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runRuntimeMigrations } from '../src/db.js';
 
-function createFakeD1({ users, adFlights, challenges, recites, issueCategories, voterWriteins, auditLog }) {
+function createFakeD1({ users, adFlights, challenges, recites, issueCategories, voterWriteins, auditLog, missingChallengeSlug = false }) {
   const userColumns = new Set(users);
   const adColumns = new Set(adFlights);
   const challengeColumns = new Set(challenges);
@@ -9,6 +9,7 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
   const issueCategoryColumns = new Set(issueCategories);
   const voterWriteinColumns = new Set(voterWriteins);
   const auditColumns = new Set(auditLog);
+  let hasMissingChallengeSlug = missingChallengeSlug;
   const auditIndexes = new Set();
   const surveyResponseIndexes = new Set();
   const executed = [];
@@ -47,6 +48,12 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
           }
           return { results: [] };
         },
+        first: async () => {
+          if (sql === `SELECT id FROM challenges WHERE public_receipt_slug IS NULL OR public_receipt_slug = '' LIMIT 1`) {
+            return hasMissingChallengeSlug ? { id: 'legacy-challenge' } : null;
+          }
+          return null;
+        },
       };
     },
     batch: async (statements) => {
@@ -58,6 +65,9 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
         if (adMatch) adColumns.add(adMatch[1]);
         const challengeMatch = statement.sql.match(/^ALTER TABLE challenges ADD COLUMN (\w+)/);
         if (challengeMatch) challengeColumns.add(challengeMatch[1]);
+        if (statement.sql === `UPDATE challenges SET public_receipt_slug = id WHERE public_receipt_slug IS NULL OR public_receipt_slug = ''`) {
+          hasMissingChallengeSlug = false;
+        }
         const reciteMatch = statement.sql.match(/^ALTER TABLE recites ADD COLUMN (\w+)/);
         if (reciteMatch) reciteColumns.add(reciteMatch[1]);
         const issueCategoryMatch = statement.sql.match(/^ALTER TABLE issue_categories ADD COLUMN (\w+)/);
@@ -83,6 +93,7 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
     auditIndexes,
     surveyResponseIndexes,
     executed,
+    get hasMissingChallengeSlug() { return hasMissingChallengeSlug; },
   };
 
   return db;
@@ -253,5 +264,32 @@ describe('runtime migrations', () => {
     await runRuntimeMigrations(db);
 
     expect(db.executed).toEqual([]);
+  });
+
+  it('backfills legacy challenge receipt slugs once', async () => {
+    const db = createFakeD1({
+      users: ['id'],
+      adFlights: ['id'],
+      challenges: ['id', 'public_receipt_slug'],
+      recites: ['id'],
+      issueCategories: ['id', 'parent_category_id'],
+      voterWriteins: ['id', 'writein_rank'],
+      auditLog: ['id', 'prev_hash', 'entry_hash', 'chain_seq'],
+      missingChallengeSlug: true,
+    });
+
+    await runRuntimeMigrations(db);
+
+    expect(db.executed).toContain(
+      `UPDATE challenges SET public_receipt_slug = id WHERE public_receipt_slug IS NULL OR public_receipt_slug = ''`
+    );
+    expect(db.hasMissingChallengeSlug).toBe(false);
+
+    db.executed.length = 0;
+    await runRuntimeMigrations(db);
+
+    expect(db.executed).not.toContain(
+      `UPDATE challenges SET public_receipt_slug = id WHERE public_receipt_slug IS NULL OR public_receipt_slug = ''`
+    );
   });
 });
