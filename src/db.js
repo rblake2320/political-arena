@@ -6,6 +6,17 @@
 
 const initializedDbs = new WeakSet();
 
+const DEMO_MEDIA = {
+  healthcareAdImage: 'https://placehold.co/800x450/111827/ffffff.png?text=Healthcare+Ad',
+  texasEnergyImage: 'https://placehold.co/800x450/172554/ffffff.png?text=Texas+Energy',
+  aiRegulationImage: 'https://placehold.co/800x450/312e81/ffffff.png?text=AI+Regulation',
+  healthcareRebuttalImage: 'https://placehold.co/800x450/1f2937/ffffff.png?text=Rebuttal+Response',
+  debateResponseImage: 'https://placehold.co/800x450/064e3b/ffffff.png?text=Challenge+Response',
+  educationResponseImage: 'https://placehold.co/800x450/78350f/ffffff.png?text=Education+Response',
+  outsideAdVideo: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+  outsideResponseVideo: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+};
+
 export async function runRuntimeMigrations(db) {
   // Runtime migrations for databases created by older versions of the worker.
   const userColumnsResult = await db.prepare(`PRAGMA table_info(users)`).all();
@@ -670,14 +681,51 @@ export async function seedIssueCategories(db) {
   }
 }
 
+async function repairDemoMediaData(db) {
+  await db.batch([
+    db.prepare(`UPDATE ad_flights SET media_url = ?, media_type = 'image', updated_at = datetime('now') WHERE id = 'ad-1'`)
+      .bind(DEMO_MEDIA.healthcareAdImage),
+    db.prepare(`UPDATE ad_flights SET media_url = ?, media_type = 'image', updated_at = datetime('now') WHERE id = 'ad-2'`)
+      .bind(DEMO_MEDIA.texasEnergyImage),
+    db.prepare(`UPDATE ad_flights SET media_url = ?, media_type = 'image', updated_at = datetime('now') WHERE id = 'ad-3'`)
+      .bind(DEMO_MEDIA.aiRegulationImage),
+    db.prepare(`UPDATE rebuttal_ads SET media_url = ?, updated_at = datetime('now') WHERE id = 'reb-1'`)
+      .bind(DEMO_MEDIA.healthcareRebuttalImage),
+    db.prepare(`UPDATE challenge_responses SET media_url = ? WHERE id = 'resp-1'`)
+      .bind(DEMO_MEDIA.debateResponseImage),
+    db.prepare(`UPDATE challenge_responses SET media_url = ? WHERE id = 'resp-2'`)
+      .bind(DEMO_MEDIA.educationResponseImage),
+    db.prepare(
+      `UPDATE ad_flights
+       SET media_url = ?, source_url = ?, media_type = 'video', updated_at = datetime('now')
+       WHERE source_type = 'external'
+         AND (
+           media_url LIKE 'http://example.com/%.mp4'
+           OR media_url LIKE 'https://example.com/%.mp4'
+           OR source_url LIKE 'http://example.com/%.mp4'
+           OR source_url LIKE 'https://example.com/%.mp4'
+         )`
+    ).bind(DEMO_MEDIA.outsideAdVideo, DEMO_MEDIA.outsideAdVideo),
+    db.prepare(
+      `UPDATE rebuttal_ads
+       SET media_url = ?, updated_at = datetime('now')
+       WHERE media_url LIKE 'http://example.com/%.mp4'
+          OR media_url LIKE 'https://example.com/%.mp4'`
+    ).bind(DEMO_MEDIA.outsideResponseVideo),
+  ]);
+}
+
 // Seed demo races and candidates from store.ts data
 export async function seedDemoData(db) {
   // Check if fully seeded (races + ads)
   const raceCount = await db.prepare(`SELECT COUNT(*) as count FROM races`).first();
   const adCount = await db.prepare(`SELECT COUNT(*) as count FROM ad_flights`).first();
 
-  // If ads exist, we're fully seeded
-  if (adCount.count > 0) return;
+  // If ads exist, keep existing demo rows but repair stale placeholder media.
+  if (adCount.count > 0) {
+    await repairDemoMediaData(db);
+    return;
+  }
 
   // Create system user for seed data (FK constraint requires valid user)
   await db.prepare(
@@ -720,16 +768,16 @@ export async function seedDemoData(db) {
 
   await db.batch([
     db.prepare(`INSERT OR IGNORE INTO ad_flights (id, race_id, candidate_id, created_by, title, ad_content_text, disclaimer_text, status, start_date, end_date, rebuttal_window_expires, media_type, media_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind('ad-1', 'race-1', 'cand-1', 'system', 'Healthcare for Alabama', 'My healthcare plan saves families an average of $2,000 a year while expanding coverage to every Alabamian.', 'Paid for by Jane Doe for Senate', 'active', now, weekFromNow, rebuttalWindow, 'image', 'https://images.unsplash.com/photo-1450101499163-c8848e66ad76?w=800&q=80'),
+      .bind('ad-1', 'race-1', 'cand-1', 'system', 'Healthcare for Alabama', 'My healthcare plan saves families an average of $2,000 a year while expanding coverage to every Alabamian.', 'Paid for by Jane Doe for Senate', 'active', now, weekFromNow, rebuttalWindow, 'image', DEMO_MEDIA.healthcareAdImage),
     db.prepare(`INSERT OR IGNORE INTO ad_flights (id, race_id, candidate_id, created_by, title, ad_content_text, disclaimer_text, status, start_date, end_date, rebuttal_window_expires, media_type, media_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind('ad-2', 'race-2', 'cand-4', 'system', 'Texas Energy Independence', 'As Governor, I will expand energy production and lower your utility bills by cutting red tape.', 'Paid for by Robert Johnson for Texas', 'active', now, weekFromNow, rebuttalWindow, 'image', 'https://images.unsplash.com/photo-1473341304170-971dccb5ac1e?w=800&q=80'),
+      .bind('ad-2', 'race-2', 'cand-4', 'system', 'Texas Energy Independence', 'As Governor, I will expand energy production and lower your utility bills by cutting red tape.', 'Paid for by Robert Johnson for Texas', 'active', now, weekFromNow, rebuttalWindow, 'image', DEMO_MEDIA.texasEnergyImage),
     db.prepare(`INSERT OR IGNORE INTO ad_flights (id, race_id, candidate_id, created_by, title, ad_content_text, disclaimer_text, status, start_date, end_date, rebuttal_window_expires, media_type, media_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind('ad-3', 'race-3', 'cand-5', 'system', 'AI Regulation Now', 'Silicon Valley needs responsible AI regulation. As your representative, I will fight for transparency and accountability.', 'Paid for by Lisa Chen for Congress', 'active', now, weekFromNow, rebuttalWindow, 'image', 'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=800&q=80'),
+      .bind('ad-3', 'race-3', 'cand-5', 'system', 'AI Regulation Now', 'Silicon Valley needs responsible AI regulation. As your representative, I will fight for transparency and accountability.', 'Paid for by Lisa Chen for Congress', 'active', now, weekFromNow, rebuttalWindow, 'image', DEMO_MEDIA.aiRegulationImage),
   ]);
 
   // Seed a rebuttal
   await db.prepare(`INSERT OR IGNORE INTO rebuttal_ads (id, parent_ad_id, race_id, candidate_id, created_by, response_text, disclaimer_text, status, slot_claimed_at, media_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind('reb-1', 'ad-1', 'race-1', 'cand-2', 'system', "My opponent's healthcare plan will bankrupt our state. Here are the facts.", 'Paid for by John Smith for Senate', 'active', now, 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=800&q=80').run();
+    .bind('reb-1', 'ad-1', 'race-1', 'cand-2', 'system', "My opponent's healthcare plan will bankrupt our state. Here are the facts.", 'Paid for by John Smith for Senate', 'active', now, DEMO_MEDIA.healthcareRebuttalImage).run();
 
   // Seed challenges
   const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
@@ -747,9 +795,9 @@ export async function seedDemoData(db) {
   // Seed challenge responses with media
   await db.batch([
     db.prepare(`INSERT OR IGNORE INTO challenge_responses (id, challenge_id, candidate_id, created_by, response_text, media_url) VALUES (?, ?, ?, ?, ?, ?)`)
-      .bind('resp-1', 'chal-1', 'cand-1', 'system', "I'm happy to debate. My plan saves families an average of $2,000 a year.", 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=80'),
+      .bind('resp-1', 'chal-1', 'cand-1', 'system', "I'm happy to debate. My plan saves families an average of $2,000 a year.", DEMO_MEDIA.debateResponseImage),
     db.prepare(`INSERT OR IGNORE INTO challenge_responses (id, challenge_id, candidate_id, created_by, response_text, media_url) VALUES (?, ?, ?, ?, ?, ?)`)
-      .bind('resp-2', 'chal-4', 'cand-2', 'system', "I support public schools. My plan increases funding by redirecting wasteful spending while keeping taxes low.", 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=800&q=80'),
+      .bind('resp-2', 'chal-4', 'cand-2', 'system', "I support public schools. My plan increases funding by redirecting wasteful spending while keeping taxes low.", DEMO_MEDIA.educationResponseImage),
   ]);
 
   // Seed credits (10 credits for new seed candidates only — uses INSERT OR IGNORE IDs)

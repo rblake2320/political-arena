@@ -1,5 +1,6 @@
 import worker from '../src/worker.js';
 import { describe, expect, it } from 'vitest';
+import wranglerConfig from '../wrangler.toml?raw';
 
 describe('worker health and bootstrap failure handling', () => {
   it('reports degraded health and blocks API routes when database bootstrap fails', async () => {
@@ -30,5 +31,9 @@ describe('worker health and bootstrap failure handling', () => {
     expect(api.status).toBe(503);
     const apiBody = await api.json();
     expect(apiBody.error).toBe('Service unavailable');
+  });
+
+  it('keeps Cloudflare assets configured for single-page app deep links', () => {
+    expect(wranglerConfig).toMatch(/\[assets\][\s\S]*not_found_handling\s*=\s*"single-page-application"/);
   });
 });

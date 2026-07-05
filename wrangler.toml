@@ -22,6 +22,7 @@ crons = ["*/15 * * * *"]
 [assets]
 directory = "./dist"
 binding = "ASSETS"
+not_found_handling = "single-page-application"
 
 # Configurable platform parameters
 [vars]

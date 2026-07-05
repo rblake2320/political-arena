@@ -7,6 +7,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 
 const BASE = 'https://example.com';
 const VALID_PASSWORD = 'Str0ng!Passw0rd';
+const SAMPLE_VIDEO_URL = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
 let seq = 0;
 
 async function api(method, path, body, token) {
@@ -98,6 +99,24 @@ describe('production workflow smoke', () => {
     ]);
   });
 
+  it('keeps demo race media renderable for public race pages', async () => {
+    const race = await get('/api/races/race-1');
+    expect(race.status).toBe(200);
+
+    const ads = race.body.data.ads || [];
+    const rebuttals = race.body.data.rebuttals || [];
+    const challengeResponses = race.body.data.challengeResponses || [];
+    const mediaUrls = [
+      ...ads.map(ad => ad.media_url),
+      ...rebuttals.map(rebuttal => rebuttal.media_url),
+      ...challengeResponses.map(response => response.media_url),
+    ].filter(Boolean);
+
+    expect(mediaUrls.length).toBeGreaterThan(0);
+    expect(mediaUrls.every(url => !url.includes('example.com'))).toBe(true);
+    expect(mediaUrls.every(url => /\.(png|mp4)(\?|#|$)/i.test(new URL(url).pathname))).toBe(true);
+  });
+
   it('runs the core voter, press, ad, credit, and challenge workflows', async () => {
     const me = await get('/api/users/me', staffA.token);
     expect(me.status).toBe(200);
@@ -162,10 +181,10 @@ describe('production workflow smoke', () => {
       source_candidate_id: candidateA,
       responder_candidate_id: candidateB,
       source_title: 'Outside TV Attack Ad',
-      source_media_url: 'https://example.com/tv-attack.mp4',
+      source_media_url: SAMPLE_VIDEO_URL,
       source_description: 'The outside ad claims the challenger supports a tax increase.',
       response_text: 'Here is the record and the context voters need before they believe that claim.',
-      response_media_url: 'https://example.com/counter-response.mp4',
+      response_media_url: SAMPLE_VIDEO_URL,
       disclaimer_text: 'Paid for by Smoke Candidate B',
     }, staffB.token);
     expect(outsideResponse.status).toBe(200);
