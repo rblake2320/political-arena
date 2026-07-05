@@ -165,7 +165,10 @@ router.post('/:id/verify', async (request, env, ctx) => {
 
   const { id } = request.params;
   const body = await parseBody(request);
-  const action = body?.action || 'verify'; // 'verify' or 'reject'
+  const action = body?.action;
+  if (action !== 'verify' && action !== 'reject') {
+    return errorResponse("action must be 'verify' or 'reject'", 400);
+  }
 
   const candidate = await env.ARENA_DB.prepare(`SELECT * FROM candidates WHERE id = ?`).bind(id).first();
   if (!candidate) return errorResponse('Candidate not found', 404);

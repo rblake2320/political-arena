@@ -256,10 +256,26 @@ router.post('/:id/respond', async (request, env) => {
 
   const responses = body.responses;
 
+  // Validate all question_ids belong to this survey (prevents cross-survey injection)
+  const questionIds = responses.map(r => r.question_id).filter(Boolean);
+  if (questionIds.length !== responses.length) {
+    return errorResponse('Each response must include a question_id', 400);
+  }
+  const placeholders = questionIds.map(() => '?').join(',');
+  const validQs = await env.ARENA_DB.prepare(
+    `SELECT id FROM survey_questions WHERE survey_id = ? AND id IN (${placeholders})`
+  ).bind(id, ...questionIds).all();
+  const validQIds = new Set((validQs.results || []).map(q => q.id));
+  const invalidQIds = questionIds.filter(qid => !validQIds.has(qid));
+  if (invalidQIds.length > 0) {
+    return errorResponse(`Question(s) not found in this survey: ${invalidQIds.join(', ')}`, 400);
+  }
+
+  // INSERT OR REPLACE to allow re-submission of a single question (idempotent)
   const inserts = responses.map(r => {
     const respId = generateId('vsr');
     return env.ARENA_DB.prepare(
-      `INSERT INTO voter_survey_responses (id, user_id, survey_id, question_id, response_value, party_affiliation, jurisdiction_state) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT OR REPLACE INTO voter_survey_responses (id, user_id, survey_id, question_id, response_value, party_affiliation, jurisdiction_state) VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).bind(respId, request.user.id, id, r.question_id, String(r.response_value),
       request.user.party_affiliation || null, request.user.jurisdiction_state || null);
   });

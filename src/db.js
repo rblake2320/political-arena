@@ -271,7 +271,8 @@ export async function initDatabase(db) {
       response_value TEXT NOT NULL,
       party_affiliation TEXT,
       jurisdiction_state TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, survey_id, question_id)
     )`),
 
     // ========== ANALYTICS ENGINE TABLES ==========
