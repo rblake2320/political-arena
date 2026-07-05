@@ -207,6 +207,34 @@ export async function runRuntimeMigrations(db) {
         ON press_feed_items(source, section)`),
     ]);
   }
+
+  const emailDeliveriesResult = await db.prepare(`PRAGMA table_info(email_deliveries)`).all();
+  if ((emailDeliveriesResult.results || []).length === 0) {
+    await db.batch([
+      db.prepare(`CREATE TABLE IF NOT EXISTS email_deliveries (
+        id TEXT PRIMARY KEY,
+        provider TEXT,
+        provider_message_id TEXT,
+        recipient_user_id TEXT REFERENCES users(id),
+        recipient_email TEXT,
+        subject TEXT NOT NULL,
+        template_key TEXT,
+        related_entity_type TEXT,
+        related_entity_id TEXT,
+        status TEXT NOT NULL CHECK(status IN ('sent','failed','skipped')),
+        error_message TEXT,
+        metadata TEXT,
+        sent_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_email_deliveries_recipient
+        ON email_deliveries(recipient_user_id, created_at)`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_email_deliveries_related
+        ON email_deliveries(related_entity_type, related_entity_id, created_at)`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_email_deliveries_status
+        ON email_deliveries(status, created_at)`),
+    ]);
+  }
 }
 
 export async function initDatabase(db) {
@@ -477,6 +505,23 @@ export async function initDatabase(db) {
       body TEXT,
       link_url TEXT,
       is_read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS email_deliveries (
+      id TEXT PRIMARY KEY,
+      provider TEXT,
+      provider_message_id TEXT,
+      recipient_user_id TEXT REFERENCES users(id),
+      recipient_email TEXT,
+      subject TEXT NOT NULL,
+      template_key TEXT,
+      related_entity_type TEXT,
+      related_entity_id TEXT,
+      status TEXT NOT NULL CHECK(status IN ('sent','failed','skipped')),
+      error_message TEXT,
+      metadata TEXT,
+      sent_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
 
@@ -790,6 +835,9 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_notif_subs_user ON notification_subscriptions(user_id, is_active)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_notif_subs_target ON notification_subscriptions(subscription_type, target_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_email_deliveries_recipient ON email_deliveries(recipient_user_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_email_deliveries_related ON email_deliveries(related_entity_type, related_entity_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_email_deliveries_status ON email_deliveries(status, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_voter_priorities_user ON voter_issue_priorities(user_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_voter_priorities_race ON voter_issue_priorities(race_id, issue_category_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_voter_priorities_party ON voter_issue_priorities(party_affiliation, jurisdiction_state)`),

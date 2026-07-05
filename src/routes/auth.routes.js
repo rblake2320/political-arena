@@ -11,6 +11,7 @@ import { checkRateLimit, clearRateLimit } from '../ratelimit.js';
 import { json, errorResponse, successResponse, parseBody, getClientIP } from '../middleware.js';
 import { validate, registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../validation.js';
 import { authenticate } from '../auth.js';
+import { isTransactionalEmailConfigured, sendAndRecordTransactionalEmail } from '../email.js';
 
 const router = Router({ base: '/api/auth' });
 
@@ -29,34 +30,53 @@ function getPasswordResetUrl(request, env, token) {
   return `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
 }
 
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 async function deliverPasswordReset(request, env, user, token) {
   const resetUrl = getPasswordResetUrl(request, env, token);
-  const webhookUrl = env.PASSWORD_RESET_WEBHOOK_URL;
-  if (!webhookUrl) {
-    return { delivered: false, resetUrl };
-  }
+  const subject = 'Reset your Arena password';
+  const text = [
+    'A password reset was requested for your Arena account.',
+    '',
+    'Use this link within 60 minutes:',
+    resetUrl,
+    '',
+    'If you did not request this, you can ignore this email.',
+  ].join('\n');
+  const html = `
+    <p>A password reset was requested for your Arena account.</p>
+    <p><a href="${escapeHtml(resetUrl)}">Reset your password</a></p>
+    <p>This link expires in 60 minutes.</p>
+    <p>If you did not request this, you can ignore this email.</p>
+  `;
 
-  const headers = { 'Content-Type': 'application/json' };
-  if (env.PASSWORD_RESET_WEBHOOK_TOKEN) {
-    headers.Authorization = `Bearer ${env.PASSWORD_RESET_WEBHOOK_TOKEN}`;
-  }
-
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
+  const result = await sendAndRecordTransactionalEmail(env.ARENA_DB, env, {
+    to: user.email,
+    subject,
+    text,
+    html,
+    tag: 'password_reset',
+    metadata: {
       type: 'password_reset',
-      to: user.email,
-      reset_url: resetUrl,
+      user_id: user.id,
       expires_in_minutes: 60,
-    }),
+    },
+    idempotencyKey: `password-reset-${user.id}-${token.slice(0, 16)}`,
+  }, {
+    recipient_user_id: user.id,
+    related_entity_type: 'user',
+    related_entity_id: user.id,
+    template_key: 'password_reset',
   });
 
-  if (!response.ok) {
-    throw new Error(`Password reset webhook failed with ${response.status}`);
-  }
-
-  return { delivered: true, resetUrl };
+  return { ...result, resetUrl };
 }
 
 // POST /api/auth/register
@@ -281,7 +301,7 @@ router.post('/forgot-password', async (request, env, ctx) => {
     action: 'user.password_reset_requested',
     entityType: 'user',
     entityId: user.id,
-    metadata: { delivery_configured: !!env.PASSWORD_RESET_WEBHOOK_URL },
+    metadata: { delivery_configured: isTransactionalEmailConfigured(env) },
     ipAddress: getClientIP(request),
   });
 

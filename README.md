@@ -35,7 +35,7 @@ Cloudflare Worker (src/worker.js)
    ├─ validation.js  Zod schemas for every write endpoint
    ├─ ratelimit.js   D1-backed fixed-window rate limiter (atomic UPSERT)
    ├─ audit.js       non-blocking append-only audit log (ctx.waitUntil)
-   └─ db.js          32 tables + 58 indexes, CREATE IF NOT EXISTS bootstrap + runtime migrations
+   └─ db.js          33 tables + 61 indexes, CREATE IF NOT EXISTS bootstrap + runtime migrations
    │
    ├─ D1  (ARENA_DB)     all relational state
    ├─ R2  (ARENA_MEDIA)  candidate media (video/image/audio), served via /media/*
@@ -51,6 +51,7 @@ The Vite-built SPA is served from Workers static assets; unknown paths fall back
 - **Rate limiting** — login (per-IP and per-email), registration (per-IP), email verification, analytics events, vote toggles, and recite submission use D1-backed fixed windows; challenge issuance additionally has per-candidate daily/weekly caps + pairwise cooldowns.
 - **Passwords** — PBKDF2-SHA256 (100k iterations, per-user salt), constant-time comparison, complexity policy enforced by Zod.
 - **Password reset** — reset tokens are random, stored only as hashes, expire after 1 hour, and invalidate all active sessions after a successful reset. Forgot-password responses are always generic to avoid email enumeration.
+- **Transactional email** — password resets and public-callout notices use a configured Resend or Postmark provider, with every delivery attempt recorded in `email_deliveries`. The old webhook path remains available as a legacy fallback.
 - **Authorization** — role hierarchy (`voter → candidate_staff → moderator → admin → super_admin`) plus per-candidate staff links; every candidate-scoped mutation verifies the staff link server-side.
 - **Bootstrap health** — `/api/health` reports `database: ok`; if schema/bootstrap fails, it returns `503` with degraded health and other API routes return `503` instead of pretending the app is healthy.
 - **Content visibility** — unpublished ads (draft/submitted/rejected) return 404 to everyone except owning staff and admins.
@@ -81,7 +82,7 @@ npx wrangler dev
 Tests are **real integration tests**: they run the actual worker inside `workerd` (Cloudflare's production runtime) against a real SQLite-backed D1 database via `@cloudflare/vitest-pool-workers`. No mocks.
 
 ```bash
-npm test          # 59 tests: auth/reset flows, session invalidation,
+npm test          # 85 tests: auth/reset flows, session invalidation,
                   # rate limiting, ad visibility/authorization regressions,
                   # challenge credit lifecycle, mobile media upload/streaming,
                   # side-by-side outside ad responses, recites/fact scores,
@@ -98,8 +99,11 @@ npm run test:watch
 npx wrangler d1 create arena-database          # update database_id in wrangler.toml
 npx wrangler r2 bucket create political-arena-media
 npx wrangler secret put JWT_SECRET
-npx wrangler secret put PASSWORD_RESET_WEBHOOK_URL      # email/service webhook
-npx wrangler secret put PASSWORD_RESET_WEBHOOK_TOKEN    # if the webhook requires auth
+
+# Choose one transactional email provider after verifying the sender/domain.
+npx wrangler secret put RESEND_API_KEY                  # Resend
+# or
+npx wrangler secret put POSTMARK_SERVER_TOKEN           # Postmark
 
 npm run deploy    # tsc --noEmit + vite build + wrangler deploy
 ```
@@ -117,14 +121,18 @@ CI (GitHub Actions) runs typecheck, build, the full workerd test suite, and `npm
 | `CHALLENGE_COOLDOWN_HOURS` | 24 | Cooldown per challenger→target pair |
 | `MAX_CHALLENGES_PER_DAY` / `_WEEK` | 3 / 10 | Per-candidate challenge caps |
 | `IMPRESSION_LOG_RETENTION_DAYS` | 30 | Analytics/impression retention |
+| `EMAIL_PROVIDER` | inferred | `resend`, `postmark`, or `webhook`; inferred from configured secret when omitted |
+| `EMAIL_FROM` | none | Verified sender used for transactional email, for example `Arena <noreply@example.com>` |
+| `EMAIL_REPLY_TO` | none | Optional reply-to address for transactional email |
+| `POSTMARK_MESSAGE_STREAM` | `outbound` | Optional Postmark message stream |
 | `PASSWORD_RESET_BASE_URL` | request origin | Base URL used in reset links |
 | `PASSWORD_RESET_EXPOSE_DEV_TOKEN` | false | Allows dev/test reset token responses; never enable in production |
 
-Secrets (via `wrangler secret put`): `JWT_SECRET` (required in production), `PASSWORD_RESET_WEBHOOK_URL` (required for real email delivery), and optionally `PASSWORD_RESET_WEBHOOK_TOKEN`.
+Secrets (via `wrangler secret put`): `JWT_SECRET` is required in production. For real email delivery, set either `RESEND_API_KEY` or `POSTMARK_SERVER_TOKEN` and configure `EMAIL_FROM` to a verified sender/domain. Legacy webhook delivery still accepts `PASSWORD_RESET_WEBHOOK_URL` and optional `PASSWORD_RESET_WEBHOOK_TOKEN`, but Resend/Postmark are the production path.
 
 ## Production readiness checks
 
-- Confirm the password-reset webhook delivers email/SMS in the production provider and rejects invalid bearer tokens if `PASSWORD_RESET_WEBHOOK_TOKEN` is set.
+- Confirm Resend or Postmark delivers password-reset and challenge-notice email from the verified production sender, and that `email_deliveries` records `sent` rows.
 - Run `/api/health` after deployment and require `200` with `database: ok`; treat `503` as a failed deploy.
 - Keep `ENVIRONMENT=production` and do not set `PASSWORD_RESET_EXPOSE_DEV_TOKEN` or `SEED_DEMO_DATA` in production.
 - Run `npm test`, `npm run build`, and `npm audit --audit-level=low` before release; CI enforces the same gates.
