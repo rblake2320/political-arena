@@ -191,3 +191,149 @@ describe('audit trail', () => {
     expect(actions.has('ad.activate')).toBe(true);
   });
 });
+
+describe('security: forgot/reset password', () => {
+  it('forgot-password always returns success (no email enumeration)', async () => {
+    const r1 = await post('/api/auth/forgot-password', { email: 'nobody@unknown.invalid' });
+    expect(r1.status).toBe(200);
+
+    const r2 = await post('/api/auth/forgot-password', { email: 'staffer@example.com' });
+    expect(r2.status).toBe(200);
+    // Both responses look identical to prevent enumeration
+    expect(r1.body.data.message).toBe(r2.body.data.message);
+  });
+
+  it('reset-password rejects invalid token with 400', async () => {
+    const res = await post('/api/auth/reset-password', {
+      token: 'deadbeef'.repeat(8),
+      password: VALID_PASSWORD,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('full forgot→reset→login flow works end-to-end', async () => {
+    const reg = await post('/api/auth/register', {
+      email: 'resetme@example.com',
+      username: 'resetme',
+      password: VALID_PASSWORD,
+      display_name: 'ResetMe',
+    });
+    expect(reg.status).toBe(200);
+
+    // Forgot password — dev env returns the raw token
+    const forgot = await post('/api/auth/forgot-password', { email: 'resetme@example.com' });
+    expect(forgot.status).toBe(200);
+    expect(forgot.body.data.reset_token).toBeTruthy(); // only present outside production
+
+    const resetToken = forgot.body.data.reset_token;
+
+    // Old session should still work before reset
+    const beforeReset = await get('/api/auth/me', reg.body.data.token);
+    expect(beforeReset.status).toBe(200);
+
+    // Reset password
+    const newPassword = 'N3wStr0ng!Pass';
+    const reset = await post('/api/auth/reset-password', { token: resetToken, password: newPassword });
+    expect(reset.status).toBe(200);
+
+    // Old token should now be invalidated (session wiped on reset)
+    const afterReset = await get('/api/auth/me', reg.body.data.token);
+    expect(afterReset.status).toBe(401);
+
+    // Can log in with new password
+    const login = await post('/api/auth/login', { email: 'resetme@example.com', password: newPassword });
+    expect(login.status).toBe(200);
+
+    // Cannot reuse the same reset token
+    const reuse = await post('/api/auth/reset-password', { token: resetToken, password: VALID_PASSWORD });
+    expect(reuse.status).toBe(400);
+  });
+});
+
+describe('security: analytics user_id stripping', () => {
+  it('ignores client-supplied user_id and session_id', async () => {
+    const fakeUserId = 'usr_attacker_injected';
+    await post('/api/analytics/events', {
+      events: [{ event_type: 'view', user_id: fakeUserId, session_id: 'ses_fake', race_id: 'race-1' }],
+    });
+
+    // The injected user_id must NOT appear in the analytics table
+    const row = await env.ARENA_DB.prepare(
+      `SELECT user_id, session_id FROM analytics_events WHERE race_id = 'race-1' ORDER BY created_at DESC LIMIT 1`
+    ).first();
+    expect(row?.user_id).not.toBe(fakeUserId);
+    expect(row?.session_id).toBeNull();
+  });
+
+  it('stores authenticated user_id when request is authenticated', async () => {
+    const reg = await post('/api/auth/register', {
+      email: 'analytic_user@example.com',
+      username: 'analytic_user',
+      password: VALID_PASSWORD,
+      display_name: 'Analytic',
+    });
+    const token = reg.body.data.token;
+    const userId = reg.body.data.user.id;
+
+    await post('/api/analytics/events', {
+      events: [{ event_type: 'pageview', race_id: 'race-2' }],
+    }, token);
+
+    const row = await env.ARENA_DB.prepare(
+      `SELECT user_id FROM analytics_events WHERE race_id = 'race-2' AND user_id = ? ORDER BY created_at DESC LIMIT 1`
+    ).bind(userId).first();
+    expect(row?.user_id).toBe(userId);
+  });
+
+  it('rejects oversized metadata (over 1000 chars)', async () => {
+    // Even if the event is accepted (we don't reject on analytics), large metadata is discarded
+    const bigMeta = { data: 'x'.repeat(2000) };
+    await post('/api/analytics/events', {
+      events: [{ event_type: 'pageview', metadata: bigMeta, race_id: 'race-3' }],
+    });
+
+    const row = await env.ARENA_DB.prepare(
+      `SELECT metadata FROM analytics_events WHERE race_id = 'race-3' ORDER BY created_at DESC LIMIT 1`
+    ).first();
+    // metadata should be null (discarded because it exceeded 1000 chars)
+    expect(row?.metadata).toBeNull();
+  });
+});
+
+describe('security: staff role validation', () => {
+  it('rejects non-staff user attempting to assign the primary role', async () => {
+    const { token, id } = await registerUser('roleatk');
+    // Make them staff of cand-1 first (as viewer)
+    await env.ARENA_DB.prepare(
+      `INSERT OR IGNORE INTO candidate_staff_links (id, user_id, candidate_id, role, is_active) VALUES ('sl-roleatk', ?, 'cand-1', 'staff', 1)`
+    ).bind(id).run();
+
+    // Register another user to add
+    const target = await registerUser('roletarget');
+
+    // Staff cannot promote to primary
+    const res = await post('/api/candidates/cand-1/staff', { user_id: target.id, role: 'primary' }, token);
+    expect(res.status).toBe(403);
+  });
+
+  it('allows valid role values (staff, viewer)', async () => {
+    const { token } = staffUser; // primary staff linked in beforeAll
+    const newStaffer = await registerUser('newstaffer_role');
+
+    const res = await post('/api/candidates/cand-1/staff', { user_id: newStaffer.id, role: 'viewer' }, token);
+    expect(res.status).toBe(200);
+    expect(res.body.data.role).toBe('viewer');
+  });
+});
+
+describe('security: reactions content_type validation', () => {
+  it('rejects invalid content_type in /reactions/counts', async () => {
+    const res = await get('/api/reactions/counts?content_type=evil_type&content_id=ad-1');
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts valid content_type', async () => {
+    const res = await get('/api/reactions/counts?content_type=ad&content_id=ad-1');
+    expect(res.status).toBe(200);
+  });
+});

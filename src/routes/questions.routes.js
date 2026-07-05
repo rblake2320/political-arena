@@ -10,6 +10,7 @@ import {
   optionalAuth, successResponse, errorResponse, parsePagination, parseBody,
 } from '../middleware.js';
 import { validate, submitQuestionSchema } from '../validation.js';
+import { checkRateLimit } from '../ratelimit.js';
 
 const router = Router({ base: '/api/questions' });
 
@@ -181,6 +182,10 @@ router.post('/:questionId/vote', async (request, env) => {
       if (err) return err;
     }
   }
+
+  // Rate limit: 20 vote toggles per user per 10 minutes
+  const voteRl = await checkRateLimit(env.ARENA_DB, `vote:${request.user.id}`, 20, 10 * 60);
+  if (voteRl.limited) return errorResponse('Too many vote actions. Please slow down.', 429);
 
   // Check existing vote
   const existing = await env.ARENA_DB.prepare(

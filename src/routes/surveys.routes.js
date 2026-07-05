@@ -236,7 +236,9 @@ router.post('/:id/respond', async (request, env) => {
     return errorResponse('responses array required');
   }
 
-  const inserts = body.responses.map(r => {
+  const responses = body.responses.slice(0, 100); // cap to prevent unbounded inserts
+
+  const inserts = responses.map(r => {
     const respId = generateId('vsr');
     return env.ARENA_DB.prepare(
       `INSERT INTO voter_survey_responses (id, user_id, survey_id, question_id, response_value, party_affiliation, jurisdiction_state) VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -246,7 +248,7 @@ router.post('/:id/respond', async (request, env) => {
 
   if (inserts.length > 0) await env.ARENA_DB.batch(inserts);
 
-  return successResponse({ submitted: inserts.length });
+  return successResponse({ submitted: inserts.length, capped: responses.length < body.responses.length });
 });
 
 export default router;

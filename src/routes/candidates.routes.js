@@ -207,6 +207,17 @@ router.post('/:id/staff', async (request, env, ctx) => {
   const body = await parseBody(request);
   if (!body || !body.user_id) return errorResponse('user_id required');
 
+  // Validate the requested role — 'primary' is admin-only to prevent privilege escalation
+  const STAFF_ROLES = ['staff', 'viewer'];
+  const ADMIN_ONLY_ROLES = ['primary'];
+  const requestedRole = body.role;
+  if (requestedRole && ADMIN_ONLY_ROLES.includes(requestedRole) && !isAdmin) {
+    return errorResponse('Only admins can assign the primary role', 403);
+  }
+  const role = (requestedRole && (STAFF_ROLES.includes(requestedRole) || (ADMIN_ONLY_ROLES.includes(requestedRole) && isAdmin)))
+    ? requestedRole
+    : 'staff';
+
   // Check target user exists
   const targetUser = await env.ARENA_DB.prepare(`SELECT id FROM users WHERE id = ? AND is_active = 1`).bind(body.user_id).first();
   if (!targetUser) return errorResponse('User not found', 404);
@@ -215,7 +226,7 @@ router.post('/:id/staff', async (request, env, ctx) => {
   try {
     await env.ARENA_DB.prepare(
       `INSERT INTO candidate_staff_links (id, user_id, candidate_id, role, granted_by) VALUES (?, ?, ?, ?, ?)`
-    ).bind(linkId, body.user_id, id, body.role || 'staff', request.user.id).run();
+    ).bind(linkId, body.user_id, id, role, request.user.id).run();
   } catch (e) {
     if (e.message?.includes('UNIQUE')) return errorResponse('User is already staff for this candidate', 409);
     throw e;
@@ -226,11 +237,11 @@ router.post('/:id/staff', async (request, env, ctx) => {
     action: 'candidate.add_staff',
     entityType: 'candidate',
     entityId: id,
-    afterState: { user_id: body.user_id, role: body.role || 'staff' },
+    afterState: { user_id: body.user_id, role },
     ipAddress: getClientIP(request),
   });
 
-  return successResponse({ id: linkId, user_id: body.user_id, candidate_id: id, role: body.role || 'staff' });
+  return successResponse({ id: linkId, user_id: body.user_id, candidate_id: id, role });
 });
 
 export default router;

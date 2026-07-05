@@ -9,7 +9,7 @@ import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
 import { checkRateLimit, clearRateLimit } from '../ratelimit.js';
 import { json, errorResponse, successResponse, parseBody, getClientIP } from '../middleware.js';
-import { validate, registerSchema, loginSchema } from '../validation.js';
+import { validate, registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../validation.js';
 import { authenticate } from '../auth.js';
 
 const router = Router({ base: '/api/auth' });
@@ -20,6 +20,12 @@ const LOGIN_MAX_PER_EMAIL = 10;     // per 15 min
 const LOGIN_WINDOW_SECONDS = 15 * 60;
 const REGISTER_MAX_PER_IP = 5;      // per hour
 const REGISTER_WINDOW_SECONDS = 60 * 60;
+const VERIFY_MAX_PER_IP = 5;        // per 10 min
+const VERIFY_WINDOW_SECONDS = 10 * 60;
+const FORGOT_MAX_PER_IP = 5;        // per 15 min
+const FORGOT_WINDOW_SECONDS = 15 * 60;
+const RESET_MAX_PER_IP = 10;        // per 15 min
+const RESET_WINDOW_SECONDS = 15 * 60;
 
 // POST /api/auth/register
 router.post('/register', async (request, env, ctx) => {
@@ -202,6 +208,13 @@ router.post('/verify-email', async (request, env, ctx) => {
   const body = await parseBody(request);
   if (!body || !body.token) return errorResponse('Verification token required');
 
+  // Rate limit to prevent token enumeration
+  const verifyIpHash = await hashIP(getClientIP(request));
+  if (verifyIpHash) {
+    const rl = await checkRateLimit(env.ARENA_DB, `verify:${verifyIpHash}`, VERIFY_MAX_PER_IP, VERIFY_WINDOW_SECONDS);
+    if (rl.limited) return errorResponse('Too many verification attempts. Please try again later.', 429);
+  }
+
   const user = await env.ARENA_DB.prepare(
     `SELECT id FROM users WHERE verification_token = ? AND email_verified = 0`
   ).bind(body.token).first();
@@ -229,6 +242,98 @@ router.get('/me', async (request, env) => {
   if (!user) return errorResponse('Not authenticated', 401);
 
   return successResponse({ user });
+});
+
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (request, env, ctx) => {
+  const body = await parseBody(request);
+  if (!body) return errorResponse('Invalid request body');
+
+  const { valid, errors, data } = validate(forgotPasswordSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+
+  const ipHash = await hashIP(getClientIP(request));
+  if (ipHash) {
+    const rl = await checkRateLimit(env.ARENA_DB, `forgot:${ipHash}`, FORGOT_MAX_PER_IP, FORGOT_WINDOW_SECONDS);
+    if (rl.limited) return errorResponse('Too many requests. Please try again later.', 429);
+  }
+
+  const user = await env.ARENA_DB.prepare(
+    `SELECT id, email FROM users WHERE email = ? AND is_active = 1`
+  ).bind(data.email.toLowerCase()).first();
+
+  // Always return success — never reveal whether email is registered
+  const successMsg = { message: 'If that email is registered, a reset link has been sent.' };
+  if (!user) return successResponse(successMsg);
+
+  const resetToken = generateVerificationToken();
+  const tokenHash = await hashToken(resetToken);
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+
+  await env.ARENA_DB.prepare(
+    `UPDATE users SET password_reset_token = ?, password_reset_expires = ?, updated_at = datetime('now') WHERE id = ?`
+  ).bind(tokenHash, expiresAt, user.id).run();
+
+  auditLog(env.ARENA_DB, ctx, {
+    actorId: user.id,
+    action: 'user.forgot_password',
+    entityType: 'user',
+    entityId: user.id,
+    ipAddress: getClientIP(request),
+  });
+
+  // In non-production, return the raw token so developers can test the reset flow.
+  // In production, wire up MailChannels (or your email provider) here and send the link.
+  const responseData = { ...successMsg };
+  if (env.ENVIRONMENT !== 'production') {
+    responseData.reset_token = resetToken;
+  }
+  return successResponse(responseData);
+});
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (request, env, ctx) => {
+  const body = await parseBody(request);
+  if (!body) return errorResponse('Invalid request body');
+
+  const { valid, errors, data } = validate(resetPasswordSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+
+  const ipHash = await hashIP(getClientIP(request));
+  if (ipHash) {
+    const rl = await checkRateLimit(env.ARENA_DB, `reset:${ipHash}`, RESET_MAX_PER_IP, RESET_WINDOW_SECONDS);
+    if (rl.limited) return errorResponse('Too many requests. Please try again later.', 429);
+  }
+
+  const tokenHash = await hashToken(data.token);
+
+  const user = await env.ARENA_DB.prepare(
+    `SELECT id FROM users WHERE password_reset_token = ? AND password_reset_expires > datetime('now') AND is_active = 1`
+  ).bind(tokenHash).first();
+
+  if (!user) return errorResponse('Invalid or expired reset token', 400);
+
+  const newHash = await hashPassword(data.password);
+
+  // Atomically: update password, clear reset token, invalidate all sessions
+  await env.ARENA_DB.batch([
+    env.ARENA_DB.prepare(
+      `UPDATE users SET password_hash = ?, password_reset_token = NULL, password_reset_expires = NULL, updated_at = datetime('now') WHERE id = ?`
+    ).bind(newHash, user.id),
+    env.ARENA_DB.prepare(
+      `UPDATE sessions SET is_active = 0 WHERE user_id = ? AND is_active = 1`
+    ).bind(user.id),
+  ]);
+
+  auditLog(env.ARENA_DB, ctx, {
+    actorId: user.id,
+    action: 'user.reset_password',
+    entityType: 'user',
+    entityId: user.id,
+    ipAddress: getClientIP(request),
+  });
+
+  return successResponse({ message: 'Password reset successfully. Please log in with your new password.' });
 });
 
 export default router;

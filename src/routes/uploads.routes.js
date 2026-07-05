@@ -147,7 +147,7 @@ async function handleDirectUpload(request, env, ctx) {
   if (env.ARENA_MEDIA) {
     // Upload to R2
     const arrayBuffer = await file.arrayBuffer();
-    await env.ARENA_MEDIA.put(key, arrayBuffer, {
+    await env.ARENA_MEDIA.put(keyStr, arrayBuffer, {
       httpMetadata: {
         contentType: file.type,
       },
@@ -158,18 +158,30 @@ async function handleDirectUpload(request, env, ctx) {
       },
     });
 
+    // Extract fileId from key for DB tracking: uploads/{owner}/{fileId}.{ext}
+    const keyParts = keyStr.split('/');
+    const filename = keyParts[keyParts.length - 1];
+    const trackedFileId = filename.replace(/\.[^.]+$/, '');
+
+    // Track in D1 so serve endpoint can look up by fileId without listing R2
+    const uploadRecordId = generateId('mu');
+    await env.ARENA_DB.prepare(
+      `INSERT OR IGNORE INTO media_uploads (id, file_id, r2_key, owner_id, candidate_id, file_type, file_size)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(uploadRecordId, trackedFileId, keyStr, request.user.id, candidateId || null, file.type, file.size).run();
+
     auditLog(env.ARENA_DB, ctx, {
       actorId: request.user.id,
       action: 'media.upload',
       entityType: 'media',
-      entityId: key,
+      entityId: keyStr,
       afterState: { type: file.type, size: file.size, candidate: candidateId },
       ipAddress: getClientIP(request),
     });
 
     return successResponse({
-      key,
-      url: `/media/${key}`,
+      key: keyStr,
+      url: `/media/${keyStr}`,
       type: file.type,
       size: file.size,
     });
@@ -180,27 +192,32 @@ async function handleDirectUpload(request, env, ctx) {
 }
 
 // GET /api/uploads/serve/:fileId — Serve file from R2
+// Uses the media_uploads index table rather than listing R2 objects (O(1) vs O(n)).
 router.get('/serve/:fileId', async (request, env) => {
   if (!env.ARENA_MEDIA) return errorResponse('Media storage not available', 503);
 
   const { fileId } = request.params;
 
-  // Search for file in R2 by prefix (exact filename match, not substring)
-  const list = await env.ARENA_MEDIA.list({ prefix: `uploads/`, limit: 1000 });
-  const match = list.objects.find(o => {
-    const filename = o.key.split('/').pop() || '';
-    return filename === fileId || filename.startsWith(`${fileId}.`);
-  });
+  // Validate fileId format to prevent path traversal
+  if (!/^media_[a-zA-Z0-9_-]+$/.test(fileId)) {
+    return errorResponse('Invalid file ID', 400);
+  }
 
-  if (!match) return errorResponse('File not found', 404);
+  // Look up the R2 key from the DB index — O(1), no listing required
+  const record = await env.ARENA_DB.prepare(
+    `SELECT r2_key, file_type FROM media_uploads WHERE file_id = ?`
+  ).bind(fileId).first();
 
-  const object = await env.ARENA_MEDIA.get(match.key);
+  if (!record) return errorResponse('File not found', 404);
+
+  const object = await env.ARENA_MEDIA.get(record.r2_key);
   if (!object) return errorResponse('File not found', 404);
 
   return new Response(object.body, {
     headers: {
-      'Content-Type': object.httpMetadata?.contentType || 'application/octet-stream',
-      'Cache-Control': 'public, max-age=31536000',
+      'Content-Type': object.httpMetadata?.contentType || record.file_type || 'application/octet-stream',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'X-Content-Type-Options': 'nosniff',
     },
   });
 });

@@ -210,11 +210,11 @@ router.post('/', async (request, env, ctx) => {
     ).bind(creditTxId, data.challenger_candidate_id, challengeId),
   ]);
 
-  // Create notifications for subscribers
+  // Create notifications for subscribers (hard cap to prevent fan-out DoS)
   const subs = await env.ARENA_DB.prepare(
     `SELECT * FROM notification_subscriptions
      WHERE ((subscription_type = 'race' AND target_id = ?) OR (subscription_type = 'candidate' AND target_id = ?))
-     AND is_active = 1`
+     AND is_active = 1 LIMIT 500`
   ).bind(data.race_id, data.target_candidate_id).all();
 
   if (subs.results && subs.results.length > 0) {

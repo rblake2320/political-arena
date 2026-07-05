@@ -419,6 +419,18 @@ export async function initDatabase(db) {
       reset_at TEXT NOT NULL
     )`),
 
+    // ========== MEDIA UPLOAD TRACKING ==========
+    db.prepare(`CREATE TABLE IF NOT EXISTS media_uploads (
+      id TEXT PRIMARY KEY,
+      file_id TEXT NOT NULL UNIQUE,
+      r2_key TEXT NOT NULL,
+      owner_id TEXT NOT NULL REFERENCES users(id),
+      candidate_id TEXT REFERENCES candidates(id),
+      file_type TEXT NOT NULL,
+      file_size INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
     // ========== CREDIT TRANSACTIONS ==========
     db.prepare(`CREATE TABLE IF NOT EXISTS credit_transactions (
       id TEXT PRIMARY KEY,
@@ -482,10 +494,17 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_creds_user ON press_credentials(user_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_credit_tx_candidate ON credit_transactions(candidate_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_challenges_candidate_created ON challenges(challenger_candidate_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_media_uploads_file_id ON media_uploads(file_id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_media_uploads_owner ON media_uploads(owner_id)`),
   ]);
 
+  // Password reset columns: ALTER TABLE is used because the table already exists in deployed DBs.
+  // D1/SQLite doesn't support IF NOT EXISTS on ALTER TABLE, so we catch the "already exists" error.
+  try { await db.prepare(`ALTER TABLE users ADD COLUMN password_reset_token TEXT`).run(); } catch {}
+  try { await db.prepare(`ALTER TABLE users ADD COLUMN password_reset_expires TEXT`).run(); } catch {}
+
   dbInitialized = true;
-  console.log('Arena database initialized: 29 tables + 48 indexes');
+  console.log('Arena database initialized: 30 tables + 50 indexes');
 }
 
 // Seed issue categories (idempotent)

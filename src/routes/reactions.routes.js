@@ -48,6 +48,8 @@ router.delete('/:id', async (request, env) => {
   return successResponse({ deleted: true });
 });
 
+const VALID_CONTENT_TYPES = ['ad', 'rebuttal', 'challenge', 'challenge_response'];
+
 // GET /api/reactions/counts — Get reaction counts for content
 router.get('/counts', async (request, env) => {
   const url = new URL(request.url);
@@ -55,6 +57,7 @@ router.get('/counts', async (request, env) => {
   const contentId = url.searchParams.get('content_id');
 
   if (!contentType || !contentId) return errorResponse('content_type and content_id required');
+  if (!VALID_CONTENT_TYPES.includes(contentType)) return errorResponse(`Invalid content_type. Allowed: ${VALID_CONTENT_TYPES.join(', ')}`);
 
   const result = await env.ARENA_DB.prepare(
     `SELECT reaction_type, COUNT(*) as count FROM reactions WHERE content_type = ? AND content_id = ? GROUP BY reaction_type`

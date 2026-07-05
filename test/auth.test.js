@@ -36,6 +36,7 @@ describe('health & headers', () => {
     expect(body.status).toBe('ok');
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(res.headers.get('X-Frame-Options')).toBe('DENY');
+    expect(res.headers.get('Strict-Transport-Security')).toContain('max-age=');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBeTruthy();
   });
 
