@@ -7,7 +7,7 @@
 import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { requireAuth, requireVerifiedVoter, requireRole, errorResponse, successResponse, parseBody, parsePagination } from '../middleware.js';
-import { validate, submitPrioritiesSchema, createSurveySchema } from '../validation.js';
+import { validate, submitPrioritiesSchema, createSurveySchema, respondToSurveySchema } from '../validation.js';
 
 const router = Router({ base: '/api/surveys' });
 
@@ -255,18 +255,45 @@ router.post('/:id/respond', async (request, env) => {
 
   const { id } = request.params;
   const body = await parseBody(request);
-  if (!body || !body.responses || !Array.isArray(body.responses)) {
-    return errorResponse('responses array required');
-  }
-  if (body.responses.length > 100) {
-    return errorResponse('responses array cannot exceed 100 entries', 400);
+  const { valid, errors, data } = validate(respondToSurveySchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+
+  const survey = await env.ARENA_DB.prepare(
+    `SELECT id FROM surveys WHERE id = ? AND status = 'active'`
+  ).bind(id).first();
+  if (!survey) return errorResponse('Survey not found', 404);
+
+  const questionIds = data.responses.map(r => r.question_id);
+  const uniqueQuestionIds = [...new Set(questionIds)];
+  if (uniqueQuestionIds.length !== questionIds.length) {
+    return errorResponse('responses cannot contain duplicate question_id entries', 400);
   }
 
-  const inserts = body.responses.map(r => {
+  const placeholders = uniqueQuestionIds.map(() => '?').join(',');
+  const questions = await env.ARENA_DB.prepare(
+    `SELECT id FROM survey_questions WHERE survey_id = ? AND id IN (${placeholders})`
+  ).bind(id, ...uniqueQuestionIds).all();
+  const validQuestionIds = new Set((questions.results || []).map(q => q.id));
+  const missingQuestionIds = uniqueQuestionIds.filter(questionId => !validQuestionIds.has(questionId));
+  if (missingQuestionIds.length > 0) {
+    return errorResponse(`Unknown survey questions: ${missingQuestionIds.join(', ')}`, 400);
+  }
+
+  const inserts = data.responses.map(r => {
     const respId = generateId('vsr');
+    const responseValue = typeof r.response_value === 'string'
+      ? r.response_value
+      : JSON.stringify(r.response_value);
     return env.ARENA_DB.prepare(
-      `INSERT INTO voter_survey_responses (id, user_id, survey_id, question_id, response_value, party_affiliation, jurisdiction_state) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(respId, request.user.id, id, r.question_id, String(r.response_value),
+      `INSERT INTO voter_survey_responses
+       (id, user_id, survey_id, question_id, response_value, party_affiliation, jurisdiction_state)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, survey_id, question_id) DO UPDATE SET
+         response_value = excluded.response_value,
+         party_affiliation = excluded.party_affiliation,
+         jurisdiction_state = excluded.jurisdiction_state,
+         created_at = datetime('now')`
+    ).bind(respId, request.user.id, id, r.question_id, responseValue,
       request.user.party_affiliation || null, request.user.jurisdiction_state || null);
   });
 

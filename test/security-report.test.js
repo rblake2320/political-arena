@@ -299,6 +299,95 @@ describe('red-team report regressions', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects cross-survey response injection and upserts one answer per voter question', async () => {
+    const voter = await makeVerifiedVoter('surveyintegrity');
+    const suffix = Date.now().toString(36);
+    const surveyA = `sec-survey-a-${suffix}`;
+    const surveyB = `sec-survey-b-${suffix}`;
+    const questionA = `sec-question-a-${suffix}`;
+    const questionB = `sec-question-b-${suffix}`;
+
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(
+        `INSERT INTO surveys (id, title, status, created_by, target_audience)
+         VALUES (?, 'Security Survey A', 'active', ?, 'all')`
+      ).bind(surveyA, voter.id),
+      env.ARENA_DB.prepare(
+        `INSERT INTO surveys (id, title, status, created_by, target_audience)
+         VALUES (?, 'Security Survey B', 'active', ?, 'all')`
+      ).bind(surveyB, voter.id),
+      env.ARENA_DB.prepare(
+        `INSERT INTO survey_questions (id, survey_id, question_text, question_type)
+         VALUES (?, ?, 'Question A?', 'multiple_choice')`
+      ).bind(questionA, surveyA),
+      env.ARENA_DB.prepare(
+        `INSERT INTO survey_questions (id, survey_id, question_text, question_type)
+         VALUES (?, ?, 'Question B?', 'multiple_choice')`
+      ).bind(questionB, surveyB),
+    ]);
+
+    const injected = await post(`/api/surveys/${surveyA}/respond`, {
+      responses: [{ question_id: questionB, response_value: 'yes' }],
+    }, voter.token);
+    expect(injected.status).toBe(400);
+
+    const duplicatePayload = await post(`/api/surveys/${surveyA}/respond`, {
+      responses: [
+        { question_id: questionA, response_value: 'yes' },
+        { question_id: questionA, response_value: 'no' },
+      ],
+    }, voter.token);
+    expect(duplicatePayload.status).toBe(400);
+
+    const first = await post(`/api/surveys/${surveyA}/respond`, {
+      responses: [{ question_id: questionA, response_value: 'yes' }],
+    }, voter.token);
+    expect(first.status).toBe(200);
+
+    const second = await post(`/api/surveys/${surveyA}/respond`, {
+      responses: [{ question_id: questionA, response_value: 'no' }],
+    }, voter.token);
+    expect(second.status).toBe(200);
+
+    const count = await env.ARENA_DB.prepare(
+      `SELECT COUNT(*) as count FROM voter_survey_responses WHERE user_id = ? AND survey_id = ? AND question_id = ?`
+    ).bind(voter.id, surveyA, questionA).first();
+    expect(count.count).toBe(1);
+
+    const row = await env.ARENA_DB.prepare(
+      `SELECT response_value FROM voter_survey_responses WHERE user_id = ? AND survey_id = ? AND question_id = ?`
+    ).bind(voter.id, surveyA, questionA).first();
+    expect(row.response_value).toBe('no');
+  });
+
+  it('validates candidate verification actions before changing status', async () => {
+    const admin = await makeAdmin('candidateverifyadmin');
+    const candidateId = `sec-verify-cand-${Date.now().toString(36)}`;
+    await env.ARENA_DB.prepare(
+      `INSERT INTO candidates (id, race_id, name, party, verification_status, is_active)
+       VALUES (?, 'race-1', 'Verification Candidate', 'Independent', 'pending', 1)`
+    ).bind(candidateId).run();
+
+    const nullAction = await post(`/api/candidates/${candidateId}/verify`, null, admin.token);
+    expect(nullAction.status).toBe(400);
+
+    const typoAction = await post(`/api/candidates/${candidateId}/verify`, { action: 'typo' }, admin.token);
+    expect(typoAction.status).toBe(400);
+
+    const unchanged = await env.ARENA_DB.prepare(
+      `SELECT verification_status FROM candidates WHERE id = ?`
+    ).bind(candidateId).first();
+    expect(unchanged.verification_status).toBe('pending');
+
+    const verified = await post(`/api/candidates/${candidateId}/verify`, { action: 'verify' }, admin.token);
+    expect(verified.status).toBe(200);
+    expect(verified.body.data.verification_status).toBe('verified');
+
+    const rejected = await post(`/api/candidates/${candidateId}/verify`, { action: 'reject' }, admin.token);
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.data.verification_status).toBe('rejected');
+  });
+
   it('limits challenge notification fan-out to 500 subscribers', async () => {
     const staff = await registerUser('fanoutstaff');
     await linkStaff(staff.id, 'cand-5');

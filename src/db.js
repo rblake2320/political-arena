@@ -83,6 +83,25 @@ export async function runRuntimeMigrations(db) {
     reciteColumnMigrations.push(db.prepare(`ALTER TABLE recites ADD COLUMN review_note TEXT`));
   }
   if (reciteColumnMigrations.length > 0) await db.batch(reciteColumnMigrations);
+
+  const surveyResponseIndexesResult = await db.prepare(`PRAGMA index_list(voter_survey_responses)`).all();
+  const surveyResponseIndexes = new Set((surveyResponseIndexesResult.results || []).map(i => i.name));
+  if (!surveyResponseIndexes.has('idx_vsr_user_survey_question')) {
+    await db.batch([
+      db.prepare(
+        `DELETE FROM voter_survey_responses
+         WHERE rowid NOT IN (
+           SELECT MIN(rowid)
+           FROM voter_survey_responses
+           GROUP BY user_id, survey_id, question_id
+         )`
+      ),
+      db.prepare(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_vsr_user_survey_question
+         ON voter_survey_responses(user_id, survey_id, question_id)`
+      ),
+    ]);
+  }
 }
 
 export async function initDatabase(db) {
@@ -414,7 +433,8 @@ export async function initDatabase(db) {
       response_value TEXT NOT NULL,
       party_affiliation TEXT,
       jurisdiction_state TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, survey_id, question_id)
     )`),
 
     // ========== ANALYTICS ENGINE TABLES ==========
@@ -630,6 +650,7 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_voter_priorities_user ON voter_issue_priorities(user_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_voter_priorities_race ON voter_issue_priorities(race_id, issue_category_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_voter_priorities_party ON voter_issue_priorities(party_affiliation, jurisdiction_state)`),
+    db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vsr_user_survey_question ON voter_survey_responses(user_id, survey_id, question_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_analytics_events_type ON analytics_events(event_type, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_analytics_events_race ON analytics_events(race_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_analytics_agg_period ON analytics_aggregates(period_type, period_start, metric_name)`),

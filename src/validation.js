@@ -73,6 +73,10 @@ export const updateCandidateSchema = z.object({
   website_url: z.string().url().max(500).optional(),
 });
 
+export const verifyCandidateSchema = z.object({
+  action: z.enum(['verify', 'reject']),
+});
+
 export const addCandidateStaffSchema = z.object({
   user_id: z.string().min(1),
   role: z.enum(['primary', 'staff', 'viewer']).optional().default('staff'),
@@ -339,6 +343,20 @@ export const createSurveySchema = z.object({
     options: z.array(z.string().max(500)).max(20).optional(),
     is_required: z.boolean().optional(),
   })).max(50).optional(),
+});
+
+const surveyResponseValueSchema = z.union([
+  z.string().max(5000),
+  z.number(),
+  z.boolean(),
+  z.array(z.union([z.string().max(500), z.number(), z.boolean()])).max(50),
+]);
+
+export const respondToSurveySchema = z.object({
+  responses: z.array(z.object({
+    question_id: z.string().min(1),
+    response_value: surveyResponseValueSchema,
+  })).min(1).max(100),
 });
 
 // ===== User Profile Schemas =====

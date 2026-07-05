@@ -7,7 +7,7 @@ import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
 import { requireAuth, requireRole, errorResponse, successResponse, parseBody, getClientIP } from '../middleware.js';
-import { validate, createCandidateSchema, updateCandidateSchema, addCandidateStaffSchema } from '../validation.js';
+import { validate, createCandidateSchema, updateCandidateSchema, verifyCandidateSchema, addCandidateStaffSchema } from '../validation.js';
 
 const router = Router({ base: '/api/candidates' });
 
@@ -331,19 +331,20 @@ router.post('/:id/verify', async (request, env, ctx) => {
 
   const { id } = request.params;
   const body = await parseBody(request);
-  const action = body?.action || 'verify'; // 'verify' or 'reject'
+  const { valid, errors, data } = validate(verifyCandidateSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
 
   const candidate = await env.ARENA_DB.prepare(`SELECT * FROM candidates WHERE id = ?`).bind(id).first();
   if (!candidate) return errorResponse('Candidate not found', 404);
 
-  const newStatus = action === 'reject' ? 'rejected' : 'verified';
+  const newStatus = data.action === 'reject' ? 'rejected' : 'verified';
   await env.ARENA_DB.prepare(
     `UPDATE candidates SET verification_status = ?, verified_by = ?, verified_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
   ).bind(newStatus, request.user.id, id).run();
 
   auditLog(env.ARENA_DB, ctx, {
     actorId: request.user.id,
-    action: `candidate.${action}`,
+    action: `candidate.${data.action}`,
     entityType: 'candidate',
     entityId: id,
     beforeState: { verification_status: candidate.verification_status },

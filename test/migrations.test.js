@@ -6,6 +6,7 @@ function createFakeD1({ users, adFlights, challenges, recites }) {
   const adColumns = new Set(adFlights);
   const challengeColumns = new Set(challenges);
   const reciteColumns = new Set(recites);
+  const surveyResponseIndexes = new Set();
   const executed = [];
 
   const db = {
@@ -25,6 +26,9 @@ function createFakeD1({ users, adFlights, challenges, recites }) {
           if (sql === 'PRAGMA table_info(recites)') {
             return { results: Array.from(reciteColumns).map(name => ({ name })) };
           }
+          if (sql === 'PRAGMA index_list(voter_survey_responses)') {
+            return { results: Array.from(surveyResponseIndexes).map(name => ({ name })) };
+          }
           return { results: [] };
         },
       };
@@ -40,6 +44,8 @@ function createFakeD1({ users, adFlights, challenges, recites }) {
         if (challengeMatch) challengeColumns.add(challengeMatch[1]);
         const reciteMatch = statement.sql.match(/^ALTER TABLE recites ADD COLUMN (\w+)/);
         if (reciteMatch) reciteColumns.add(reciteMatch[1]);
+        const surveyResponseIndexMatch = statement.sql.match(/^CREATE UNIQUE INDEX IF NOT EXISTS (\w+)/);
+        if (surveyResponseIndexMatch) surveyResponseIndexes.add(surveyResponseIndexMatch[1]);
       }
       return statements.map(() => ({ success: true }));
     },
@@ -47,6 +53,7 @@ function createFakeD1({ users, adFlights, challenges, recites }) {
     adColumns,
     challengeColumns,
     reciteColumns,
+    surveyResponseIndexes,
     executed,
   };
 
@@ -134,6 +141,14 @@ describe('runtime migrations', () => {
       'ALTER TABLE recites ADD COLUMN archive_url TEXT',
       'ALTER TABLE recites ADD COLUMN evidence_media_url TEXT',
       'ALTER TABLE recites ADD COLUMN review_note TEXT',
+      `DELETE FROM voter_survey_responses
+         WHERE rowid NOT IN (
+           SELECT MIN(rowid)
+           FROM voter_survey_responses
+           GROUP BY user_id, survey_id, question_id
+         )`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_vsr_user_survey_question
+         ON voter_survey_responses(user_id, survey_id, question_id)`,
     ]);
 
     db.executed.length = 0;
