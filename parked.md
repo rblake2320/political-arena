@@ -5,7 +5,7 @@
 ---
 
 ## 🚨 Go-live blockers (clear before production)
-- [ ] **JWT_SECRET not set in Cloudflare secrets** — prod auth 500s/401s without it. Fix: `wrangler secret put JWT_SECRET` (strong random value). R2 binding/bucket + `ENVIRONMENT=production` already present. (Flagged by Codex QA.)
+- [x] **JWT_SECRET set in Cloudflare secrets** (Codex/Ron). Was the cause of registration "Internal server error" — register inserted the user then failed closed creating the JWE under ENVIRONMENT=production. Now present (`wrangler secret list`), mirrored to local `.dev.vars`; register + login verified working. R2 + ENVIRONMENT=production also present. **No go-live blockers remain.**
 
 ## Redesign follow-ups (branch redesign/arena → PR #1)
 - [ ] Media-rich ad players (design 2a–2c): video / audio / image / note ad formats. Demo ads are text-only; `ContentMedia` exists to wire in.
