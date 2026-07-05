@@ -73,8 +73,9 @@ export function Register() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Username</label>
+              <label htmlFor="register-username" className="block text-sm font-medium text-zinc-400 mb-1.5">Username</label>
               <input
+                id="register-username"
                 required
                 autoFocus
                 placeholder="johndoe"
@@ -84,8 +85,9 @@ export function Register() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Display Name</label>
+              <label htmlFor="register-display-name" className="block text-sm font-medium text-zinc-400 mb-1.5">Display Name</label>
               <input
+                id="register-display-name"
                 placeholder="John Doe"
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
                 value={form.display_name}
@@ -95,8 +97,9 @@ export function Register() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Email</label>
+            <label htmlFor="register-email" className="block text-sm font-medium text-zinc-400 mb-1.5">Email</label>
             <input
+              id="register-email"
               type="email"
               required
               placeholder="you@example.com"
@@ -107,9 +110,10 @@ export function Register() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Password</label>
+            <label htmlFor="register-password" className="block text-sm font-medium text-zinc-400 mb-1.5">Password</label>
             <div className="relative">
               <input
+                id="register-password"
                 type={showPassword ? 'text' : 'password'}
                 required
                 minLength={8}
@@ -129,8 +133,9 @@ export function Register() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Confirm Password</label>
+            <label htmlFor="register-confirm-password" className="block text-sm font-medium text-zinc-400 mb-1.5">Confirm Password</label>
             <input
+              id="register-confirm-password"
               type={showPassword ? 'text' : 'password'}
               required
               placeholder="Re-enter password"
@@ -142,8 +147,9 @@ export function Register() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Party (Optional)</label>
+              <label htmlFor="register-party" className="block text-sm font-medium text-zinc-400 mb-1.5">Party (Optional)</label>
               <select
+                id="register-party"
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
                 value={form.party_affiliation}
                 onChange={e => update('party_affiliation', e.target.value)}
@@ -157,8 +163,9 @@ export function Register() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">State (Optional)</label>
+              <label htmlFor="register-state" className="block text-sm font-medium text-zinc-400 mb-1.5">State (Optional)</label>
               <select
+                id="register-state"
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
                 value={form.jurisdiction_state}
                 onChange={e => update('jurisdiction_state', e.target.value)}
