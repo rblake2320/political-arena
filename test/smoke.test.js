@@ -117,6 +117,32 @@ describe('production workflow smoke', () => {
     expect(mediaUrls.every(url => /\.(png|mp4)(\?|#|$)/i.test(new URL(url).pathname))).toBe(true);
   });
 
+  it('seeds source-backed demo recites for race summaries and receipts', async () => {
+    const race = await get('/api/races/race-1');
+    expect(race.status).toBe(200);
+
+    const challenges = race.body.data.challenges || [];
+    const responded = challenges.filter(challenge => ['chal-1', 'chal-4'].includes(challenge.id));
+    expect(responded).toHaveLength(2);
+    for (const challenge of responded) {
+      expect(challenge.challenge_recite_summary.recite_count).toBeGreaterThan(0);
+      expect(challenge.challenge_recite_summary.fact_score.verified_count).toBeGreaterThan(0);
+      expect(challenge.challenge_recite_summary.top_source).toMatchObject({
+        title: expect.any(String),
+        status: 'verified',
+        url: expect.any(String),
+      });
+    }
+
+    const receipt = await get('/api/challenges/chal-1/receipt');
+    expect(receipt.status).toBe(200);
+    expect(receipt.body.data.recites.length).toBeGreaterThan(0);
+    expect(receipt.body.data.response_recites.length).toBeGreaterThan(0);
+    expect(receipt.body.data.fact_score.verified_count).toBeGreaterThan(0);
+    expect(receipt.body.data.response_fact_score.verified_count).toBeGreaterThan(0);
+    expect(receipt.body.data.recites.some(recite => recite.archive_url && recite.review_note)).toBe(true);
+  });
+
   it('runs the core voter, press, ad, credit, and challenge workflows', async () => {
     const me = await get('/api/users/me', staffA.token);
     expect(me.status).toBe(200);
