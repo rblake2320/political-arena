@@ -114,6 +114,26 @@ export async function getCandidatePublicProfile(candidateId: string) {
   return unwrap<any>(await api.get(`/candidates/${candidateId}/public-profile`));
 }
 
+export async function createCandidate(data: {
+  race_id: string;
+  name: string;
+  party: string;
+  biography?: string;
+  issue_positions?: string[];
+  website_url?: string;
+}) {
+  const result = unwrap<any>(await api.post('/candidates', data));
+  void trackEvent({
+    event_type: 'candidate_registered',
+    race_id: data.race_id,
+    candidate_id: result.id,
+    content_type: 'candidate',
+    content_id: result.id,
+    metadata: { verification_status: result.verification_status || 'pending' },
+  });
+  return result;
+}
+
 // ---- Ads ----
 export async function createAd(data: {
   race_id: string; candidate_id: string; title: string; ad_content_text: string;
@@ -217,6 +237,28 @@ export async function respondToChallenge(challengeId: string, data: { response_t
     content_type: 'challenge',
     content_id: challengeId,
     metadata: { response_id: result.response_id, has_media: Boolean(data.media_url) },
+  });
+  return result;
+}
+
+export async function refuseChallenge(challengeId: string, data: { refusal_reason?: string }) {
+  const result = unwrap<any>(await api.post(`/challenges/${challengeId}/refuse`, data));
+  void trackEvent({
+    event_type: 'challenge_refused',
+    content_type: 'challenge',
+    content_id: challengeId,
+    metadata: { has_reason: Boolean(data.refusal_reason) },
+  });
+  return result;
+}
+
+export async function withdrawChallenge(challengeId: string) {
+  const result = unwrap<any>(await api.post(`/challenges/${challengeId}/withdraw`, {}));
+  void trackEvent({
+    event_type: 'challenge_withdrawn',
+    content_type: 'challenge',
+    content_id: challengeId,
+    metadata: { credit_refunded: Boolean(result.credit_refunded) },
   });
   return result;
 }
