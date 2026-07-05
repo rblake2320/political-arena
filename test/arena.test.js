@@ -96,6 +96,7 @@ describe('races & demo seed (test env only)', () => {
       event_type: expect.stringMatching(/^(issued|responded|refused|expired)$/),
       event_at: expect.any(String),
       challenge_id: expect.any(String),
+      public_receipt_slug: expect.any(String),
       race_id: expect.any(String),
       race_label: expect.any(String),
       challenger_name: expect.any(String),

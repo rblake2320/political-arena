@@ -64,6 +64,15 @@ export async function runRuntimeMigrations(db) {
   }
   if (challengeColumnMigrations.length > 0) await db.batch(challengeColumnMigrations);
 
+  const missingReceiptSlug = await db.prepare(
+    `SELECT id FROM challenges WHERE public_receipt_slug IS NULL OR public_receipt_slug = '' LIMIT 1`
+  ).first();
+  if (missingReceiptSlug) {
+    await db.batch([
+      db.prepare(`UPDATE challenges SET public_receipt_slug = id WHERE public_receipt_slug IS NULL OR public_receipt_slug = ''`),
+    ]);
+  }
+
   const reciteColumnsResult = await db.prepare(`PRAGMA table_info(recites)`).all();
   const reciteColumns = new Set((reciteColumnsResult.results || []).map(c => c.name));
   const reciteColumnMigrations = [];
@@ -912,14 +921,14 @@ export async function seedDemoData(db) {
   // Seed challenges
   const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
   await db.batch([
-    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind('chal-1', 'race-1', 'cand-2', 'cand-1', 'system', 'I challenge my opponent to debate the economic impact of their proposed healthcare policies.', 'debate_request', 'responded', threeDaysFromNow),
-    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind('chal-2', 'race-2', 'cand-3', 'cand-4', 'system', 'Will you commit to fully funding our public schools without raising property taxes?', 'policy_question', 'open', threeDaysFromNow),
-    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind('chal-3', 'race-1', 'cand-1', 'cand-2', 'system', 'I challenge my opponent to explain how their deregulation plan won\'t harm our local environment.', 'policy_question', 'open', threeDaysFromNow),
-    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind('chal-4', 'race-1', 'cand-1', 'cand-2', 'system', 'I challenge my opponent to explain their position on public school funding and why they voted against the Education Investment Act.', 'policy_question', 'responded', threeDaysFromNow),
+    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline, public_receipt_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind('chal-1', 'race-1', 'cand-2', 'cand-1', 'system', 'I challenge my opponent to debate the economic impact of their proposed healthcare policies.', 'debate_request', 'responded', threeDaysFromNow, 'chal-1'),
+    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline, public_receipt_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind('chal-2', 'race-2', 'cand-3', 'cand-4', 'system', 'Will you commit to fully funding our public schools without raising property taxes?', 'policy_question', 'open', threeDaysFromNow, 'chal-2'),
+    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline, public_receipt_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind('chal-3', 'race-1', 'cand-1', 'cand-2', 'system', 'I challenge my opponent to explain how their deregulation plan won\'t harm our local environment.', 'policy_question', 'open', threeDaysFromNow, 'chal-3'),
+    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline, public_receipt_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind('chal-4', 'race-1', 'cand-1', 'cand-2', 'system', 'I challenge my opponent to explain their position on public school funding and why they voted against the Education Investment Act.', 'policy_question', 'responded', threeDaysFromNow, 'chal-4'),
   ]);
 
   // Seed challenge responses with media
