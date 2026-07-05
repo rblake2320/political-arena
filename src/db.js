@@ -92,6 +92,14 @@ export async function runRuntimeMigrations(db) {
     ]);
   }
 
+  const voterWriteinColumnsResult = await db.prepare(`PRAGMA table_info(voter_writeins)`).all();
+  const voterWriteinColumns = new Set((voterWriteinColumnsResult.results || []).map(c => c.name));
+  if (!voterWriteinColumns.has('writein_rank')) {
+    await db.batch([
+      db.prepare(`ALTER TABLE voter_writeins ADD COLUMN writein_rank INTEGER NOT NULL DEFAULT 1 CHECK(writein_rank BETWEEN 1 AND 3)`),
+    ]);
+  }
+
   const auditColumnsResult = await db.prepare(`PRAGMA table_info(audit_log)`).all();
   const auditColumns = new Set((auditColumnsResult.results || []).map(c => c.name));
   const auditColumnMigrations = [];
@@ -467,7 +475,8 @@ export async function initDatabase(db) {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id),
       race_id TEXT,
-      writein_text TEXT NOT NULL CHECK(length(writein_text) BETWEEN 3 AND 200),
+      writein_text TEXT NOT NULL CHECK(length(writein_text) <= 200),
+      writein_rank INTEGER NOT NULL CHECK(writein_rank BETWEEN 1 AND 3),
       normalized_text TEXT NOT NULL,
       party_affiliation TEXT,
       jurisdiction_state TEXT,
@@ -781,8 +790,8 @@ export async function seedIssueCategories(db) {
     { id: 'cat-10', name: 'Technology & AI', slug: 'technology', description: 'Tech regulation, AI policy, digital privacy', icon: 'cpu', display_order: 10 },
     { id: 'cat-11', name: 'Infrastructure', slug: 'infrastructure', description: 'Roads, bridges, broadband, public transit', icon: 'construction', display_order: 11 },
     { id: 'cat-12', name: 'Social Security & Retirement', slug: 'social-security', description: 'Social Security, Medicare, retirement benefits', icon: 'shield-check', display_order: 12 },
-    { id: 'cat-13', name: 'Democracy & Elections', slug: 'democracy-elections', description: 'Voting rights, election administration, election integrity', icon: 'vote', display_order: 13 },
-    { id: 'cat-14', name: 'Abortion & Reproductive Policy', slug: 'reproductive-policy', description: 'Abortion, contraception, reproductive health policy', icon: 'stethoscope', display_order: 14 },
+    { id: 'cat-13', name: 'Elections and Democracy', slug: 'elections-democracy', description: 'Voting rights, election administration, election integrity', icon: 'vote', display_order: 13 },
+    { id: 'cat-14', name: 'Abortion and Reproductive Policy', slug: 'reproductive-policy', description: 'Abortion, contraception, reproductive health policy', icon: 'stethoscope', display_order: 14 },
     { id: 'cat-15', name: 'Cost of Living', slug: 'cost-of-living', description: 'Prices, inflation, household expenses, affordability', icon: 'wallet', display_order: 15 },
   ];
 

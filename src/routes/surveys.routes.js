@@ -7,7 +7,7 @@
 import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { requireAuth, requireVerifiedVoter, requireRole, errorResponse, successResponse, parseBody, parsePagination } from '../middleware.js';
-import { validate, submitPrioritiesSchema, createSurveySchema, respondToSurveySchema } from '../validation.js';
+import { validate, submitPrioritiesSchema, submitWriteinsSchema, createSurveySchema, respondToSurveySchema } from '../validation.js';
 
 const router = Router({ base: '/api/surveys' });
 
@@ -16,7 +16,7 @@ function normalizeWriteIn(text) {
 }
 
 function cleanWriteIns(writeIns = []) {
-  return writeIns.map(text => text.trim()).filter(Boolean);
+  return writeIns.map(text => text.trim().replace(/\s+/g, ' ')).filter(Boolean);
 }
 
 // GET /api/surveys/issue-categories — Public list
@@ -87,9 +87,9 @@ router.post('/my-priorities', async (request, env) => {
   const writeInInserts = writeIns.map((text, index) => {
     const id = generateId('vwi');
     return env.ARENA_DB.prepare(
-      `INSERT INTO voter_writeins (id, user_id, race_id, writein_text, normalized_text, party_affiliation, jurisdiction_state, jurisdiction_district)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(id, request.user.id, raceId, text, normalizedWriteIns[index],
+      `INSERT INTO voter_writeins (id, user_id, race_id, writein_text, writein_rank, normalized_text, party_affiliation, jurisdiction_state, jurisdiction_district)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, request.user.id, raceId, text, index + 1, normalizedWriteIns[index],
       request.user.party_affiliation || null, request.user.jurisdiction_state || null, request.user.jurisdiction_district || null);
   });
 
@@ -119,16 +119,79 @@ router.get('/my-priorities', async (request, env) => {
   sql += ` ORDER BY vip.priority_rank`;
   const result = await env.ARENA_DB.prepare(sql).bind(...binds).all();
 
-  let writeInSql = `SELECT id, race_id, writein_text, normalized_text, party_affiliation, jurisdiction_state, jurisdiction_district, created_at
+  let writeInSql = `SELECT id, race_id, writein_text, writein_rank, normalized_text, party_affiliation, jurisdiction_state, jurisdiction_district, created_at
      FROM voter_writeins
      WHERE user_id = ?`;
   const writeInBinds = [request.user.id];
   if (raceId) { writeInSql += ` AND race_id = ?`; writeInBinds.push(raceId); }
   else { writeInSql += ` AND race_id IS NULL`; }
-  writeInSql += ` ORDER BY created_at ASC`;
+  writeInSql += ` ORDER BY writein_rank ASC, created_at ASC`;
   const writeIns = await env.ARENA_DB.prepare(writeInSql).bind(...writeInBinds).all();
 
   return successResponse({ priorities: result.results || [], write_ins: writeIns.results || [] });
+});
+
+// POST /api/surveys/my-writeins — Submit/update ranked write-in issues (verified voter)
+router.post('/my-writeins', async (request, env) => {
+  const authError = await requireVerifiedVoter(request, env);
+  if (authError) return authError;
+
+  const body = await parseBody(request);
+  const { valid, errors, data } = validate(submitWriteinsSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+
+  const raceId = data.race_id || null;
+  if (raceId) {
+    const race = await env.ARENA_DB.prepare(`SELECT id FROM races WHERE id = ?`).bind(raceId).first();
+    if (!race) return errorResponse('Race not found', 404);
+  }
+
+  await env.ARENA_DB.prepare(
+    `DELETE FROM voter_writeins WHERE user_id = ? AND (race_id = ? OR (race_id IS NULL AND ? IS NULL))`
+  ).bind(request.user.id, raceId, raceId).run();
+
+  const inserts = data.writeins.map(writeIn => {
+    const text = writeIn.writein_text.trim().replace(/\s+/g, ' ');
+    return env.ARENA_DB.prepare(
+      `INSERT INTO voter_writeins (id, user_id, race_id, writein_text, writein_rank, normalized_text, party_affiliation, jurisdiction_state, jurisdiction_district)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      generateId('vwi'),
+      request.user.id,
+      raceId,
+      text,
+      writeIn.writein_rank,
+      normalizeWriteIn(text),
+      request.user.party_affiliation || null,
+      request.user.jurisdiction_state || null,
+      request.user.jurisdiction_district || null,
+    );
+  });
+
+  if (inserts.length > 0) await env.ARENA_DB.batch(inserts);
+
+  return successResponse({ saved: inserts.length });
+});
+
+// GET /api/surveys/my-writeins — Get current user's ranked write-in issues
+router.get('/my-writeins', async (request, env) => {
+  const authError = await requireVerifiedVoter(request, env);
+  if (authError) return authError;
+
+  const url = new URL(request.url);
+  const raceId = url.searchParams.get('race_id') || null;
+  let sql = `SELECT id, race_id, writein_text, writein_rank, normalized_text, party_affiliation, jurisdiction_state, jurisdiction_district, created_at
+     FROM voter_writeins
+     WHERE user_id = ?`;
+  const binds = [request.user.id];
+
+  if (raceId) { sql += ` AND race_id = ?`; binds.push(raceId); }
+  else { sql += ` AND race_id IS NULL`; }
+
+  sql += ` ORDER BY writein_rank ASC, created_at ASC`;
+  const result = await env.ARENA_DB.prepare(sql).bind(...binds).all();
+
+  return successResponse({ writeins: result.results || [] });
 });
 
 // GET /api/surveys/priorities/aggregate — Public aggregated results

@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { runRuntimeMigrations } from '../src/db.js';
 
-function createFakeD1({ users, adFlights, challenges, recites, issueCategories, auditLog }) {
+function createFakeD1({ users, adFlights, challenges, recites, issueCategories, voterWriteins, auditLog }) {
   const userColumns = new Set(users);
   const adColumns = new Set(adFlights);
   const challengeColumns = new Set(challenges);
   const reciteColumns = new Set(recites);
   const issueCategoryColumns = new Set(issueCategories);
+  const voterWriteinColumns = new Set(voterWriteins);
   const auditColumns = new Set(auditLog);
   const auditIndexes = new Set();
   const surveyResponseIndexes = new Set();
@@ -31,6 +32,9 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
           }
           if (sql === 'PRAGMA table_info(issue_categories)') {
             return { results: Array.from(issueCategoryColumns).map(name => ({ name })) };
+          }
+          if (sql === 'PRAGMA table_info(voter_writeins)') {
+            return { results: Array.from(voterWriteinColumns).map(name => ({ name })) };
           }
           if (sql === 'PRAGMA table_info(audit_log)') {
             return { results: Array.from(auditColumns).map(name => ({ name })) };
@@ -58,6 +62,8 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
         if (reciteMatch) reciteColumns.add(reciteMatch[1]);
         const issueCategoryMatch = statement.sql.match(/^ALTER TABLE issue_categories ADD COLUMN (\w+)/);
         if (issueCategoryMatch) issueCategoryColumns.add(issueCategoryMatch[1]);
+        const voterWriteinMatch = statement.sql.match(/^ALTER TABLE voter_writeins ADD COLUMN (\w+)/);
+        if (voterWriteinMatch) voterWriteinColumns.add(voterWriteinMatch[1]);
         const auditMatch = statement.sql.match(/^ALTER TABLE audit_log ADD COLUMN (\w+)/);
         if (auditMatch) auditColumns.add(auditMatch[1]);
         const auditIndexMatch = statement.sql.match(/^CREATE UNIQUE INDEX IF NOT EXISTS (idx_audit_\w+)/);
@@ -72,6 +78,7 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
     challengeColumns,
     reciteColumns,
     issueCategoryColumns,
+    voterWriteinColumns,
     auditColumns,
     auditIndexes,
     surveyResponseIndexes,
@@ -141,6 +148,18 @@ describe('runtime migrations', () => {
         'display_order',
         'is_active',
       ],
+      voterWriteins: [
+        'id',
+        'user_id',
+        'race_id',
+        'writein_text',
+        'normalized_text',
+        'party_affiliation',
+        'jurisdiction_state',
+        'jurisdiction_district',
+        'created_at',
+        'updated_at',
+      ],
       auditLog: [
         'id',
         'actor_id',
@@ -169,6 +188,7 @@ describe('runtime migrations', () => {
     expect(db.reciteColumns.has('archive_url')).toBe(true);
     expect(db.reciteColumns.has('review_note')).toBe(true);
     expect(db.issueCategoryColumns.has('parent_category_id')).toBe(true);
+    expect(db.voterWriteinColumns.has('writein_rank')).toBe(true);
     expect(db.auditColumns.has('prev_hash')).toBe(true);
     expect(db.auditColumns.has('entry_hash')).toBe(true);
     expect(db.auditColumns.has('chain_seq')).toBe(true);
@@ -191,6 +211,7 @@ describe('runtime migrations', () => {
       'ALTER TABLE recites ADD COLUMN evidence_media_url TEXT',
       'ALTER TABLE recites ADD COLUMN review_note TEXT',
       'ALTER TABLE issue_categories ADD COLUMN parent_category_id TEXT REFERENCES issue_categories(id)',
+      'ALTER TABLE voter_writeins ADD COLUMN writein_rank INTEGER NOT NULL DEFAULT 1 CHECK(writein_rank BETWEEN 1 AND 3)',
       'ALTER TABLE audit_log ADD COLUMN prev_hash TEXT',
       'ALTER TABLE audit_log ADD COLUMN entry_hash TEXT',
       'ALTER TABLE audit_log ADD COLUMN chain_seq INTEGER',

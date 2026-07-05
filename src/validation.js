@@ -316,6 +316,38 @@ export const submitPrioritiesSchema = z.object({
   });
 });
 
+export const submitWriteinsSchema = z.object({
+  race_id: z.string().optional().nullable(),
+  writeins: z.array(z.object({
+    writein_text: z.string().trim().min(3).max(200),
+    writein_rank: z.number().int().min(1).max(3),
+  })).max(3),
+}).superRefine((data, ctx) => {
+  const ranks = new Set();
+  const writeIns = new Set();
+
+  data.writeins.forEach((writeIn, index) => {
+    if (ranks.has(writeIn.writein_rank)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['writeins', index, 'writein_rank'],
+        message: 'Write-in ranks must be unique',
+      });
+    }
+    ranks.add(writeIn.writein_rank);
+
+    const normalized = writeIn.writein_text.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (writeIns.has(normalized)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['writeins', index, 'writein_text'],
+        message: 'Write-in issues must be unique',
+      });
+    }
+    writeIns.add(normalized);
+  });
+});
+
 // ===== Question Schemas =====
 
 export const submitQuestionSchema = z.object({
