@@ -29,6 +29,53 @@ async function canActForCandidate(request, env, candidateId) {
   return !!link;
 }
 
+function finalReviewFrom(existing, data) {
+  return {
+    truth_status: data.truth_status ?? existing.truth_status,
+    answer_status: data.answer_status ?? existing.answer_status,
+    evasion_score: data.evasion_score ?? existing.evasion_score,
+    confidence_score: data.confidence_score ?? existing.confidence_score,
+  };
+}
+
+function isHighStakesReview(review) {
+  return review.truth_status !== 'unreviewed'
+    || !['answered', 'not_applicable'].includes(review.answer_status)
+    || review.evasion_score > 0;
+}
+
+async function findMatchingPendingReview(db, statementId, reviewerId, review) {
+  return db.prepare(
+    `SELECT srp.*, u.display_name as reviewer_name
+     FROM statement_review_proposals srp
+     JOIN users u ON u.id = srp.reviewer_id
+     WHERE srp.statement_id = ?
+       AND srp.status = 'pending'
+       AND srp.reviewer_id != ?
+       AND srp.truth_status = ?
+       AND srp.answer_status = ?
+       AND srp.evasion_score = ?
+       AND srp.confidence_score = ?
+     ORDER BY srp.created_at ASC
+     LIMIT 1`
+  ).bind(
+    statementId,
+    reviewerId,
+    review.truth_status,
+    review.answer_status,
+    review.evasion_score,
+    review.confidence_score,
+  ).first();
+}
+
+async function userHasPendingStatementReview(db, statementId, reviewerId) {
+  return !!(await db.prepare(
+    `SELECT id FROM statement_review_proposals
+     WHERE statement_id = ? AND reviewer_id = ? AND status = 'pending'
+     LIMIT 1`
+  ).bind(statementId, reviewerId).first());
+}
+
 // GET /api/statements/candidates/:candidateId — Public candidate statement ledger
 router.get('/candidates/:candidateId', async (request, env) => {
   const { candidateId } = request.params;
@@ -77,6 +124,63 @@ router.get('/search', async (request, env) => {
 
   return successResponse({ statements: result.results || [], claim_key: key });
 });
+
+// GET /api/statements/review-pending — Moderator/admin second-review queue
+router.get('/review-pending', async (request, env) => {
+  const authError = await requireRole('moderator', 'admin', 'super_admin')(request, env);
+  if (authError) return authError;
+
+  const url = new URL(request.url);
+  const { limit, offset } = parsePagination(url);
+  const result = await env.ARENA_DB.prepare(
+    `SELECT srp.*, ps.statement_text, ps.source_url, ps.source_title,
+            c.name as candidate_name, r.name as race_name,
+            u.display_name as reviewer_name
+     FROM statement_review_proposals srp
+     JOIN public_statements ps ON ps.id = srp.statement_id
+     JOIN candidates c ON c.id = ps.candidate_id
+     LEFT JOIN races r ON r.id = ps.race_id
+     JOIN users u ON u.id = srp.reviewer_id
+     WHERE srp.status = 'pending'
+     ORDER BY srp.created_at ASC
+     LIMIT ? OFFSET ?`
+  ).bind(limit, offset).all();
+
+  return successResponse({ proposals: result.results || [], page: Math.floor(offset / limit) + 1, limit });
+});
+
+// GET /api/statements/review-rubric — Public moderation rubric for statement/evasion reviews
+router.get('/review-rubric', () => successResponse({
+  rubric: {
+    principle: 'Statement reviews are source-labeled moderation calls, not platform claims of absolute truth.',
+    truth_statuses: {
+      unreviewed: 'No moderator truth review has been applied.',
+      supported: 'Available cited sources materially support the statement.',
+      disputed: 'Available cited sources materially dispute the statement.',
+      false: 'Available cited sources show the statement is materially false.',
+      mixed: 'Available cited sources support part of the statement and dispute part of it.',
+      context_needed: 'The statement cannot be fairly scored without additional context.',
+    },
+    answer_statuses: {
+      answered: 'The response directly addresses the question or claim.',
+      partial: 'The response addresses part of the question or claim.',
+      dodged: 'The response avoids the central question or claim.',
+      unclear: 'The response is too ambiguous to classify cleanly.',
+      not_applicable: 'No answer-status review applies to this statement.',
+    },
+    evasion_score: {
+      0: 'No evasion score applied.',
+      '1-39': 'Minor incompleteness or ambiguity.',
+      '40-69': 'Materially partial, unclear, or indirect answer.',
+      '70-100': 'Substantial dodge or off-topic response.',
+    },
+    safeguards: {
+      high_stakes_reviews_require_second_reviewer: true,
+      high_stakes_definition: 'Any non-unreviewed truth label, partial/dodged/unclear answer label, or evasion score above 0.',
+      correction_path: '/api/corrections',
+    },
+  },
+}));
 
 // GET /api/statements/:id — Public single statement
 router.get('/:id', async (request, env) => {
@@ -164,6 +268,112 @@ router.put('/:id/review', async (request, env, ctx) => {
   const existing = await env.ARENA_DB.prepare(`SELECT * FROM public_statements WHERE id = ?`).bind(id).first();
   if (!existing) return errorResponse('Statement not found', 404);
 
+  const finalReview = finalReviewFrom(existing, data);
+  if (isHighStakesReview(finalReview)) {
+    const matchingPending = await findMatchingPendingReview(env.ARENA_DB, id, request.user.id, finalReview);
+    if (!matchingPending) {
+      const alreadyProposed = await userHasPendingStatementReview(env.ARENA_DB, id, request.user.id);
+      if (alreadyProposed) return errorResponse('A different moderator must confirm this pending statement review', 409);
+
+      const proposalId = generateId('srp');
+      await env.ARENA_DB.prepare(
+        `INSERT INTO statement_review_proposals
+         (id, statement_id, reviewer_id, truth_status, answer_status, evasion_score, confidence_score, review_note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        proposalId,
+        id,
+        request.user.id,
+        finalReview.truth_status,
+        finalReview.answer_status,
+        finalReview.evasion_score,
+        finalReview.confidence_score,
+        data.review_note || null,
+      ).run();
+
+      auditLog(env.ARENA_DB, ctx, {
+        actorId: request.user.id,
+        action: 'statement.review_propose',
+        entityType: 'statement',
+        entityId: id,
+        beforeState: {
+          truth_status: existing.truth_status,
+          answer_status: existing.answer_status,
+          evasion_score: existing.evasion_score,
+          confidence_score: existing.confidence_score,
+        },
+        afterState: finalReview,
+      });
+
+      return successResponse({
+        id,
+        review_status: 'pending_second_review',
+        requires_second_reviewer: true,
+        proposal_id: proposalId,
+        proposed: finalReview,
+      });
+    }
+
+    const reviewNote = data.review_note || matchingPending.review_note || null;
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(
+        `UPDATE public_statements
+         SET truth_status = ?,
+             answer_status = ?,
+             evasion_score = ?,
+             confidence_score = ?,
+             review_note = ?,
+             reviewed_by = ?,
+             reviewed_at = datetime('now'),
+             updated_at = datetime('now')
+         WHERE id = ?`
+      ).bind(
+        finalReview.truth_status,
+        finalReview.answer_status,
+        finalReview.evasion_score,
+        finalReview.confidence_score,
+        reviewNote,
+        request.user.id,
+        id,
+      ),
+      env.ARENA_DB.prepare(
+        `UPDATE statement_review_proposals
+         SET status = 'applied',
+             second_reviewer_id = ?,
+             applied_at = datetime('now'),
+             updated_at = datetime('now')
+         WHERE id = ?`
+      ).bind(request.user.id, matchingPending.id),
+    ]);
+
+    auditLog(env.ARENA_DB, ctx, {
+      actorId: request.user.id,
+      action: 'statement.review_apply',
+      entityType: 'statement',
+      entityId: id,
+      beforeState: {
+        truth_status: existing.truth_status,
+        answer_status: existing.answer_status,
+        evasion_score: existing.evasion_score,
+        confidence_score: existing.confidence_score,
+      },
+      afterState: {
+        ...finalReview,
+        first_reviewer_id: matchingPending.reviewer_id,
+        second_reviewer_id: request.user.id,
+      },
+    });
+
+    return successResponse({
+      id,
+      ...finalReview,
+      review_note: reviewNote,
+      review_status: 'applied',
+      first_reviewer_id: matchingPending.reviewer_id,
+      second_reviewer_id: request.user.id,
+    });
+  }
+
   await env.ARENA_DB.prepare(
     `UPDATE public_statements
      SET truth_status = COALESCE(?, truth_status),
@@ -190,11 +400,16 @@ router.put('/:id/review', async (request, env, ctx) => {
     action: 'statement.review',
     entityType: 'statement',
     entityId: id,
-    beforeState: { truth_status: existing.truth_status, answer_status: existing.answer_status, evasion_score: existing.evasion_score },
+    beforeState: {
+      truth_status: existing.truth_status,
+      answer_status: existing.answer_status,
+      evasion_score: existing.evasion_score,
+      confidence_score: existing.confidence_score,
+    },
     afterState: data,
   });
 
-  return successResponse({ id, ...data });
+  return successResponse({ id, ...data, review_status: 'applied' });
 });
 
 export default router;

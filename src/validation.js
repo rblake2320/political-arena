@@ -239,6 +239,23 @@ export const reviewStatementSchema = z.object({
   review_note: z.string().max(1000).optional(),
 });
 
+// ===== Correction / Appeal Schemas =====
+
+export const createCorrectionRequestSchema = z.object({
+  content_type: z.enum(['statement', 'recite', 'challenge', 'challenge_response', 'candidate', 'ad', 'rebuttal']),
+  content_id: z.string().min(1).max(120),
+  candidate_id: z.string().min(1).max(120).optional(),
+  reason: z.enum(['factual_error', 'missing_context', 'source_error', 'identity_error', 'score_dispute', 'other']).optional().default('factual_error'),
+  requested_change: z.string().min(10).max(3000),
+  evidence_url: z.string().url().max(1000).optional(),
+});
+
+export const reviewCorrectionRequestSchema = z.object({
+  status: z.enum(['under_review', 'upheld', 'revised', 'rejected']),
+  resolution_note: z.string().min(5).max(3000),
+  public_note: z.string().min(5).max(3000).optional(),
+});
+
 // ===== Reaction Schemas =====
 
 export const createReactionSchema = z.object({
