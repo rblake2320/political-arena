@@ -61,6 +61,14 @@ async function makeAdmin(label) {
   return user;
 }
 
+async function makeModerator(label) {
+  const user = await registerUser(label);
+  await env.ARENA_DB.prepare(
+    `UPDATE users SET role = 'moderator', verification_status = 'verified', email_verified = 1 WHERE id = ?`
+  ).bind(user.id).run();
+  return user;
+}
+
 async function linkStaff(userId, candidateId, role = 'primary') {
   await env.ARENA_DB.prepare(
     `INSERT OR IGNORE INTO candidate_staff_links (id, user_id, candidate_id, role, is_active)
@@ -412,6 +420,66 @@ describe('red-team report regressions', () => {
       `SELECT response_value FROM voter_survey_responses WHERE user_id = ? AND survey_id = ? AND question_id = ?`
     ).bind(voter.id, surveyA, questionA).first();
     expect(row.response_value).toBe('no');
+  });
+
+  it('lists only claimed pending candidate applications for moderators', async () => {
+    const voter = await makeVerifiedVoter('candidatependingvoter');
+    const moderator = await makeModerator('candidatependingmod');
+    const suffix = Date.now().toString(36);
+    const olderId = `sec-pending-old-${suffix}`;
+    const newerId = `sec-pending-new-${suffix}`;
+    const verifiedId = `sec-pending-verified-${suffix}`;
+    const unclaimedId = `sec-pending-fec-${suffix}`;
+
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(
+        `INSERT INTO candidates (id, race_id, user_id, name, party, issue_positions, verification_status, is_active, created_at)
+         VALUES (?, 'race-1', ?, 'Older Pending Candidate', 'Independent', ?, 'pending', 1, ?)`
+      ).bind(olderId, voter.id, JSON.stringify(['Healthcare']), '2026-01-01T00:00:00.000Z'),
+      env.ARENA_DB.prepare(
+        `INSERT INTO candidates (id, race_id, user_id, name, party, issue_positions, verification_status, is_active, created_at)
+         VALUES (?, 'race-1', ?, 'Newer Pending Candidate', 'Independent', ?, 'pending', 1, ?)`
+      ).bind(newerId, voter.id, JSON.stringify(['Housing']), '2026-01-02T00:00:00.000Z'),
+      env.ARENA_DB.prepare(
+        `INSERT INTO candidates (id, race_id, user_id, name, party, verification_status, is_active, created_at)
+         VALUES (?, 'race-1', ?, 'Already Verified Candidate', 'Independent', 'verified', 1, ?)`
+      ).bind(verifiedId, voter.id, '2026-01-03T00:00:00.000Z'),
+      env.ARENA_DB.prepare(
+        `INSERT INTO candidates (id, race_id, name, party, verification_status, is_active, created_at)
+         VALUES (?, 'race-1', 'Unclaimed FEC Listed Candidate', 'Independent', 'pending', 1, ?)`
+      ).bind(unclaimedId, '2026-01-04T00:00:00.000Z'),
+    ]);
+
+    const anonymous = await get('/api/candidates/pending');
+    expect(anonymous.status).toBe(401);
+
+    const regularUser = await get('/api/candidates/pending', voter.token);
+    expect(regularUser.status).toBe(403);
+
+    const queue = await get('/api/candidates/pending', moderator.token);
+    expect(queue.status).toBe(200);
+    const candidates = queue.body.data.candidates;
+    const older = candidates.find(candidate => candidate.id === olderId);
+    const newer = candidates.find(candidate => candidate.id === newerId);
+
+    expect(candidates.some(candidate => candidate.id === verifiedId)).toBe(false);
+    expect(candidates.some(candidate => candidate.id === unclaimedId)).toBe(false);
+    expect(older).toMatchObject({
+      id: olderId,
+      race_id: 'race-1',
+      user_id: voter.id,
+      name: 'Older Pending Candidate',
+      party: 'Independent',
+      verification_status: 'pending',
+      race_name: expect.any(String),
+      race_state: expect.any(String),
+      created_at: '2026-01-01T00:00:00.000Z',
+      applicant_email: voter.email,
+    });
+    expect(older.issue_positions).toEqual(['Healthcare']);
+    expect(candidates.findIndex(candidate => candidate.id === newerId))
+      .toBeLessThan(candidates.findIndex(candidate => candidate.id === olderId));
+    expect(newer.race_name).toBe(older.race_name);
   });
 
   it('validates candidate verification actions before changing status', async () => {

@@ -30,6 +30,48 @@ router.get('/races/:raceId', async (request, env) => {
   return successResponse({ candidates });
 });
 
+// GET /api/candidates/pending — List pending candidate profile applications (admin/moderator)
+router.get('/pending', async (request, env) => {
+  const authError = await requireRole('admin', 'super_admin', 'moderator')(request, env);
+  if (authError) return authError;
+
+  const result = await env.ARENA_DB.prepare(
+    `SELECT
+       c.id,
+       c.race_id,
+       c.user_id,
+       c.name,
+       c.party,
+       c.biography,
+       c.issue_positions,
+       c.photo_url,
+       c.website_url,
+       c.verification_status,
+       c.created_at,
+       c.updated_at,
+       r.name as race_name,
+       r.state as race_state,
+       r.office as race_office,
+       r.district as race_district,
+       u.display_name as applicant_name,
+       u.email as applicant_email
+     FROM candidates c
+     JOIN races r ON r.id = c.race_id
+     JOIN users u ON u.id = c.user_id
+     WHERE c.verification_status = 'pending'
+       AND c.user_id IS NOT NULL
+       AND c.is_active = 1
+     ORDER BY c.created_at DESC, c.id DESC`
+  ).all();
+
+  const candidates = (result.results || []).map(candidate => ({
+    ...candidate,
+    issue_positions: candidate.issue_positions ? JSON.parse(candidate.issue_positions) : [],
+  }));
+
+  return successResponse({ candidates });
+});
+
 // GET /api/candidates/:id/public-profile — Public trust ledger profile
 router.get('/:id/public-profile', async (request, env) => {
   const { id } = request.params;
