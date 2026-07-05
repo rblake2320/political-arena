@@ -1,0 +1,59 @@
+{
+  "source_name": "2026 United States gubernatorial elections",
+  "cycle": 2026,
+  "scope": "state_governor_races_only",
+  "election_date": "2026-11-03",
+  "sources": [
+    {
+      "name": "National Governors Association",
+      "url": "https://www.nga.org/governors/elections/"
+    },
+    {
+      "name": "Wikipedia 2026 United States gubernatorial elections",
+      "url": "https://en.wikipedia.org/wiki/2026_United_States_gubernatorial_elections"
+    }
+  ],
+  "notes": [
+    "State races only. Territories are excluded from this loader and should be decided separately.",
+    "North Carolina is excluded because its next regular gubernatorial election is not in 2026."
+  ],
+  "territories_excluded": ["GU", "MP", "VI"],
+  "states": [
+    { "abbr": "AL", "name": "Alabama" },
+    { "abbr": "AK", "name": "Alaska" },
+    { "abbr": "AZ", "name": "Arizona" },
+    { "abbr": "AR", "name": "Arkansas" },
+    { "abbr": "CA", "name": "California" },
+    { "abbr": "CO", "name": "Colorado" },
+    { "abbr": "CT", "name": "Connecticut" },
+    { "abbr": "FL", "name": "Florida" },
+    { "abbr": "GA", "name": "Georgia" },
+    { "abbr": "HI", "name": "Hawaii" },
+    { "abbr": "ID", "name": "Idaho" },
+    { "abbr": "IL", "name": "Illinois" },
+    { "abbr": "IA", "name": "Iowa" },
+    { "abbr": "KS", "name": "Kansas" },
+    { "abbr": "ME", "name": "Maine" },
+    { "abbr": "MD", "name": "Maryland" },
+    { "abbr": "MA", "name": "Massachusetts" },
+    { "abbr": "MI", "name": "Michigan" },
+    { "abbr": "MN", "name": "Minnesota" },
+    { "abbr": "NE", "name": "Nebraska" },
+    { "abbr": "NV", "name": "Nevada" },
+    { "abbr": "NH", "name": "New Hampshire" },
+    { "abbr": "NM", "name": "New Mexico" },
+    { "abbr": "NY", "name": "New York" },
+    { "abbr": "OH", "name": "Ohio" },
+    { "abbr": "OK", "name": "Oklahoma" },
+    { "abbr": "OR", "name": "Oregon" },
+    { "abbr": "PA", "name": "Pennsylvania" },
+    { "abbr": "RI", "name": "Rhode Island" },
+    { "abbr": "SC", "name": "South Carolina" },
+    { "abbr": "SD", "name": "South Dakota" },
+    { "abbr": "TN", "name": "Tennessee" },
+    { "abbr": "TX", "name": "Texas" },
+    { "abbr": "VT", "name": "Vermont" },
+    { "abbr": "WI", "name": "Wisconsin" },
+    { "abbr": "WY", "name": "Wyoming" }
+  ]
+}

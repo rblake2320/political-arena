@@ -103,6 +103,29 @@ describe('red-team report regressions', () => {
     expect(row.metadata.length).toBeLessThanOrEqual(1000);
   });
 
+  it('accepts event_data as a compatibility alias for analytics metadata', async () => {
+    const marker = `security.analytics.alias.${Date.now()}`;
+
+    const res = await post('/api/analytics/events', {
+      events: [{
+        event_type: marker,
+        race_id: 'race-1',
+        content_type: 'race',
+        content_id: 'race-1',
+        event_data: { route: '/race/:id', path: '/race/race-1' },
+      }],
+    }, undefined, { 'CF-Connecting-IP': '203.0.113.13' });
+
+    expect(res.status).toBe(200);
+    const row = await env.ARENA_DB.prepare(
+      `SELECT race_id, content_type, content_id, metadata FROM analytics_events WHERE event_type = ? ORDER BY created_at DESC LIMIT 1`
+    ).bind(marker).first();
+    expect(row.race_id).toBe('race-1');
+    expect(row.content_type).toBe('race');
+    expect(row.content_id).toBe('race-1');
+    expect(JSON.parse(row.metadata)).toEqual({ route: '/race/:id', path: '/race/race-1' });
+  });
+
   it('rate-limits analytics ingestion by IP', async () => {
     const ip = '203.0.113.11';
     let last;
@@ -165,6 +188,37 @@ describe('red-team report regressions', () => {
     }, primary.token);
 
     expect(res.status).toBe(403);
+  });
+
+  it('keeps platform admin separate from campaign authority', async () => {
+    const admin = await makeAdmin('campaignboundary');
+
+    const ad = await post('/api/ads', {
+      race_id: 'race-1',
+      candidate_id: 'cand-1',
+      title: 'Admin should not be campaign staff',
+      ad_content_text: 'This should require a real campaign staff link.',
+      disclaimer_text: 'Paid for by Candidate',
+    }, admin.token);
+    expect(ad.status).toBe(403);
+
+    const challenge = await post('/api/challenges', {
+      race_id: 'race-1',
+      challenger_candidate_id: 'cand-1',
+      target_candidate_id: 'cand-2',
+      challenge_text: 'Please explain this policy in detail.',
+      challenge_type: 'policy_question',
+    }, admin.token);
+    expect(challenge.status).toBe(403);
+
+    const statement = await post('/api/statements', {
+      candidate_id: 'cand-1',
+      race_id: 'race-1',
+      statement_text: 'This statement should not be logged by platform admin authority alone.',
+      source_url: 'https://example.com/admin-boundary-source',
+      source_type: 'article',
+    }, admin.token);
+    expect(statement.status).toBe(403);
   });
 
   it('returns the persisted balance after credit grants', async () => {

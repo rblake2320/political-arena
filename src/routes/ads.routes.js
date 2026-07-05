@@ -104,14 +104,11 @@ router.post('/', async (request, env, ctx) => {
   const { valid, errors, data } = validate(createAdSchema, body);
   if (!valid) return errorResponse(errors.join('; '));
 
-  // Verify candidate staff authorization
-  const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isAdmin) {
-    const link = await env.ARENA_DB.prepare(
-      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-    ).bind(request.user.id, data.candidate_id).first();
-    if (!link) return errorResponse('Not authorized for this candidate', 403);
-  }
+  // Campaign speech requires an explicit staff link; platform admin is not campaign authority.
+  const link = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+  ).bind(request.user.id, data.candidate_id).first();
+  if (!link) return errorResponse('Not authorized for this candidate', 403);
 
   // Verify candidate is in the specified race
   const candidate = await env.ARENA_DB.prepare(
@@ -130,14 +127,6 @@ router.post('/', async (request, env, ctx) => {
     data.start_date || null, data.end_date || null,
   ).run();
 
-  // Auto-approve + activate for admin/super_admin (skip review workflow)
-  const isSuperAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (isSuperAdmin) {
-    await env.ARENA_DB.prepare(
-      `UPDATE ad_flights SET status = 'active', reviewed_by = ?, reviewed_at = datetime('now'), approved_at = datetime('now'), activated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
-    ).bind(request.user.id, adId).run();
-  }
-
   auditLog(env.ARENA_DB, ctx, {
     actorId: request.user.id,
     action: 'ad.create',
@@ -147,7 +136,7 @@ router.post('/', async (request, env, ctx) => {
     ipAddress: getClientIP(request),
   });
 
-  return successResponse({ id: adId, status: isSuperAdmin ? 'active' : 'draft' });
+  return successResponse({ id: adId, status: 'draft' });
 });
 
 // POST /api/ads/:id/submit — Submit ad for review
@@ -160,14 +149,10 @@ router.post('/:id/submit', async (request, env, ctx) => {
   if (!ad) return errorResponse('Ad not found', 404);
   if (!['draft', 'rejected'].includes(ad.status)) return errorResponse('Ad can only be submitted from draft or rejected status');
 
-  // Check staff auth
-  const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isAdmin) {
-    const link = await env.ARENA_DB.prepare(
-      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-    ).bind(request.user.id, ad.candidate_id).first();
-    if (!link) return errorResponse('Not authorized', 403);
-  }
+  const link = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+  ).bind(request.user.id, ad.candidate_id).first();
+  if (!link) return errorResponse('Not authorized', 403);
 
   if (!ad.disclaimer_text) return errorResponse('Disclaimer text is required before submission');
 
@@ -244,14 +229,10 @@ router.post('/:id/activate', async (request, env, ctx) => {
   if (!ad) return errorResponse('Ad not found', 404);
   if (ad.status !== 'approved') return errorResponse('Ad must be approved before activation');
 
-  // Only staff of the owning candidate (or admins) may activate
-  const isActivateAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isActivateAdmin) {
-    const link = await env.ARENA_DB.prepare(
-      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-    ).bind(request.user.id, ad.candidate_id).first();
-    if (!link) return errorResponse('Not authorized for this candidate', 403);
-  }
+  const link = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+  ).bind(request.user.id, ad.candidate_id).first();
+  if (!link) return errorResponse('Not authorized for this candidate', 403);
 
   await env.ARENA_DB.prepare(
     `UPDATE ad_flights SET status = 'active', activated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
@@ -275,14 +256,10 @@ router.get('/candidates/:candidateId', async (request, env) => {
 
   const { candidateId } = request.params;
 
-  // Check authorization
-  const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isAdmin) {
-    const link = await env.ARENA_DB.prepare(
-      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-    ).bind(request.user.id, candidateId).first();
-    if (!link) return errorResponse('Not authorized', 403);
-  }
+  const link = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+  ).bind(request.user.id, candidateId).first();
+  if (!link) return errorResponse('Not authorized', 403);
 
   const result = await env.ARENA_DB.prepare(
     `SELECT * FROM ad_flights WHERE candidate_id = ? ORDER BY created_at DESC`
@@ -374,15 +351,12 @@ router.post('/rebuttals', async (request, env, ctx) => {
     `SELECT id, race_id, verification_status FROM candidates WHERE id = ? AND is_active = 1`
   ).bind(data.candidate_id).first();
   if (!candidate || candidate.race_id !== ad.race_id) return errorResponse('Candidate must be in the same race');
-  const isAdminRebuttal = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isAdminRebuttal && candidate.verification_status !== 'verified') return errorResponse('Candidate must be verified');
+  if (candidate.verification_status !== 'verified') return errorResponse('Candidate must be verified');
 
-  if (!isAdminRebuttal) {
-    const link = await env.ARENA_DB.prepare(
-      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-    ).bind(request.user.id, data.candidate_id).first();
-    if (!link) return errorResponse('Not authorized for this candidate', 403);
-  }
+  const rebuttalStaffLink = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+  ).bind(request.user.id, data.candidate_id).first();
+  if (!rebuttalStaffLink) return errorResponse('Not authorized for this candidate', 403);
 
   const existingRebuttal = await env.ARENA_DB.prepare(
     `SELECT id FROM rebuttal_ads WHERE parent_ad_id = ? AND candidate_id = ?`
@@ -395,8 +369,7 @@ router.post('/rebuttals', async (request, env, ctx) => {
   if (rebuttalCount.count >= (ad.max_rebuttals || 3)) return errorResponse('Max rebuttals reached');
 
   const rebuttalId = generateId('reb');
-  const isSuperAdmin2 = ['admin', 'super_admin'].includes(request.user.role);
-  const rebuttalStatus = isSuperAdmin2 ? 'approved' : 'draft';
+  const rebuttalStatus = 'draft';
   await env.ARENA_DB.prepare(
     `INSERT INTO rebuttal_ads (id, parent_ad_id, race_id, candidate_id, created_by, response_text, disclaimer_text, media_url, status, slot_claimed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
   ).bind(rebuttalId, data.parent_ad_id, ad.race_id, data.candidate_id, request.user.id, data.response_text, data.disclaimer_text, data.media_url || null, rebuttalStatus).run();
@@ -440,17 +413,14 @@ router.post('/external-response', async (request, env, ctx) => {
   ).bind(data.responder_candidate_id, data.race_id).first();
   if (!responderCandidate) return errorResponse('Responder candidate not found in this race', 404);
 
-  const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isAdmin && responderCandidate.verification_status !== 'verified') {
+  if (responderCandidate.verification_status !== 'verified') {
     return errorResponse('Responder candidate must be verified');
   }
 
-  if (!isAdmin) {
-    const link = await env.ARENA_DB.prepare(
-      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-    ).bind(request.user.id, data.responder_candidate_id).first();
-    if (!link) return errorResponse('Not authorized for this candidate', 403);
-  }
+  const responderStaffLink = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+  ).bind(request.user.id, data.responder_candidate_id).first();
+  if (!responderStaffLink) return errorResponse('Not authorized for this candidate', 403);
 
   const adId = generateId('ad');
   const rebuttalId = generateId('reb');

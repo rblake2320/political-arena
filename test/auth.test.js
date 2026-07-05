@@ -3,10 +3,12 @@
  * Covers: register, login, session-bound JWT, logout invalidation,
  * duplicate rejection, password policy, and login rate limiting.
  */
-import { SELF } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
 import { describe, it, expect } from 'vitest';
+import { PASSWORD_HASH_ALGORITHM, PBKDF2_ITERATIONS } from '../src/auth.js';
 
 const BASE = 'https://example.com';
+const LEGACY_PBKDF2_ITERATIONS = 100000;
 
 async function post(path, body, token) {
   const headers = { 'Content-Type': 'application/json' };
@@ -27,6 +29,27 @@ async function get(path, token) {
 }
 
 const VALID_PASSWORD = 'Str0ng!Passw0rd';
+
+function bytesToHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function legacyPasswordHash(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits'],
+  );
+  const derivedBits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: LEGACY_PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    key,
+    256,
+  );
+  return `${bytesToHex(salt)}:${bytesToHex(new Uint8Array(derivedBits))}`;
+}
 
 describe('health & headers', () => {
   it('GET /api/health returns ok with security headers', async () => {
@@ -79,6 +102,11 @@ describe('registration', () => {
     const me = await get('/api/auth/me', reg.body.data.token);
     expect(me.status).toBe(200);
     expect(me.body.data.user.email).toBe('alice@example.com');
+
+    const stored = await env.ARENA_DB.prepare(
+      `SELECT password_hash FROM users WHERE email = ?`
+    ).bind('alice@example.com').first();
+    expect(stored.password_hash).toMatch(new RegExp(`^${PASSWORD_HASH_ALGORITHM}\\$${PBKDF2_ITERATIONS}\\$`));
   });
 
   it('rejects a duplicate email with 409', async () => {
@@ -146,6 +174,31 @@ describe('login & sessions', () => {
     // The JWT itself is still cryptographically valid, but the session is dead
     const meAfter = await get('/api/auth/me', token);
     expect(meAfter.status).toBe(401);
+  });
+
+  it('upgrades legacy password hashes after a successful login', async () => {
+    await post('/api/auth/register', {
+      email: 'legacyhash@example.com',
+      username: 'legacyhash',
+      password: VALID_PASSWORD,
+      display_name: 'Legacy Hash',
+    });
+
+    const legacyHash = await legacyPasswordHash(VALID_PASSWORD);
+    await env.ARENA_DB.prepare(
+      `UPDATE users SET password_hash = ? WHERE email = ?`
+    ).bind(legacyHash, 'legacyhash@example.com').run();
+
+    const login = await post('/api/auth/login', {
+      email: 'legacyhash@example.com',
+      password: VALID_PASSWORD,
+    });
+    expect(login.status).toBe(200);
+
+    const stored = await env.ARENA_DB.prepare(
+      `SELECT password_hash FROM users WHERE email = ?`
+    ).bind('legacyhash@example.com').first();
+    expect(stored.password_hash).toMatch(new RegExp(`^${PASSWORD_HASH_ALGORITHM}\\$${PBKDF2_ITERATIONS}\\$`));
   });
 
   it('rejects a garbage token', async () => {

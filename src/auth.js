@@ -8,68 +8,88 @@ import { EncryptJWT, jwtDecrypt } from 'jose';
 
 // ===== Password Hashing (PBKDF2) =====
 
-export async function hashPassword(password) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
+export const PASSWORD_HASH_ALGORITHM = 'pbkdf2_sha256';
+export const PBKDF2_ITERATIONS = 600000;
+const LEGACY_PBKDF2_ITERATIONS = 100000;
 
-  const key = await crypto.subtle.importKey(
+function bytesToHex(bytes) {
+  return Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToBytes(hex) {
+  if (!/^[a-f0-9]+$/i.test(hex) || hex.length % 2 !== 0) {
+    throw new Error('Invalid hex input');
+  }
+  return new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+}
+
+async function derivePasswordHash(password, salt, iterations) {
+  const passwordKey = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(password),
     { name: 'PBKDF2' },
     false,
-    ['deriveBits', 'deriveKey']
+    ['deriveBits']
   );
 
-  const derivedKey = await crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
-    key,
-    { name: 'AES-GCM', length: 256 },
-    true,
-    ['encrypt', 'decrypt']
+  const derivedBits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    passwordKey,
+    256
   );
 
-  const exportedKey = await crypto.subtle.exportKey('raw', derivedKey);
-  const hash = Array.from(new Uint8Array(exportedKey))
-    .map(b => b.toString(16).padStart(2, '0')).join('');
-  const saltHex = Array.from(salt)
-    .map(b => b.toString(16).padStart(2, '0')).join('');
+  return bytesToHex(new Uint8Array(derivedBits));
+}
 
-  return `${saltHex}:${hash}`;
+export async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = await derivePasswordHash(password, salt, PBKDF2_ITERATIONS);
+  return `${PASSWORD_HASH_ALGORITHM}$${PBKDF2_ITERATIONS}$${bytesToHex(salt)}$${hash}`;
+}
+
+function parsePasswordHash(storedHash) {
+  if (typeof storedHash !== 'string') return null;
+
+  const versionedParts = storedHash.split('$');
+  if (versionedParts.length === 4) {
+    const [algorithm, iterationsText, saltHex, hashHex] = versionedParts;
+    const iterations = Number(iterationsText);
+    if (algorithm !== PASSWORD_HASH_ALGORITHM || !Number.isInteger(iterations) || iterations < 1) return null;
+    return { algorithm, iterations, saltHex, hashHex };
+  }
+
+  const legacyParts = storedHash.split(':');
+  if (legacyParts.length === 2) {
+    const [saltHex, hashHex] = legacyParts;
+    return {
+      algorithm: 'legacy_pbkdf2_sha256',
+      iterations: LEGACY_PBKDF2_ITERATIONS,
+      saltHex,
+      hashHex,
+    };
+  }
+
+  return null;
 }
 
 export async function verifyPassword(password, storedHash) {
   try {
-    const [saltHex, hash] = storedHash.split(':');
-    if (!saltHex || !hash) return false;
+    const parsed = parsePasswordHash(storedHash);
+    if (!parsed) return false;
 
-    const salt = new Uint8Array(
-      saltHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16))
-    );
-
-    const key = await crypto.subtle.importKey(
-      'raw',
-      new TextEncoder().encode(password),
-      { name: 'PBKDF2' },
-      false,
-      ['deriveBits', 'deriveKey']
-    );
-
-    const derivedKey = await crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
-      key,
-      { name: 'AES-GCM', length: 256 },
-      true,
-      ['encrypt', 'decrypt']
-    );
-
-    const exportedKey = await crypto.subtle.exportKey('raw', derivedKey);
-    const computedHash = Array.from(new Uint8Array(exportedKey))
-      .map(b => b.toString(16).padStart(2, '0')).join('');
-
-    return timingSafeEqual(computedHash, hash);
+    const computedHash = await derivePasswordHash(password, hexToBytes(parsed.saltHex), parsed.iterations);
+    return timingSafeEqual(computedHash, parsed.hashHex);
   } catch (error) {
     console.error('Password verification error:', error);
     return false;
   }
+}
+
+export function passwordNeedsRehash(storedHash) {
+  const parsed = parsePasswordHash(storedHash);
+  if (!parsed) return true;
+  return parsed.algorithm !== PASSWORD_HASH_ALGORITHM || parsed.iterations < PBKDF2_ITERATIONS;
 }
 
 // Constant-time string comparison — avoids leaking match position via timing

@@ -84,6 +84,67 @@ export async function runRuntimeMigrations(db) {
   }
   if (reciteColumnMigrations.length > 0) await db.batch(reciteColumnMigrations);
 
+  const issueCategoryColumnsResult = await db.prepare(`PRAGMA table_info(issue_categories)`).all();
+  const issueCategoryColumns = new Set((issueCategoryColumnsResult.results || []).map(c => c.name));
+  if (!issueCategoryColumns.has('parent_category_id')) {
+    await db.batch([
+      db.prepare(`ALTER TABLE issue_categories ADD COLUMN parent_category_id TEXT REFERENCES issue_categories(id)`),
+    ]);
+  }
+
+  const auditColumnsResult = await db.prepare(`PRAGMA table_info(audit_log)`).all();
+  const auditColumns = new Set((auditColumnsResult.results || []).map(c => c.name));
+  const auditColumnMigrations = [];
+  if (!auditColumns.has('prev_hash')) {
+    auditColumnMigrations.push(db.prepare(`ALTER TABLE audit_log ADD COLUMN prev_hash TEXT`));
+  }
+  if (!auditColumns.has('entry_hash')) {
+    auditColumnMigrations.push(db.prepare(`ALTER TABLE audit_log ADD COLUMN entry_hash TEXT`));
+  }
+  if (!auditColumns.has('chain_seq')) {
+    auditColumnMigrations.push(db.prepare(`ALTER TABLE audit_log ADD COLUMN chain_seq INTEGER`));
+    auditColumnMigrations.push(db.prepare(
+      `WITH ranked AS (
+         SELECT pending.id,
+                COALESCE((
+                  SELECT MAX(existing.chain_seq)
+                  FROM audit_log existing
+                  WHERE existing.entity_type = pending.entity_type
+                    AND existing.entity_id = pending.entity_id
+                    AND existing.chain_seq IS NOT NULL
+                ), 0) + ROW_NUMBER() OVER (
+                  PARTITION BY pending.entity_type, pending.entity_id
+                  ORDER BY pending.created_at ASC, pending.id ASC
+                ) AS seq
+         FROM audit_log pending
+         WHERE pending.chain_seq IS NULL
+       )
+       UPDATE audit_log
+       SET chain_seq = (SELECT seq FROM ranked WHERE ranked.id = audit_log.id)
+       WHERE id IN (SELECT id FROM ranked)`
+    ));
+  }
+  if (auditColumnMigrations.length > 0) await db.batch(auditColumnMigrations);
+
+  const auditIndexesResult = await db.prepare(`PRAGMA index_list(audit_log)`).all();
+  const auditIndexes = new Set((auditIndexesResult.results || []).map(i => i.name));
+  const auditIndexMigrations = [];
+  if (!auditIndexes.has('idx_audit_entity_seq_unique')) {
+    auditIndexMigrations.push(db.prepare(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_entity_seq_unique
+       ON audit_log(entity_type, entity_id, chain_seq)
+       WHERE chain_seq IS NOT NULL`
+    ));
+  }
+  if (!auditIndexes.has('idx_audit_entity_prev_hash_unique')) {
+    auditIndexMigrations.push(db.prepare(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_entity_prev_hash_unique
+       ON audit_log(entity_type, entity_id, prev_hash)
+       WHERE chain_seq IS NOT NULL AND entry_hash IS NOT NULL AND prev_hash IS NOT NULL`
+    ));
+  }
+  if (auditIndexMigrations.length > 0) await db.batch(auditIndexMigrations);
+
   const surveyResponseIndexesResult = await db.prepare(`PRAGMA index_list(voter_survey_responses)`).all();
   const surveyResponseIndexes = new Set((surveyResponseIndexesResult.results || []).map(i => i.name));
   if (!surveyResponseIndexes.has('idx_vsr_user_survey_question')) {
@@ -383,6 +444,7 @@ export async function initDatabase(db) {
       description TEXT,
       icon TEXT,
       display_order INTEGER NOT NULL DEFAULT 0,
+      parent_category_id TEXT REFERENCES issue_categories(id),
       is_active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
@@ -399,6 +461,20 @@ export async function initDatabase(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(user_id, race_id, issue_category_id)
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS voter_writeins (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      race_id TEXT,
+      writein_text TEXT NOT NULL CHECK(length(writein_text) BETWEEN 3 AND 200),
+      normalized_text TEXT NOT NULL,
+      party_affiliation TEXT,
+      jurisdiction_state TEXT,
+      jurisdiction_district TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, race_id, normalized_text)
     )`),
 
     db.prepare(`CREATE TABLE IF NOT EXISTS surveys (
@@ -516,6 +592,9 @@ export async function initDatabase(db) {
       after_state TEXT,
       metadata TEXT,
       ip_address TEXT,
+      prev_hash TEXT,
+      entry_hash TEXT,
+      chain_seq INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
 
@@ -650,6 +729,9 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_voter_priorities_user ON voter_issue_priorities(user_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_voter_priorities_race ON voter_issue_priorities(race_id, issue_category_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_voter_priorities_party ON voter_issue_priorities(party_affiliation, jurisdiction_state)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_voter_writeins_user ON voter_writeins(user_id, race_id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_voter_writeins_race ON voter_writeins(race_id, normalized_text)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_voter_writeins_party ON voter_writeins(party_affiliation, jurisdiction_state)`),
     db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vsr_user_survey_question ON voter_survey_responses(user_id, survey_id, question_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_analytics_events_type ON analytics_events(event_type, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_analytics_events_race ON analytics_events(race_id, created_at)`),
@@ -658,6 +740,12 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, created_at)`),
+    db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_entity_seq_unique
+      ON audit_log(entity_type, entity_id, chain_seq)
+      WHERE chain_seq IS NOT NULL`),
+    db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_entity_prev_hash_unique
+      ON audit_log(entity_type, entity_id, prev_hash)
+      WHERE chain_seq IS NOT NULL AND entry_hash IS NOT NULL AND prev_hash IS NOT NULL`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_impression_logs_ad ON impression_logs(ad_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_impression_logs_date ON impression_logs(created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_impression_budgets_candidate ON impression_budgets(candidate_id, race_id)`),
@@ -675,7 +763,7 @@ export async function initDatabase(db) {
   ]);
 
   initializedDbs.add(db);
-  console.log('Arena database initialized: 31 tables + 54 indexes');
+  console.log('Arena database initialized: 32 tables + 57 indexes');
 }
 
 // Seed issue categories (idempotent)
@@ -693,12 +781,24 @@ export async function seedIssueCategories(db) {
     { id: 'cat-10', name: 'Technology & AI', slug: 'technology', description: 'Tech regulation, AI policy, digital privacy', icon: 'cpu', display_order: 10 },
     { id: 'cat-11', name: 'Infrastructure', slug: 'infrastructure', description: 'Roads, bridges, broadband, public transit', icon: 'construction', display_order: 11 },
     { id: 'cat-12', name: 'Social Security & Retirement', slug: 'social-security', description: 'Social Security, Medicare, retirement benefits', icon: 'shield-check', display_order: 12 },
+    { id: 'cat-13', name: 'Democracy & Elections', slug: 'democracy-elections', description: 'Voting rights, election administration, election integrity', icon: 'vote', display_order: 13 },
+    { id: 'cat-14', name: 'Abortion & Reproductive Policy', slug: 'reproductive-policy', description: 'Abortion, contraception, reproductive health policy', icon: 'stethoscope', display_order: 14 },
+    { id: 'cat-15', name: 'Cost of Living', slug: 'cost-of-living', description: 'Prices, inflation, household expenses, affordability', icon: 'wallet', display_order: 15 },
   ];
 
   for (const cat of categories) {
     await db.prepare(
-      `INSERT OR IGNORE INTO issue_categories (id, name, slug, description, icon, display_order) VALUES (?, ?, ?, ?, ?, ?)`
-    ).bind(cat.id, cat.name, cat.slug, cat.description, cat.icon, cat.display_order).run();
+      `INSERT INTO issue_categories (id, name, slug, description, icon, display_order, parent_category_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         slug = excluded.slug,
+         description = excluded.description,
+         icon = excluded.icon,
+         display_order = excluded.display_order,
+         parent_category_id = excluded.parent_category_id,
+         is_active = 1`
+    ).bind(cat.id, cat.name, cat.slug, cat.description, cat.icon, cat.display_order, cat.parent_category_id || null).run();
   }
 }
 

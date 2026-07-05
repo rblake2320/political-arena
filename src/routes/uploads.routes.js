@@ -40,15 +40,12 @@ router.post('/presign', async (request, env, ctx) => {
     return errorResponse(`Unsupported file type. Allowed: ${supportedMediaTypes().map(t => t.mime).join(', ')}`);
   }
 
-  // Verify candidate staff authorization
+  // Verify candidate staff authorization. Platform admin is not campaign authority.
   if (candidate_id) {
-    const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-    if (!isAdmin) {
-      const link = await env.ARENA_DB.prepare(
-        `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-      ).bind(request.user.id, candidate_id).first();
-      if (!link) return errorResponse('Only registered candidate staff can upload media', 403);
-    }
+    const link = await env.ARENA_DB.prepare(
+      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+    ).bind(request.user.id, candidate_id).first();
+    if (!link) return errorResponse('Only registered candidate staff can upload media', 403);
   }
 
   const fileId = generateId('media');
@@ -109,11 +106,10 @@ async function handleDirectUpload(request, env, ctx) {
   }
   // Verify the key belongs to this user or their candidate
   const keyOwner = keyStr.split('/')[1];
-  const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
   if (candidateIdStr && keyOwner !== candidateIdStr) {
     return errorResponse('Upload key does not match candidate', 403);
   }
-  if (!isAdmin && keyOwner !== request.user.id && keyOwner !== candidateIdStr) {
+  if (keyOwner !== request.user.id && keyOwner !== candidateIdStr) {
     return errorResponse('Upload key does not match your identity', 403);
   }
 
@@ -129,13 +125,10 @@ async function handleDirectUpload(request, env, ctx) {
 
   // Verify candidate staff
   if (candidateIdStr) {
-    const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-    if (!isAdmin) {
-      const link = await env.ARENA_DB.prepare(
-        `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-      ).bind(request.user.id, candidateIdStr).first();
-      if (!link) return errorResponse('Only registered candidate staff can upload media', 403);
-    }
+    const link = await env.ARENA_DB.prepare(
+      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+    ).bind(request.user.id, candidateIdStr).first();
+    if (!link) return errorResponse('Only registered candidate staff can upload media', 403);
   }
 
   if (env.ARENA_MEDIA) {

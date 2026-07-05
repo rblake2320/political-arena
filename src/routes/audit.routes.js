@@ -5,7 +5,7 @@
 
 import { Router } from 'itty-router';
 import { requireRole, errorResponse, successResponse, parsePagination } from '../middleware.js';
-import { queryAuditLog } from '../audit.js';
+import { queryAuditLog, verifyAuditChain } from '../audit.js';
 
 const router = Router({ base: '/api/audit' });
 
@@ -35,9 +35,12 @@ router.get('/:entityType/:entityId', async (request, env) => {
   if (authError) return authError;
 
   const { entityType, entityId } = request.params;
-  const entries = await queryAuditLog(env.ARENA_DB, { entityType, entityId, limit: 100 });
+  const [entries, chain] = await Promise.all([
+    queryAuditLog(env.ARENA_DB, { entityType, entityId, limit: 100 }),
+    verifyAuditChain(env.ARENA_DB, { entityType, entityId }),
+  ]);
 
-  return successResponse({ entries });
+  return successResponse({ entries, chain });
 });
 
 export default router;

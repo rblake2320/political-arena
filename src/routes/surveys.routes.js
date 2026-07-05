@@ -11,6 +11,14 @@ import { validate, submitPrioritiesSchema, createSurveySchema, respondToSurveySc
 
 const router = Router({ base: '/api/surveys' });
 
+function normalizeWriteIn(text) {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function cleanWriteIns(writeIns = []) {
+  return writeIns.map(text => text.trim()).filter(Boolean);
+}
+
 // GET /api/surveys/issue-categories — Public list
 router.get('/issue-categories', async (request, env) => {
   const result = await env.ARENA_DB.prepare(
@@ -29,6 +37,19 @@ router.post('/my-priorities', async (request, env) => {
   if (!valid) return errorResponse(errors.join('; '));
 
   const raceId = data.race_id || null;
+  const writeIns = cleanWriteIns(data.write_ins);
+  if (writeIns.length > 3) {
+    return errorResponse('A voter may submit at most 3 write-in issues', 400);
+  }
+  const normalizedWriteIns = writeIns.map(normalizeWriteIn);
+  if (new Set(normalizedWriteIns).size !== normalizedWriteIns.length) {
+    return errorResponse('Write-in issues must be unique', 400);
+  }
+  const invalidWriteIn = writeIns.find(text => text.length < 3 || text.length > 200);
+  if (invalidWriteIn) {
+    return errorResponse('Write-in issues must be between 3 and 200 characters after trimming', 400);
+  }
+
   if (raceId) {
     const race = await env.ARENA_DB.prepare(`SELECT id FROM races WHERE id = ?`).bind(raceId).first();
     if (!race) return errorResponse('Race not found', 404);
@@ -45,12 +66,16 @@ router.post('/my-priorities', async (request, env) => {
     return errorResponse(`Unknown issue categories: ${missingIssueIds.join(', ')}`, 400);
   }
 
-  // Delete existing priorities for this user+race combo, then insert new
-  await env.ARENA_DB.prepare(
-    `DELETE FROM voter_issue_priorities WHERE user_id = ? AND (race_id = ? OR (race_id IS NULL AND ? IS NULL))`
-  ).bind(request.user.id, raceId, raceId).run();
+  await env.ARENA_DB.batch([
+    env.ARENA_DB.prepare(
+      `DELETE FROM voter_issue_priorities WHERE user_id = ? AND (race_id = ? OR (race_id IS NULL AND ? IS NULL))`
+    ).bind(request.user.id, raceId, raceId),
+    env.ARENA_DB.prepare(
+      `DELETE FROM voter_writeins WHERE user_id = ? AND (race_id = ? OR (race_id IS NULL AND ? IS NULL))`
+    ).bind(request.user.id, raceId, raceId),
+  ]);
 
-  const inserts = data.priorities.map(p => {
+  const priorityInserts = data.priorities.map(p => {
     const id = generateId('vip');
     return env.ARENA_DB.prepare(
       `INSERT INTO voter_issue_priorities (id, user_id, race_id, issue_category_id, priority_rank, party_affiliation, jurisdiction_state, jurisdiction_district)
@@ -59,9 +84,19 @@ router.post('/my-priorities', async (request, env) => {
       request.user.party_affiliation || null, request.user.jurisdiction_state || null, request.user.jurisdiction_district || null);
   });
 
+  const writeInInserts = writeIns.map((text, index) => {
+    const id = generateId('vwi');
+    return env.ARENA_DB.prepare(
+      `INSERT INTO voter_writeins (id, user_id, race_id, writein_text, normalized_text, party_affiliation, jurisdiction_state, jurisdiction_district)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, request.user.id, raceId, text, normalizedWriteIns[index],
+      request.user.party_affiliation || null, request.user.jurisdiction_state || null, request.user.jurisdiction_district || null);
+  });
+
+  const inserts = [...priorityInserts, ...writeInInserts];
   if (inserts.length > 0) await env.ARENA_DB.batch(inserts);
 
-  return successResponse({ saved: data.priorities.length });
+  return successResponse({ saved: data.priorities.length, write_ins_saved: writeIns.length });
 });
 
 // GET /api/surveys/my-priorities — Get current user's rankings
@@ -84,7 +119,16 @@ router.get('/my-priorities', async (request, env) => {
   sql += ` ORDER BY vip.priority_rank`;
   const result = await env.ARENA_DB.prepare(sql).bind(...binds).all();
 
-  return successResponse({ priorities: result.results || [] });
+  let writeInSql = `SELECT id, race_id, writein_text, normalized_text, party_affiliation, jurisdiction_state, jurisdiction_district, created_at
+     FROM voter_writeins
+     WHERE user_id = ?`;
+  const writeInBinds = [request.user.id];
+  if (raceId) { writeInSql += ` AND race_id = ?`; writeInBinds.push(raceId); }
+  else { writeInSql += ` AND race_id IS NULL`; }
+  writeInSql += ` ORDER BY created_at ASC`;
+  const writeIns = await env.ARENA_DB.prepare(writeInSql).bind(...writeInBinds).all();
+
+  return successResponse({ priorities: result.results || [], write_ins: writeIns.results || [] });
 });
 
 // GET /api/surveys/priorities/aggregate — Public aggregated results
@@ -110,6 +154,18 @@ router.get('/priorities/aggregate', async (request, env) => {
   sql += ` GROUP BY ic.id, vip.party_affiliation ORDER BY avg_rank ASC`;
   const result = await env.ARENA_DB.prepare(sql).bind(...binds).all();
 
+  let writeInSql = `SELECT normalized_text, MIN(writein_text) as writein_text,
+    COUNT(*) as voter_count,
+    party_affiliation
+    FROM voter_writeins
+    WHERE 1=1`;
+  const writeInBinds = [];
+  if (raceId) { writeInSql += ` AND race_id = ?`; writeInBinds.push(raceId); }
+  if (party) { writeInSql += ` AND party_affiliation = ?`; writeInBinds.push(party); }
+  if (state) { writeInSql += ` AND jurisdiction_state = ?`; writeInBinds.push(state); }
+  writeInSql += ` GROUP BY normalized_text, party_affiliation ORDER BY voter_count DESC, writein_text ASC LIMIT 50`;
+  const writeIns = await env.ARENA_DB.prepare(writeInSql).bind(...writeInBinds).all();
+
   // Compute cross-party overlap
   const byParty = {};
   (result.results || []).forEach(r => {
@@ -124,6 +180,7 @@ router.get('/priorities/aggregate', async (request, env) => {
 
   return successResponse({
     priorities: result.results || [],
+    write_ins: writeIns.results || [],
     by_party: byParty,
     cross_party_overlap: overlap,
     total_voters: (result.results || []).reduce((sum, r) => sum + r.voter_count, 0),
@@ -155,13 +212,28 @@ router.get('/cross-party-overlap', async (request, env) => {
 
   const result = await env.ARENA_DB.prepare(sql).bind(...binds).all();
 
+  const writeInSql = `SELECT normalized_text, MIN(writein_text) as writein_text,
+    party_affiliation as party,
+    COUNT(*) as voter_count
+    FROM voter_writeins vwi
+    ${baseFilter.replaceAll('vip.', 'vwi.')}
+    AND vwi.party_affiliation IN ('Democrat', 'Republican')
+    GROUP BY normalized_text, vwi.party_affiliation
+    ORDER BY voter_count DESC, writein_text ASC`;
+  const writeInResult = await env.ARENA_DB.prepare(writeInSql).bind(...binds).all();
+
   const democrat = (result.results || []).filter(r => r.party === 'Democrat');
   const republican = (result.results || []).filter(r => r.party === 'Republican');
+  const democratWriteIns = (writeInResult.results || []).filter(r => r.party === 'Democrat');
+  const republicanWriteIns = (writeInResult.results || []).filter(r => r.party === 'Republican');
 
   // Find overlap: issues in top-5 for both parties
   const demTop5 = democrat.slice(0, 5).map(r => r.id);
   const repTop5 = republican.slice(0, 5).map(r => r.id);
   const overlapIds = demTop5.filter(id => repTop5.includes(id));
+  const demWriteInTop5 = democratWriteIns.slice(0, 5).map(r => r.normalized_text);
+  const repWriteInTop5 = republicanWriteIns.slice(0, 5).map(r => r.normalized_text);
+  const writeInOverlapIds = demWriteInTop5.filter(id => repWriteInTop5.includes(id));
 
   const overlapIssues = overlapIds.map(id => {
     const demEntry = democrat.find(r => r.id === id);
@@ -176,10 +248,24 @@ router.get('/cross-party-overlap', async (request, env) => {
     };
   });
 
+  const writeInOverlap = writeInOverlapIds.map(normalizedText => {
+    const demEntry = democratWriteIns.find(r => r.normalized_text === normalizedText);
+    const repEntry = republicanWriteIns.find(r => r.normalized_text === normalizedText);
+    return {
+      normalized_text: normalizedText,
+      writein_text: demEntry?.writein_text || repEntry?.writein_text,
+      democrat: { voters: demEntry?.voter_count },
+      republican: { voters: repEntry?.voter_count },
+    };
+  });
+
   return successResponse({
     overlap: overlapIssues,
+    write_in_overlap: writeInOverlap,
     democrat_top5: democrat.slice(0, 5),
     republican_top5: republican.slice(0, 5),
+    democrat_write_ins_top5: democratWriteIns.slice(0, 5),
+    republican_write_ins_top5: republicanWriteIns.slice(0, 5),
     message: overlapIssues.length > 0
       ? `Both parties agree on ${overlapIssues.length} top issues`
       : 'No overlap found in top-5 priorities',

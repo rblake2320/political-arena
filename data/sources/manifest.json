@@ -1,0 +1,27 @@
+{
+  "source_name": "FEC bulk candidate master (cn26)",
+  "source_url": "https://www.fec.gov/files/bulk-downloads/2026/cn26.zip",
+  "source_file_sha256": "ced3faa7f9bb4f9b18350809d7c74327fe556e590d5642a643ae042222671b38",
+  "source_text_sha256": "79eb29e79c5163eb393fc5d11ae6cbaf87d71d5d941738f0431c65d90a243247",
+  "validated_loader_counts": {
+    "source_rows": 8037,
+    "eligible_federal_rows": 2301,
+    "loadable_federal_candidates": 2300,
+    "federal_races": 476,
+    "house_or_delegate_races": 441,
+    "senate_races": 35,
+    "skipped_missing_required_fields": 1
+  },
+  "cycle": "2026",
+  "statuses": [
+    "C",
+    "F"
+  ],
+  "label": "fec_registered (NOT state ballot certification)",
+  "fetched_at": "2026-06-12T02:08:19.814Z",
+  "records_parsed": 2268,
+  "inserted": 0,
+  "enriched": 0,
+  "skippedExisting": 2267,
+  "unmatchedRace": 1
+}

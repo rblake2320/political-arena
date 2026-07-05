@@ -62,7 +62,7 @@ router.post('/events', async (request, env, ctx) => {
       e.candidate_id || null,
       e.content_type || null,
       e.content_id || null,
-      boundedMetadata(e.metadata),
+      boundedMetadata(e.metadata ?? e.event_data),
       ipHash,
     );
   });

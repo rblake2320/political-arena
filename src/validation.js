@@ -278,6 +278,7 @@ export const submitPrioritiesSchema = z.object({
     issue_category_id: z.string().min(1),
     priority_rank: z.number().int().min(1).max(5),
   })).min(1).max(5),
+  write_ins: z.array(z.string().trim().min(3).max(200)).max(3).optional().default([]),
 }).superRefine((data, ctx) => {
   const issueIds = new Set();
   const ranks = new Set();
@@ -299,6 +300,19 @@ export const submitPrioritiesSchema = z.object({
       });
     }
     ranks.add(priority.priority_rank);
+  });
+
+  const writeIns = new Set();
+  data.write_ins.forEach((writeIn, index) => {
+    const normalized = writeIn.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (writeIns.has(normalized)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['write_ins', index],
+        message: 'Write-in issues must be unique',
+      });
+    }
+    writeIns.add(normalized);
   });
 });
 

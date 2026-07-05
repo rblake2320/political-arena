@@ -79,11 +79,6 @@ export async function requireCandidateStaff(request, env, candidateId) {
   const authError = await requireAuth(request, env);
   if (authError) return authError;
 
-  // Admins can act as any candidate
-  if (request.user.role === 'admin' || request.user.role === 'super_admin') {
-    return null;
-  }
-
   const link = await env.ARENA_DB.prepare(
     `SELECT id, role FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
   ).bind(request.user.id, candidateId).first();

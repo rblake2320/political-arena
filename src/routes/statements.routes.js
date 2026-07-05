@@ -23,7 +23,6 @@ function claimKey(text) {
 }
 
 async function canActForCandidate(request, env, candidateId) {
-  if (['admin', 'super_admin'].includes(request.user.role)) return true;
   const link = await env.ARENA_DB.prepare(
     `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
   ).bind(request.user.id, candidateId).first();
@@ -93,7 +92,7 @@ router.get('/:id', async (request, env) => {
   return successResponse({ statement });
 });
 
-// POST /api/statements — Candidate staff/admin logs a timestamped statement
+// POST /api/statements — Candidate staff logs a timestamped statement
 router.post('/', async (request, env, ctx) => {
   const authError = await requireAuth(request, env);
   if (authError) return authError;

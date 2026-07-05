@@ -270,14 +270,10 @@ router.put('/:id', async (request, env, ctx) => {
 
   const { id } = request.params;
 
-  // Check staff authorization
-  const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isAdmin) {
-    const link = await env.ARENA_DB.prepare(
-      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-    ).bind(request.user.id, id).first();
-    if (!link) return errorResponse('Not authorized to modify this candidate', 403);
-  }
+  const link = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+  ).bind(request.user.id, id).first();
+  if (!link) return errorResponse('Not authorized to modify this candidate', 403);
 
   const existing = await env.ARENA_DB.prepare(`SELECT * FROM candidates WHERE id = ?`).bind(id).first();
   if (!existing) return errorResponse('Candidate not found', 404);

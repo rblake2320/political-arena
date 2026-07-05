@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { runRuntimeMigrations } from '../src/db.js';
 
-function createFakeD1({ users, adFlights, challenges, recites }) {
+function createFakeD1({ users, adFlights, challenges, recites, issueCategories, auditLog }) {
   const userColumns = new Set(users);
   const adColumns = new Set(adFlights);
   const challengeColumns = new Set(challenges);
   const reciteColumns = new Set(recites);
+  const issueCategoryColumns = new Set(issueCategories);
+  const auditColumns = new Set(auditLog);
+  const auditIndexes = new Set();
   const surveyResponseIndexes = new Set();
   const executed = [];
 
@@ -26,6 +29,15 @@ function createFakeD1({ users, adFlights, challenges, recites }) {
           if (sql === 'PRAGMA table_info(recites)') {
             return { results: Array.from(reciteColumns).map(name => ({ name })) };
           }
+          if (sql === 'PRAGMA table_info(issue_categories)') {
+            return { results: Array.from(issueCategoryColumns).map(name => ({ name })) };
+          }
+          if (sql === 'PRAGMA table_info(audit_log)') {
+            return { results: Array.from(auditColumns).map(name => ({ name })) };
+          }
+          if (sql === 'PRAGMA index_list(audit_log)') {
+            return { results: Array.from(auditIndexes).map(name => ({ name })) };
+          }
           if (sql === 'PRAGMA index_list(voter_survey_responses)') {
             return { results: Array.from(surveyResponseIndexes).map(name => ({ name })) };
           }
@@ -44,7 +56,13 @@ function createFakeD1({ users, adFlights, challenges, recites }) {
         if (challengeMatch) challengeColumns.add(challengeMatch[1]);
         const reciteMatch = statement.sql.match(/^ALTER TABLE recites ADD COLUMN (\w+)/);
         if (reciteMatch) reciteColumns.add(reciteMatch[1]);
-        const surveyResponseIndexMatch = statement.sql.match(/^CREATE UNIQUE INDEX IF NOT EXISTS (\w+)/);
+        const issueCategoryMatch = statement.sql.match(/^ALTER TABLE issue_categories ADD COLUMN (\w+)/);
+        if (issueCategoryMatch) issueCategoryColumns.add(issueCategoryMatch[1]);
+        const auditMatch = statement.sql.match(/^ALTER TABLE audit_log ADD COLUMN (\w+)/);
+        if (auditMatch) auditColumns.add(auditMatch[1]);
+        const auditIndexMatch = statement.sql.match(/^CREATE UNIQUE INDEX IF NOT EXISTS (idx_audit_\w+)/);
+        if (auditIndexMatch) auditIndexes.add(auditIndexMatch[1]);
+        const surveyResponseIndexMatch = statement.sql.match(/^CREATE UNIQUE INDEX IF NOT EXISTS (idx_vsr_\w+)/);
         if (surveyResponseIndexMatch) surveyResponseIndexes.add(surveyResponseIndexMatch[1]);
       }
       return statements.map(() => ({ success: true }));
@@ -53,6 +71,9 @@ function createFakeD1({ users, adFlights, challenges, recites }) {
     adColumns,
     challengeColumns,
     reciteColumns,
+    issueCategoryColumns,
+    auditColumns,
+    auditIndexes,
     surveyResponseIndexes,
     executed,
   };
@@ -111,6 +132,28 @@ describe('runtime migrations', () => {
         'quote',
         'status',
       ],
+      issueCategories: [
+        'id',
+        'name',
+        'slug',
+        'description',
+        'icon',
+        'display_order',
+        'is_active',
+      ],
+      auditLog: [
+        'id',
+        'actor_id',
+        'actor_type',
+        'action',
+        'entity_type',
+        'entity_id',
+        'before_state',
+        'after_state',
+        'metadata',
+        'ip_address',
+        'created_at',
+      ],
     });
 
     await runRuntimeMigrations(db);
@@ -125,6 +168,12 @@ describe('runtime migrations', () => {
     expect(db.challengeColumns.has('public_receipt_slug')).toBe(true);
     expect(db.reciteColumns.has('archive_url')).toBe(true);
     expect(db.reciteColumns.has('review_note')).toBe(true);
+    expect(db.issueCategoryColumns.has('parent_category_id')).toBe(true);
+    expect(db.auditColumns.has('prev_hash')).toBe(true);
+    expect(db.auditColumns.has('entry_hash')).toBe(true);
+    expect(db.auditColumns.has('chain_seq')).toBe(true);
+    expect(db.auditIndexes.has('idx_audit_entity_seq_unique')).toBe(true);
+    expect(db.auditIndexes.has('idx_audit_entity_prev_hash_unique')).toBe(true);
     expect(db.executed).toEqual([
       'ALTER TABLE users ADD COLUMN password_reset_token_hash TEXT',
       'ALTER TABLE users ADD COLUMN password_reset_expires_at TEXT',
@@ -141,6 +190,34 @@ describe('runtime migrations', () => {
       'ALTER TABLE recites ADD COLUMN archive_url TEXT',
       'ALTER TABLE recites ADD COLUMN evidence_media_url TEXT',
       'ALTER TABLE recites ADD COLUMN review_note TEXT',
+      'ALTER TABLE issue_categories ADD COLUMN parent_category_id TEXT REFERENCES issue_categories(id)',
+      'ALTER TABLE audit_log ADD COLUMN prev_hash TEXT',
+      'ALTER TABLE audit_log ADD COLUMN entry_hash TEXT',
+      'ALTER TABLE audit_log ADD COLUMN chain_seq INTEGER',
+      `WITH ranked AS (
+         SELECT pending.id,
+                COALESCE((
+                  SELECT MAX(existing.chain_seq)
+                  FROM audit_log existing
+                  WHERE existing.entity_type = pending.entity_type
+                    AND existing.entity_id = pending.entity_id
+                    AND existing.chain_seq IS NOT NULL
+                ), 0) + ROW_NUMBER() OVER (
+                  PARTITION BY pending.entity_type, pending.entity_id
+                  ORDER BY pending.created_at ASC, pending.id ASC
+                ) AS seq
+         FROM audit_log pending
+         WHERE pending.chain_seq IS NULL
+       )
+       UPDATE audit_log
+       SET chain_seq = (SELECT seq FROM ranked WHERE ranked.id = audit_log.id)
+       WHERE id IN (SELECT id FROM ranked)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_entity_seq_unique
+       ON audit_log(entity_type, entity_id, chain_seq)
+       WHERE chain_seq IS NOT NULL`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_entity_prev_hash_unique
+       ON audit_log(entity_type, entity_id, prev_hash)
+       WHERE chain_seq IS NOT NULL AND entry_hash IS NOT NULL AND prev_hash IS NOT NULL`,
       `DELETE FROM voter_survey_responses
          WHERE rowid NOT IN (
            SELECT MIN(rowid)

@@ -4,7 +4,7 @@
  */
 
 import { Router } from 'itty-router';
-import { hashPassword, verifyPassword, createJWT, hashToken, generateVerificationToken, hashIP } from '../auth.js';
+import { hashPassword, verifyPassword, passwordNeedsRehash, createJWT, hashToken, generateVerificationToken, hashIP } from '../auth.js';
 import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
 import { checkRateLimit, clearRateLimit } from '../ratelimit.js';
@@ -177,14 +177,24 @@ router.post('/login', async (request, env, ctx) => {
   const tokenHash = await hashToken(token);
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
-  await env.ARENA_DB.batch([
+  const updates = [
     env.ARENA_DB.prepare(
       `INSERT INTO sessions (id, user_id, token_hash, ip_address, user_agent, expires_at) VALUES (?, ?, ?, ?, ?, ?)`
     ).bind(sessionId, user.id, tokenHash, getClientIP(request), request.headers.get('User-Agent'), expiresAt),
     env.ARENA_DB.prepare(
       `UPDATE users SET last_login = datetime('now') WHERE id = ?`
     ).bind(user.id),
-  ]);
+  ];
+
+  if (passwordNeedsRehash(user.password_hash)) {
+    updates.push(
+      env.ARENA_DB.prepare(
+        `UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?`
+      ).bind(await hashPassword(data.password), user.id)
+    );
+  }
+
+  await env.ARENA_DB.batch(updates);
 
   auditLog(env.ARENA_DB, ctx, {
     actorId: user.id,

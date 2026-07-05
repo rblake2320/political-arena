@@ -6,7 +6,7 @@
 
 import { Router } from 'itty-router';
 import { generateId } from '../db.js';
-import { auditLog } from '../audit.js';
+import { auditLogNow, verifyAuditChain } from '../audit.js';
 import { requireAuth, errorResponse, successResponse, parseBody, parsePagination, getClientIP } from '../middleware.js';
 import { validate, createChallengeSchema, respondToChallengeSchema, refuseChallengeSchema } from '../validation.js';
 import { computeFactScore, getRecitesForContent } from './recites.routes.js';
@@ -105,14 +105,27 @@ router.get('/:id/receipt', async (request, env) => {
   if (!challenge) return errorResponse('Challenge receipt not found', 404);
 
   if (challenge.status === 'open' && challenge.response_deadline < new Date().toISOString()) {
+    const expiredAt = new Date().toISOString();
+    const result = await env.ARENA_DB.prepare(
+      `UPDATE challenges SET status = 'expired', expired_at = ?, updated_at = ? WHERE id = ? AND status = 'open'`
+    ).bind(expiredAt, expiredAt, challenge.id).run();
+
     challenge.status = 'expired';
-    challenge.expired_at = new Date().toISOString();
-    await env.ARENA_DB.prepare(
-      `UPDATE challenges SET status = 'expired', expired_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'open'`
-    ).bind(challenge.id).run();
+    challenge.expired_at = expiredAt;
+
+    if (result.meta?.changes) {
+      await auditLogNow(env.ARENA_DB, {
+        actorType: 'system',
+        action: 'challenge.expire',
+        entityType: 'challenge',
+        entityId: challenge.id,
+        beforeState: { status: 'open' },
+        afterState: { status: 'expired', expired_at: expiredAt, response_deadline: challenge.response_deadline },
+      });
+    }
   }
 
-  const [response, challengeRecites, timelineResult] = await Promise.all([
+  const [response, challengeRecites, timelineResult, auditChain] = await Promise.all([
     env.ARENA_DB.prepare(
       `SELECT cr.*, c.name as candidate_name, c.party as candidate_party
        FROM challenge_responses cr
@@ -121,11 +134,12 @@ router.get('/:id/receipt', async (request, env) => {
     ).bind(challenge.id).first(),
     getRecitesForContent(env.ARENA_DB, 'challenge', challenge.id, false),
     env.ARENA_DB.prepare(
-      `SELECT action, actor_id, before_state, after_state, created_at
+      `SELECT action, actor_id, before_state, after_state, created_at, prev_hash, entry_hash, chain_seq
        FROM audit_log
        WHERE entity_type = 'challenge' AND entity_id = ?
-       ORDER BY created_at ASC`
+       ORDER BY chain_seq ASC, created_at ASC, id ASC`
     ).bind(challenge.id).all(),
+    verifyAuditChain(env.ARENA_DB, { entityType: 'challenge', entityId: challenge.id }),
   ]);
 
   const responseRecites = response
@@ -140,6 +154,7 @@ router.get('/:id/receipt', async (request, env) => {
     fact_score: computeFactScore(challengeRecites),
     response_fact_score: computeFactScore(responseRecites),
     timeline: timelineResult.results || [],
+    audit_chain: auditChain,
   });
 });
 
@@ -159,11 +174,24 @@ router.get('/:id', async (request, env) => {
 
   // Lazy expiration
   if (challenge.status === 'open' && challenge.response_deadline < new Date().toISOString()) {
+    const expiredAt = new Date().toISOString();
+    const result = await env.ARENA_DB.prepare(
+      `UPDATE challenges SET status = 'expired', expired_at = ?, updated_at = ? WHERE id = ? AND status = 'open'`
+    ).bind(expiredAt, expiredAt, id).run();
+
     challenge.status = 'expired';
-    challenge.expired_at = new Date().toISOString();
-    await env.ARENA_DB.prepare(
-      `UPDATE challenges SET status = 'expired', expired_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'open'`
-    ).bind(id).run();
+    challenge.expired_at = expiredAt;
+
+    if (result.meta?.changes) {
+      await auditLogNow(env.ARENA_DB, {
+        actorType: 'system',
+        action: 'challenge.expire',
+        entityType: 'challenge',
+        entityId: id,
+        beforeState: { status: 'open' },
+        afterState: { status: 'expired', expired_at: expiredAt, response_deadline: challenge.response_deadline },
+      });
+    }
   }
 
   // Get response if exists
@@ -186,14 +214,11 @@ router.post('/', async (request, env, ctx) => {
   const { valid, errors, data } = validate(createChallengeSchema, body);
   if (!valid) return errorResponse(errors.join('; '));
 
-  // Verify staff authorization for challenger
-  const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isAdmin) {
-    const link = await env.ARENA_DB.prepare(
-      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-    ).bind(request.user.id, data.challenger_candidate_id).first();
-    if (!link) return errorResponse('Not authorized for this candidate', 403);
-  }
+  // Public campaign actions require an explicit staff link; platform admin is not campaign authority.
+  const challengerStaffLink = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+  ).bind(request.user.id, data.challenger_candidate_id).first();
+  if (!challengerStaffLink) return errorResponse('Not authorized for this candidate', 403);
 
   // Verify both candidates are in the same race
   const challenger = await env.ARENA_DB.prepare(`SELECT race_id, verification_status FROM candidates WHERE id = ? AND is_active = 1`).bind(data.challenger_candidate_id).first();
@@ -376,12 +401,19 @@ router.post('/', async (request, env, ctx) => {
     }
   }
 
-  auditLog(env.ARENA_DB, ctx, {
+  await auditLogNow(env.ARENA_DB, {
     actorId: request.user.id,
     action: 'challenge.issue',
     entityType: 'challenge',
     entityId: challengeId,
-    afterState: { challenger: data.challenger_candidate_id, target: data.target_candidate_id, deadline, initial_recites: initialRecites.length },
+    afterState: {
+      status: 'open',
+      challenger: data.challenger_candidate_id,
+      target: data.target_candidate_id,
+      deadline,
+      public_receipt_slug: receiptSlug,
+      initial_recites: initialRecites.length,
+    },
     ipAddress: getClientIP(request),
   });
 
@@ -417,20 +449,27 @@ router.post('/:id/respond', async (request, env, ctx) => {
 
   // Check deadline
   if (new Date(challenge.response_deadline) <= new Date()) {
-    await env.ARENA_DB.prepare(
-      `UPDATE challenges SET status = 'expired', expired_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
-    ).bind(id).run();
+    const expiredAt = new Date().toISOString();
+    const result = await env.ARENA_DB.prepare(
+      `UPDATE challenges SET status = 'expired', expired_at = ?, updated_at = ? WHERE id = ? AND status = 'open'`
+    ).bind(expiredAt, expiredAt, id).run();
+    if (result.meta?.changes) {
+      await auditLogNow(env.ARENA_DB, {
+        actorType: 'system',
+        action: 'challenge.expire',
+        entityType: 'challenge',
+        entityId: id,
+        beforeState: { status: 'open' },
+        afterState: { status: 'expired', expired_at: expiredAt, response_deadline: challenge.response_deadline },
+      });
+    }
     return errorResponse('Challenge has expired');
   }
 
-  // Verify staff for target candidate
-  const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isAdmin) {
-    const link = await env.ARENA_DB.prepare(
-      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-    ).bind(request.user.id, challenge.target_candidate_id).first();
-    if (!link) return errorResponse('Not authorized for the target candidate', 403);
-  }
+  const targetStaffLink = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+  ).bind(request.user.id, challenge.target_candidate_id).first();
+  if (!targetStaffLink) return errorResponse('Not authorized for the target candidate', 403);
 
   const responseId = generateId('resp');
   await env.ARENA_DB.batch([
@@ -442,7 +481,7 @@ router.post('/:id/respond', async (request, env, ctx) => {
     ).bind(id),
   ]);
 
-  auditLog(env.ARENA_DB, ctx, {
+  await auditLogNow(env.ARENA_DB, {
     actorId: request.user.id,
     action: 'challenge.respond',
     entityType: 'challenge',
@@ -472,19 +511,16 @@ router.post('/:id/refuse', async (request, env, ctx) => {
   if (!challenge) return errorResponse('Challenge not found', 404);
   if (challenge.status !== 'open') return errorResponse('Challenge is not open');
 
-  const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isAdmin) {
-    const link = await env.ARENA_DB.prepare(
-      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-    ).bind(request.user.id, challenge.target_candidate_id).first();
-    if (!link) return errorResponse('Not authorized', 403);
-  }
+  const targetStaffLink = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+  ).bind(request.user.id, challenge.target_candidate_id).first();
+  if (!targetStaffLink) return errorResponse('Not authorized', 403);
 
   await env.ARENA_DB.prepare(
     `UPDATE challenges SET status = 'refused', refused_at = datetime('now'), refusal_reason = ?, updated_at = datetime('now') WHERE id = ?`
   ).bind(refusalReason, id).run();
 
-  auditLog(env.ARENA_DB, ctx, {
+  await auditLogNow(env.ARENA_DB, {
     actorId: request.user.id,
     action: 'challenge.refuse',
     entityType: 'challenge',
@@ -507,13 +543,10 @@ router.post('/:id/withdraw', async (request, env, ctx) => {
   if (!challenge) return errorResponse('Challenge not found', 404);
   if (challenge.status !== 'open') return errorResponse('Can only withdraw open challenges');
 
-  const isAdmin = ['admin', 'super_admin'].includes(request.user.role);
-  if (!isAdmin) {
-    const link = await env.ARENA_DB.prepare(
-      `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
-    ).bind(request.user.id, challenge.challenger_candidate_id).first();
-    if (!link) return errorResponse('Not authorized', 403);
-  }
+  const challengerStaffLink = await env.ARENA_DB.prepare(
+    `SELECT id FROM candidate_staff_links WHERE user_id = ? AND candidate_id = ? AND is_active = 1`
+  ).bind(request.user.id, challenge.challenger_candidate_id).first();
+  if (!challengerStaffLink) return errorResponse('Not authorized', 403);
 
   // Withdraw challenge + refund 1 credit atomically
   const refundTxId = generateId('ctx');
@@ -534,7 +567,7 @@ router.post('/:id/withdraw', async (request, env, ctx) => {
     `SELECT credit_balance FROM candidates WHERE id = ?`
   ).bind(challenge.challenger_candidate_id).first();
 
-  auditLog(env.ARENA_DB, ctx, {
+  await auditLogNow(env.ARENA_DB, {
     actorId: request.user.id,
     action: 'challenge.withdraw',
     entityType: 'challenge',

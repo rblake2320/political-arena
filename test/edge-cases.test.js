@@ -78,6 +78,20 @@ describe('edge-case regressions', () => {
     await SELF.fetch(`${BASE}/api/health`);
   });
 
+  it('seeds neutral public issue categories for democracy and reproductive policy', async () => {
+    const res = await get('/api/surveys/issue-categories');
+
+    expect(res.status).toBe(200);
+    const categoriesBySlug = Object.fromEntries(
+      res.body.data.categories.map(category => [category.slug, category])
+    );
+    expect(categoriesBySlug['democracy-elections'].name).toBe('Democracy & Elections');
+    expect(categoriesBySlug['democracy-elections'].description).toBe('Voting rights, election administration, election integrity');
+    expect(categoriesBySlug['reproductive-policy'].name).toBe('Abortion & Reproductive Policy');
+    expect(categoriesBySlug['reproductive-policy'].description).toBe('Abortion, contraception, reproductive health policy');
+    expect(categoriesBySlug['cost-of-living'].name).toBe('Cost of Living');
+  });
+
   it('rejects invalid candidate staff roles without creating a link', async () => {
     const primary = await registerUser('primary');
     const target = await registerUser('target');
@@ -206,16 +220,34 @@ describe('edge-case regressions', () => {
     expect(recites.body.data.recites[0].accessed_at).toBe('2026-07-05');
     expect(recites.body.data.fact_score.score).toBeGreaterThan(50);
 
+    const response = await post(`/api/challenges/${sourced.body.data.id}/respond`, {
+      response_text: 'The campaign response cites the relevant budget line and adds context for voters.',
+    }, targetStaff.token);
+    expect(response.status).toBe(200);
+
     const receipt = await get(`/api/challenges/${sourced.body.data.public_receipt_slug}/receipt`);
     expect(receipt.status).toBe(200);
     expect(receipt.body.data.challenge.claim_text).toBe('The city budget doubled last year.');
     expect(receipt.body.data.recites).toHaveLength(1);
+    expect(receipt.body.data.audit_chain.status).toBe('verified');
+    expect(receipt.body.data.audit_chain.checked_entries).toBeGreaterThanOrEqual(2);
+    expect(receipt.body.data.timeline.map(entry => entry.chain_seq)).toEqual([1, 2]);
+    expect(receipt.body.data.timeline[0].entry_hash).toMatch(/^[a-f0-9]{64}$/);
 
     const notification = await env.ARENA_DB.prepare(
       `SELECT notification_type, link_url FROM notifications WHERE user_id = ? AND notification_type = 'challenge_tagged' ORDER BY created_at DESC LIMIT 1`
     ).bind(targetStaff.id).first();
     expect(notification.notification_type).toBe('challenge_tagged');
     expect(notification.link_url).toBe(`/challenge/${sourced.body.data.public_receipt_slug}`);
+
+    await env.ARENA_DB.prepare(
+      `UPDATE audit_log SET after_state = ? WHERE entity_type = 'challenge' AND entity_id = ? AND action = 'challenge.issue'`
+    ).bind('{"tampered":true}', sourced.body.data.id).run();
+
+    const tamperedReceipt = await get(`/api/challenges/${sourced.body.data.public_receipt_slug}/receipt`);
+    expect(tamperedReceipt.status).toBe(200);
+    expect(tamperedReceipt.body.data.audit_chain.status).toBe('failed');
+    expect(tamperedReceipt.body.data.audit_chain.failures[0].reason).toMatch(/hash mismatch/);
   });
 
   it('rejects duplicate priority ranks and unknown issue categories', async () => {
@@ -242,6 +274,44 @@ describe('edge-case regressions', () => {
     }, voter.token);
     expect(valid.status).toBe(200);
     expect(valid.body.data.saved).toBe(2);
+  });
+
+  it('stores write-in priority issues as trimmed secondary data with server-side limits', async () => {
+    const voter = await makeVerifiedVoter('writeinvoter');
+
+    const tooMany = await post('/api/surveys/my-priorities', {
+      priorities: [{ issue_category_id: 'cat-1', priority_rank: 1 }],
+      write_ins: ['local hospitals', 'property insurance', 'farm water', 'transit deserts'],
+    }, voter.token);
+    expect(tooMany.status).toBe(400);
+
+    const duplicate = await post('/api/surveys/my-priorities', {
+      priorities: [{ issue_category_id: 'cat-1', priority_rank: 1 }],
+      write_ins: ['Local hospitals', ' local   hospitals '],
+    }, voter.token);
+    expect(duplicate.status).toBe(400);
+
+    const valid = await post('/api/surveys/my-priorities', {
+      priorities: [
+        { issue_category_id: 'cat-1', priority_rank: 1 },
+        { issue_category_id: 'cat-15', priority_rank: 2 },
+      ],
+      write_ins: ['  Local hospital closures  ', 'property insurance'],
+    }, voter.token);
+    expect(valid.status).toBe(200);
+    expect(valid.body.data.saved).toBe(2);
+    expect(valid.body.data.write_ins_saved).toBe(2);
+
+    const mine = await get('/api/surveys/my-priorities', voter.token);
+    expect(mine.status).toBe(200);
+    expect(mine.body.data.write_ins.map(writeIn => writeIn.writein_text)).toEqual([
+      'Local hospital closures',
+      'property insurance',
+    ]);
+
+    const aggregate = await get('/api/surveys/priorities/aggregate');
+    expect(aggregate.status).toBe(200);
+    expect(aggregate.body.data.write_ins.some(writeIn => writeIn.normalized_text === 'local hospital closures')).toBe(true);
   });
 
   it('rejects subscriptions to missing targets and keeps duplicate detection', async () => {
