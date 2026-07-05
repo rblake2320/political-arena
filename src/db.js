@@ -983,6 +983,24 @@ export async function seedPressFeedItems(db) {
   ));
 }
 
+async function ensureSystemUser(db) {
+  await db.prepare(
+    `INSERT INTO users
+       (id, email, username, display_name, password_hash, role, email_verified, verification_status, is_active)
+     VALUES
+       ('system', 'system@arena.internal', 'system', 'Arena System', 'disabled-system-account', 'admin', 1, 'verified', 0)
+     ON CONFLICT(id) DO UPDATE SET
+       email = excluded.email,
+       username = excluded.username,
+       display_name = excluded.display_name,
+       role = excluded.role,
+       email_verified = 1,
+       verification_status = 'verified',
+       is_active = 0,
+       updated_at = datetime('now')`
+  ).run();
+}
+
 export async function seedOutsideAdExamples(db) {
   const examples = [
     {
@@ -1017,6 +1035,8 @@ export async function seedOutsideAdExamples(db) {
   const existingCandidates = new Set((candidates.results || []).map(candidate => candidate.id));
   const loadable = examples.filter(example => existingCandidates.has(example.candidateId));
   if (loadable.length === 0) return;
+
+  await ensureSystemUser(db);
 
   await db.batch(loadable.map(example =>
     db.prepare(

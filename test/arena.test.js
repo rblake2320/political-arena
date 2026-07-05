@@ -232,6 +232,15 @@ describe('races & demo seed (test env only)', () => {
     ]);
     await seedOutsideAdExamples(env.ARENA_DB);
 
+    const systemUser = await env.ARENA_DB.prepare(
+      `SELECT email, role, is_active FROM users WHERE id = 'system'`
+    ).first();
+    expect(systemUser).toMatchObject({
+      email: 'system@arena.internal',
+      role: 'admin',
+      is_active: 0,
+    });
+
     const ncRace = await get('/api/races/race-2026-NC-S');
     expect(ncRace.status).toBe(200);
     const cooperAd = ncRace.body.data.ads.find(ad => ad.id === 'ad-ext-roy-cooper-easier-2026');
