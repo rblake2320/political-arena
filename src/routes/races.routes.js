@@ -101,7 +101,7 @@ router.get('/', async (request, env) => {
 
   if (state) { sql += ` AND r.state = ?`; binds.push(state); }
   if (office) { sql += ` AND r.office = ?`; binds.push(office); }
-  if (status) { sql += ` AND r.status = ?`; binds.push(status); }
+  if (status && status !== 'all') { sql += ` AND r.status = ?`; binds.push(status); }
 
   if (sort === 'trending') {
     sql += ` ORDER BY (challenge_count + ad_count + question_count + response_count) DESC, r.created_at DESC`;
@@ -188,7 +188,7 @@ router.get('/', async (request, env) => {
   const countBinds = [];
   if (state) { countSql += ` AND state = ?`; countBinds.push(state); }
   if (office) { countSql += ` AND office = ?`; countBinds.push(office); }
-  if (status) { countSql += ` AND status = ?`; countBinds.push(status); }
+  if (status && status !== 'all') { countSql += ` AND status = ?`; countBinds.push(status); }
   const countResult = await env.ARENA_DB.prepare(countSql).bind(...countBinds).first();
 
   return successResponse({

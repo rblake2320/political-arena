@@ -49,6 +49,7 @@ async function registerUser(label) {
 
 describe('production workflow smoke', () => {
   let raceId;
+  let upcomingRaceId;
   let candidateA;
   let candidateB;
   let staffA;
@@ -61,6 +62,7 @@ describe('production workflow smoke', () => {
     await SELF.fetch(`${BASE}/api/health`);
     const suffix = Date.now().toString(36);
     raceId = `smoke-race-${suffix}`;
+    upcomingRaceId = `smoke-upcoming-race-${suffix}`;
     candidateA = `smoke-cand-a-${suffix}`;
     candidateB = `smoke-cand-b-${suffix}`;
 
@@ -82,6 +84,9 @@ describe('production workflow smoke', () => {
       env.ARENA_DB.prepare(
         `INSERT INTO races (id, name, office, state, district, status) VALUES (?, ?, 'House', 'AL', '99', 'active')`
       ).bind(raceId, `Smoke Race ${suffix}`),
+      env.ARENA_DB.prepare(
+        `INSERT INTO races (id, name, office, state, district, status) VALUES (?, ?, 'House', 'AL', '98', 'upcoming')`
+      ).bind(upcomingRaceId, `Smoke Upcoming Race ${suffix}`),
       env.ARENA_DB.prepare(
         `INSERT INTO candidates (id, race_id, user_id, name, party, verification_status, credit_balance, is_active)
          VALUES (?, ?, ?, 'Smoke Candidate A', 'Democrat', 'verified', 5, 1)`
@@ -141,6 +146,19 @@ describe('production workflow smoke', () => {
     expect(receipt.body.data.fact_score.verified_count).toBeGreaterThan(0);
     expect(receipt.body.data.response_fact_score.verified_count).toBeGreaterThan(0);
     expect(receipt.body.data.recites.some(recite => recite.archive_url && recite.review_note)).toBe(true);
+  });
+
+  it('keeps the default race list active-only while allowing an all-status directory query', async () => {
+    const defaultList = await get('/api/races?limit=100');
+    expect(defaultList.status).toBe(200);
+    expect(defaultList.body.data.races.some(race => race.id === raceId)).toBe(true);
+    expect(defaultList.body.data.races.some(race => race.id === upcomingRaceId)).toBe(false);
+
+    const allList = await get('/api/races?status=all&limit=100');
+    expect(allList.status).toBe(200);
+    expect(allList.body.data.races.some(race => race.id === raceId)).toBe(true);
+    expect(allList.body.data.races.some(race => race.id === upcomingRaceId)).toBe(true);
+    expect(allList.body.data.total).toBeGreaterThan(defaultList.body.data.total);
   });
 
   it('runs the core voter, press, ad, credit, and challenge workflows', async () => {
