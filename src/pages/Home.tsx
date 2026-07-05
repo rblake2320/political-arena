@@ -1,23 +1,146 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { ChevronRight, MapPin, Users, Flame, MessageSquare, Swords, Megaphone, TrendingUp, Clock, ArrowUpDown } from "lucide-react";
+import { Search, TrendingUp, ChevronRight, Flame, Clock } from "lucide-react";
 import { useArenaStore } from "../store";
 
 type SortMode = 'trending' | 'newest' | 'name';
 
-function ActivityBar({ score, max }: { score: number; max: number }) {
-  const pct = max > 0 ? Math.min((score / max) * 100, 100) : 0;
+const ELECTION_DATE = new Date('2026-11-03T00:00:00Z');
+function daysToElection(): number {
+  const ms = ELECTION_DATE.getTime() - Date.now();
+  return Math.max(0, Math.ceil(ms / 86_400_000));
+}
+
+// Optional enriched fields Codex is adding to GET /api/races
+interface CandSummary { name: string; party: string }
+interface OpenCallout { target_name: string; claim_text: string; response_deadline: string }
+interface CycleStats { races_live: number; open_callouts: number; response_rate: number; election_date?: string }
+interface FeedItem { time?: string; race_label?: string; kind?: string; text?: string }
+
+const partyColor = (p?: string) => {
+  const k = (p || '').toUpperCase();
+  if (k.startsWith('DEM') || k === 'D') return { text: '#4D8AF0', ring: 'rgba(77,138,240,.6)', grad: 'linear-gradient(145deg,#1C2C4E,#101A30)', soft: '#7FA8F5' };
+  if (k.startsWith('REP') || k === 'R') return { text: '#E5636A', ring: 'rgba(229,72,77,.55)', grad: 'linear-gradient(145deg,#4A1D22,#2A1114)', soft: '#F08085' };
+  return { text: '#9B9BAB', ring: 'rgba(255,255,255,.25)', grad: 'linear-gradient(145deg,#25252E,#16161C)', soft: '#C7C7D2' };
+};
+const initials = (name: string) =>
+  name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('') || '—';
+
+const mono = "'IBM Plex Mono', ui-monospace, monospace";
+const display = "'Space Grotesk', system-ui, sans-serif";
+const serif = "'Instrument Serif', ui-serif, Georgia, serif";
+
+function RaceCard({ race, days }: { race: any; days: number }) {
+  const cands: CandSummary[] = race.candidates_summary || [];
+  const open: OpenCallout | null = race.open_callout || null;
+  const score = race.activity_score || 0;
+  const level = /senate|house|president/i.test(race.office) ? 'FEDERAL' : 'STATE';
+  const officeLine = [race.state, level, (race.office || '').toUpperCase(), race.district ? `DIST ${race.district}` : '']
+    .filter(Boolean).join(' · ');
+  const hot = score >= 10;
+  const filled = Math.min(10, Math.round((score / Math.max(score, 8)) * 10) || 0);
+
+  const status = open
+    ? { label: 'CALLOUT OPEN', color: '#EFB643', bg: 'rgba(239,182,67,.08)', bd: 'rgba(239,182,67,.35)' }
+    : hot
+      ? { label: 'HOT', color: '#FFB224', bg: 'rgba(255,178,36,.1)', bd: 'rgba(255,178,36,.35)' }
+      : { label: 'TRENDING', color: '#8F8FF9', bg: 'rgba(110,110,247,.1)', bd: 'rgba(110,110,247,.35)' };
+
+  const highlight = hot || !!open;
   return (
-    <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-      <div
-        className="h-full rounded-full transition-all duration-500"
-        style={{
-          width: `${Math.max(pct, 4)}%`,
-          background: pct > 60 ? 'linear-gradient(90deg, #6366f1, #ec4899)'
-            : pct > 30 ? 'linear-gradient(90deg, #6366f1, #8b5cf6)'
-            : '#4b5563',
-        }}
-      />
+    <Link to={`/race/${race.id}`} style={{ textDecoration: 'none', display: 'flex' }}>
+      <div style={{
+        position: 'relative', flex: 1, borderRadius: 16, padding: 22, display: 'flex', flexDirection: 'column', gap: 16,
+        border: highlight ? '1px solid rgba(110,110,247,.45)' : '1px solid rgba(255,255,255,.09)',
+        background: highlight ? 'linear-gradient(180deg,rgba(110,110,247,.09),rgba(110,110,247,.02) 55%),#0C0C13' : '#0C0C13',
+        boxShadow: highlight ? '0 10px 40px rgba(110,110,247,.1)' : 'none',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ font: `600 9.5px ${mono}`, letterSpacing: '.16em', color: '#8F8FF9' }}>{officeLine}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, font: `700 9px ${mono}`, letterSpacing: '.12em', color: status.color, background: status.bg, border: `1px solid ${status.bd}`, padding: '4px 9px', borderRadius: 99, whiteSpace: 'nowrap' }}>
+            {status.label === 'CALLOUT OPEN' ? <Clock size={10} /> : status.label === 'HOT' ? <Flame size={10} /> : <TrendingUp size={10} />}
+            {status.label}
+          </span>
+        </div>
+
+        <div style={{ font: `600 21px/1.2 ${display}`, color: '#F2F2F7' }}>{race.name}</div>
+
+        {cands.length >= 2 ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 10 }}>
+            <CandBadge c={cands[0]} align="left" />
+            <span style={{ font: `italic 400 17px ${serif}`, color: '#5C5C6E' }}>vs</span>
+            <CandBadge c={cands[1]} align="right" />
+          </div>
+        ) : (
+          <div style={{ font: `500 12px ${mono}`, color: '#5C5C6E', letterSpacing: '.06em' }}>
+            {(race.candidate_count || 0)} {race.candidate_count === 1 ? 'candidate' : 'candidates'} registered
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <span style={{ font: `600 8.5px ${mono}`, letterSpacing: '.16em', color: '#5C5C6E' }}>ARENA ACTIVITY</span>
+            <span style={{ font: `600 8.5px ${mono}`, letterSpacing: '.1em', color: hot ? '#8F8FF9' : '#9B9BAB' }}>{hot ? 'HIGH' : score > 0 ? 'RISING' : 'QUIET'}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 3 }}>
+            {Array.from({ length: 10 }).map((_, i) => (
+              <span key={i} style={{ height: 4, flex: 1, borderRadius: 2, background: i < filled ? `hsl(${245 + i * 6} 85% ${66 - i * 2}%)` : 'rgba(255,255,255,.08)' }} />
+            ))}
+          </div>
+        </div>
+
+        {open && (
+          <div style={{ border: '1px solid rgba(239,182,67,.25)', background: 'rgba(239,182,67,.05)', borderRadius: 10, padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <span style={{ font: `600 8.5px ${mono}`, letterSpacing: '.14em', color: '#EFB643' }}>AWAITING RESPONSE · {(open.target_name || '').toUpperCase()}</span>
+            <span style={{ font: `italic 400 14px/1.35 ${serif}`, color: '#D6D6DE' }}>“{open.claim_text}”</span>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, font: `500 11px ${mono}`, color: '#9B9BAB', flexWrap: 'wrap' }}>
+          {(race.challenge_count || 0) > 0 && <Stat color="#EFB643">{race.challenge_count} callout{race.challenge_count === 1 ? '' : 's'}</Stat>}
+          {(race.ad_count || 0) > 0 && <Stat color="#4D8AF0">{race.ad_count} ad{race.ad_count === 1 ? '' : 's'}</Stat>}
+          {(race.question_count || 0) > 0 && <Stat color="#34C384">{race.question_count} question{race.question_count === 1 ? '' : 's'}</Stat>}
+          {(race.response_count || 0) > 0 && <Stat color="#A78BFA">{race.response_count} response{race.response_count === 1 ? '' : 's'}</Stat>}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 14 }}>
+          <span style={{ font: `500 10px ${mono}`, letterSpacing: '.12em', color: '#5C5C6E' }}>{days}D TO ELECTION</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, font: `600 12.5px 'Hanken Grotesk',sans-serif`, color: '#8F8FF9' }}>
+            Enter arena <ChevronRight size={13} />
+          </span>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function CandBadge({ c, align }: { c: CandSummary; align: 'left' | 'right' }) {
+  const pc = partyColor(c.party);
+  const avatar = (
+    <div style={{ width: 42, height: 42, borderRadius: '50%', background: pc.grad, border: `1.5px solid ${pc.ring}`, display: 'flex', alignItems: 'center', justifyContent: 'center', font: `600 13px ${display}`, color: pc.soft }}>{initials(c.name)}</div>
+  );
+  const label = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: align === 'right' ? 'flex-end' : 'flex-start' }}>
+      <span style={{ font: `600 13.5px 'Hanken Grotesk',sans-serif`, color: '#F2F2F7' }}>{c.name.split(/\s+/).slice(-1)[0]}</span>
+      <span style={{ font: `500 9px ${mono}`, letterSpacing: '.1em', color: pc.text }}>{(c.party || '').toUpperCase().slice(0, 3)}</span>
+    </div>
+  );
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: align === 'right' ? 'flex-end' : 'flex-start' }}>
+      {align === 'left' ? <>{avatar}{label}</> : <>{label}{avatar}</>}
+    </div>
+  );
+}
+
+function Stat({ color, children }: { color: string; children: React.ReactNode }) {
+  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 6, height: 6, borderRadius: 2, background: color }} />{children}</span>;
+}
+
+function LedgerRow({ label, value, color, last }: { label: string; value: React.ReactNode; color: string; last?: boolean }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '13px 16px', borderBottom: last ? 'none' : '1px solid rgba(255,255,255,.06)' }}>
+      <span style={{ font: `500 11px ${mono}`, letterSpacing: '.08em', color: '#9B9BAB' }}>{label}</span>
+      <span style={{ font: `600 22px ${display}`, color }}>{value}</span>
     </div>
   );
 }
@@ -26,172 +149,91 @@ export function Home() {
   const { races, fetchRaces } = useArenaStore();
   const [loaded, setLoaded] = useState(races.length > 0);
   const [sort, setSort] = useState<SortMode>('trending');
+  const [stats, setStats] = useState<CycleStats | null>(null);
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const days = daysToElection();
+
+  useEffect(() => { fetchRaces(sort).finally(() => setLoaded(true)); }, [sort]);
 
   useEffect(() => {
-    fetchRaces(sort).finally(() => setLoaded(true));
-  }, [sort]);
+    // Endpoints Codex is building — consume when present, fall back gracefully.
+    fetch('/api/stats/cycle').then(r => r.ok ? r.json() : null).then(d => setStats(d?.data ?? d ?? null)).catch(() => {});
+    fetch('/api/feed/live').then(r => r.ok ? r.json() : null).then(d => setFeed((d?.data?.events ?? d?.events ?? []) as FeedItem[])).catch(() => {});
+  }, []);
 
-  const maxActivity = Math.max(...races.map(r => r.activity_score || 0), 1);
-
-  const sortTabs: { key: SortMode; label: string; icon: typeof TrendingUp }[] = [
-    { key: 'trending', label: 'Trending', icon: TrendingUp },
-    { key: 'newest', label: 'Newest', icon: Clock },
-    { key: 'name', label: 'A-Z', icon: ArrowUpDown },
-  ];
+  const racesLive = stats?.races_live ?? (races.filter(r => r.status === 'active').length || races.length);
+  const openCallouts = stats?.open_callouts;
+  const responseRate = stats?.response_rate;
+  const pad2 = (n?: number) => n === undefined ? '—' : String(n).padStart(2, '0');
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-12">
-      {/* Hero */}
-      <div className="mb-10">
-        <div className="flex items-center gap-2 mb-4">
-          <Flame className="w-5 h-5 text-indigo-400" />
-          <span className="text-xs font-semibold text-indigo-400 uppercase tracking-widest">Live Now</span>
+    <div style={{ background: '#08080C', color: '#F2F2F7', fontFamily: "'Hanken Grotesk', system-ui, sans-serif" }}>
+      {/* hero + cycle ledger */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 340px', gap: 60, alignItems: 'end', padding: '64px 40px 48px', maxWidth: 1440, margin: '0 auto', background: 'radial-gradient(1000px 420px at 18% -10%, rgba(110,110,247,.13), transparent 65%)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="arena-pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: '#34C384', boxShadow: '0 0 10px rgba(52,195,132,.8)' }} />
+            <span style={{ font: `600 10.5px ${mono}`, letterSpacing: '.2em', color: '#34C384' }}>{racesLive} ARENA{racesLive === 1 ? '' : 'S'} IN SESSION</span>
+          </div>
+          <div style={{ font: `400 84px/1.02 ${serif}`, letterSpacing: '-.01em', color: '#F2F2F7' }}>
+            Every claim goes <em style={{ color: '#8F8FF9' }}>on the record.</em>
+          </div>
+          <div style={{ font: `400 17px/1.6 'Hanken Grotesk',sans-serif`, color: '#9B9BAB', maxWidth: 560 }}>
+            Candidates campaign, challenge each other, and answer to voters inside a structured public arena — deadlines, receipts, and audit trails built into the platform itself.
+          </div>
         </div>
-        <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-4 bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
-          Active Arenas
-        </h1>
-        <p className="text-zinc-400 max-w-2xl text-lg leading-relaxed">
-          Watch candidates debate the issues, respond to challenges, and present their cases directly to verified voters. A transparent, fair platform for political discourse.
-        </p>
+        <div style={{ border: '1px solid rgba(255,255,255,.1)', borderRadius: 14, background: 'rgba(255,255,255,.02)', overflow: 'hidden' }}>
+          <div style={{ padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,.08)', font: `600 9.5px ${mono}`, letterSpacing: '.18em', color: '#5C5C6E' }}>CYCLE LEDGER · 2026 MIDTERMS</div>
+          <LedgerRow label="ARENAS LIVE" value={pad2(racesLive)} color="#F2F2F7" />
+          <LedgerRow label="OPEN CALLOUTS" value={pad2(openCallouts)} color="#EFB643" />
+          <LedgerRow label="RESPONSE RATE" value={responseRate === undefined ? '—' : `${responseRate}%`} color="#34C384" />
+          <LedgerRow label="ELECTION IN" value={<>{days}<span style={{ font: `600 12px ${display}`, color: '#5C5C6E' }}> DAYS</span></>} color="#F2F2F7" last />
+        </div>
       </div>
 
-      {/* Sort tabs */}
-      <div className="flex items-center gap-2 mb-8">
-        {sortTabs.map(tab => {
-          const Icon = tab.icon;
-          const active = sort === tab.key;
-          return (
-            <button
-              key={tab.key}
-              onClick={() => { setSort(tab.key); setLoaded(false); }}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
-                active
-                  ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
-                  : 'bg-zinc-900/50 text-zinc-400 border border-zinc-800 hover:border-zinc-700 hover:text-zinc-300'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {tab.label}
-            </button>
-          );
-        })}
+      {/* section head + sort + search */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 40px 22px', maxWidth: 1440, margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <span style={{ font: `600 20px ${display}`, color: '#F2F2F7' }}>Active arenas</span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {([['trending', 'Trending'], ['newest', 'Newest'], ['name', 'A–Z']] as [SortMode, string][]).map(([key, label]) => {
+              const active = sort === key;
+              return (
+                <button key={key} onClick={() => { setSort(key); setLoaded(false); }} style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', whiteSpace: 'nowrap',
+                  font: `600 12px 'Hanken Grotesk',sans-serif`, padding: '7px 14px', borderRadius: 99,
+                  color: active ? '#C7C7F9' : '#9B9BAB',
+                  background: active ? 'rgba(110,110,247,.14)' : 'rgba(255,255,255,.03)',
+                  border: active ? '1px solid rgba(110,110,247,.4)' : '1px solid rgba(255,255,255,.1)',
+                }}>
+                  {key === 'trending' && <TrendingUp size={12} />}{label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, border: '1px solid rgba(255,255,255,.1)', borderRadius: 9, padding: '8px 14px', width: 280, background: 'rgba(255,255,255,.02)' }}>
+          <Search size={13} color="#5C5C6E" />
+          <span style={{ font: `400 11px ${mono}`, color: '#5C5C6E', letterSpacing: '.04em' }}>Search races, candidates, claims…</span>
+        </div>
       </div>
 
-      {/* Race cards */}
-      {!loaded ? (
-        <div className="flex items-center justify-center py-20">
-          <div className="w-6 h-6 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
-        </div>
-      ) : races.length === 0 ? (
-        <div className="p-12 text-center border border-zinc-800 rounded-2xl bg-zinc-900/30">
-          <div className="text-zinc-400 mb-2">No active races</div>
-          <div className="text-sm text-zinc-500">Check back soon for upcoming political arenas.</div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {races.map((race, idx) => {
-            const score = race.activity_score || 0;
-            const isTrending = sort === 'trending' && idx < 3 && score > 0;
-            const isHot = score >= 10;
-
-            return (
-              <Link
-                key={race.id}
-                to={`/race/${race.id}`}
-                className={`group block p-6 rounded-2xl border transition-all duration-200 ${
-                  isTrending
-                    ? 'bg-gradient-to-br from-zinc-900/80 to-indigo-950/30 border-indigo-500/30 hover:border-indigo-400/50 shadow-lg shadow-indigo-500/5'
-                    : 'bg-zinc-900/50 border-zinc-800 hover:bg-zinc-800/50 hover:border-zinc-700'
-                }`}
-              >
-                {/* Header row */}
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-semibold text-indigo-400 tracking-wider uppercase">
-                        {race.status}
-                      </span>
-                      {isHot && (
-                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-gradient-to-r from-orange-500/20 to-pink-500/20 text-orange-300 border border-orange-500/30">
-                          <Flame className="w-3 h-3" /> Hot
-                        </span>
-                      )}
-                      {isTrending && !isHot && (
-                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
-                          <TrendingUp className="w-3 h-3" /> Trending
-                        </span>
-                      )}
-                    </div>
-                    <h2 className="text-xl font-semibold text-white mb-1 group-hover:text-indigo-300 transition-colors truncate">
-                      {race.name}
-                    </h2>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-zinc-600 group-hover:text-white group-hover:translate-x-0.5 transition-all flex-shrink-0 mt-1" />
-                </div>
-
-                {/* Location + candidates */}
-                <div className="flex items-center gap-4 text-sm text-zinc-400 mb-4">
-                  <div className="flex items-center gap-1.5">
-                    <MapPin className="w-4 h-4" />
-                    {race.state} {race.district && `- District ${race.district}`}
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Users className="w-4 h-4" />
-                    {race.candidate_count} {race.candidate_count === 1 ? "Candidate" : "Candidates"}
-                  </div>
-                </div>
-
-                {/* Activity bar */}
-                <ActivityBar score={score} max={maxActivity} />
-
-                {/* Activity counts */}
-                <div className="flex items-center gap-4 mt-3 text-xs text-zinc-500">
-                  {(race.challenge_count || 0) > 0 && (
-                    <div className="flex items-center gap-1" title="Challenges">
-                      <Swords className="w-3.5 h-3.5 text-amber-500/70" />
-                      <span>{race.challenge_count}</span>
-                    </div>
-                  )}
-                  {(race.ad_count || 0) > 0 && (
-                    <div className="flex items-center gap-1" title="Campaign Ads">
-                      <Megaphone className="w-3.5 h-3.5 text-blue-400/70" />
-                      <span>{race.ad_count}</span>
-                    </div>
-                  )}
-                  {(race.question_count || 0) > 0 && (
-                    <div className="flex items-center gap-1" title="Voter Questions">
-                      <MessageSquare className="w-3.5 h-3.5 text-emerald-400/70" />
-                      <span>{race.question_count}</span>
-                    </div>
-                  )}
-                  {(race.response_count || 0) > 0 && (
-                    <div className="flex items-center gap-1" title="Challenge Responses">
-                      <ChevronRight className="w-3.5 h-3.5 text-purple-400/70" />
-                      <span>{race.response_count} {race.response_count === 1 ? 'response' : 'responses'}</span>
-                    </div>
-                  )}
-                  {score === 0 && (
-                    <span className="text-zinc-600 italic">No activity yet</span>
-                  )}
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Info banner */}
-      <div className="mt-14 p-6 rounded-2xl border border-zinc-800 bg-zinc-900/30 flex flex-col md:flex-row items-start md:items-center gap-4">
-        <div className="w-10 h-10 rounded-full bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center flex-shrink-0">
-          <span className="text-lg">&#127963;</span>
-        </div>
-        <div>
-          <h3 className="text-sm font-semibold text-white mb-1">How Arena Works</h3>
-          <p className="text-sm text-zinc-400 leading-relaxed">
-            Candidates run ads with mandatory disclaimers. Opponents get equal rebuttal slots.
-            Voters issue challenges that candidates must respond to publicly. Full transparency, structured debate.
-          </p>
-        </div>
+      {/* race grid */}
+      <div style={{ maxWidth: 1440, margin: '0 auto', padding: '0 40px 56px' }}>
+        {!loaded ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}>
+            <div style={{ width: 24, height: 24, border: '2px solid rgba(110,110,247,.3)', borderTopColor: '#6E6EF7', borderRadius: '50%', animation: 'arena-marquee 0s' }} className="arena-pulse" />
+          </div>
+        ) : races.length === 0 ? (
+          <div style={{ padding: 48, textAlign: 'center', border: '1px solid rgba(255,255,255,.09)', borderRadius: 16, background: '#0C0C13' }}>
+            <div style={{ color: '#9B9BAB', marginBottom: 6 }}>No active arenas yet</div>
+            <div style={{ font: `400 12px ${mono}`, color: '#5C5C6E' }}>Check back soon.</div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
+            {races.map(race => <RaceCard key={race.id} race={race} days={days} />)}
+          </div>
+        )}
       </div>
     </div>
   );
