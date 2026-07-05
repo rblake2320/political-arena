@@ -15,6 +15,7 @@ import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
 import { ForgotPassword } from "./pages/ForgotPassword";
 import { ResetPassword } from "./pages/ResetPassword";
+import { LiveWire } from "./components/LiveWire";
 import { useAuth } from "./stores/auth";
 import { useArenaStore } from "./store";
 import * as api from "./api";
@@ -119,11 +120,14 @@ function Navigation() {
   }, [location.pathname]);
 
   return (
-    <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-        <Link to="/" className="text-xl font-bold tracking-tight text-white flex items-center gap-2.5">
-          <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-xs font-black shadow-lg shadow-indigo-500/20">A</span>
-          Arena
+    <header style={{ background: '#08080C', borderBottom: '1px solid rgba(255,255,255,.08)', position: 'sticky', top: 0, zIndex: 50 }}>
+      <div className="flex items-center justify-between" style={{ height: 64, padding: '0 40px' }}>
+        <Link to="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 11 }}>
+          <span style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg,#6E6EF7,#8B5CF6)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 14px rgba(110,110,247,.35)', font: "italic 400 17px 'Instrument Serif',serif", color: '#fff' }}>A</span>
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <span style={{ font: "700 15px 'Space Grotesk',sans-serif", letterSpacing: '.02em', color: '#F2F2F7', lineHeight: 1 }}>ARENA</span>
+            <span style={{ font: "500 8px 'IBM Plex Mono',monospace", letterSpacing: '.22em', color: '#5C5C6E', lineHeight: 1 }}>THE PUBLIC RECORD</span>
+          </span>
         </Link>
 
         {/* Desktop nav */}
@@ -395,7 +399,8 @@ function AppContent() {
 
   return (
     <CandidateContext.Provider value={{ candidates: portalCandidates, activeCandidateId, setActiveCandidateId }}>
-      <div className="min-h-screen bg-zinc-950 text-zinc-50 font-sans selection:bg-indigo-500/30">
+      <div className="min-h-screen text-zinc-50 font-sans selection:bg-indigo-500/30" style={{ background: '#08080C' }}>
+        <LiveWire />
         <Navigation />
         <main>
           <Routes>
