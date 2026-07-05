@@ -49,6 +49,17 @@ export function Help() {
         </p>
       </div>
 
+      {/* Neutrality commitment — always visible */}
+      <div style={{ border: '1px solid rgba(110,110,247,.35)', borderRadius: 14, background: 'linear-gradient(180deg,rgba(110,110,247,.07),rgba(110,110,247,.015))', padding: '20px 22px', marginBottom: 24 }}>
+        <div style={{ font: "600 10px 'IBM Plex Mono',monospace", letterSpacing: '.18em', color: '#8F8FF9', marginBottom: 8 }}>WHERE ARENA STANDS</div>
+        <p style={{ font: "400 15px/1.65 'Hanken Grotesk',sans-serif", color: '#D6D6DE', margin: 0 }}>
+          Arena has no partisan lean. We don't take sides. Our only job is to keep the process fair and on the record —
+          claims, sources, deadlines, and responses preserved as they happened, for every candidate equally.
+          We know we won't get everything right. When we get something wrong, we'll correct it without delay and leave
+          the correction on the record.
+        </p>
+      </div>
+
       <div className="space-y-3">
         {/* Overview */}
         <Section

@@ -384,6 +384,24 @@ export async function getPendingRecites(params?: { status?: 'pending' | 'verifie
   return unwrap<any>(await api.get('/recites/pending', { params }));
 }
 
+// ---- Applications to clear (moderation) ----
+export async function getPendingCandidates() {
+  return unwrap<any>(await api.get('/candidates/pending'));
+}
+export async function verifyCandidate(id: string, action: 'verify' | 'reject') {
+  const result = unwrap<any>(await api.post(`/candidates/${id}/verify`, { action }));
+  void trackEvent({ event_type: 'candidate_reviewed', candidate_id: id, metadata: { action } });
+  return result;
+}
+export async function getPendingPress() {
+  return unwrap<any>(await api.get('/press/pending'));
+}
+export async function reviewPress(id: string, status: 'approved' | 'rejected', review_note?: string) {
+  const result = unwrap<any>(await api.put(`/press/${id}/review`, { status, review_note }));
+  void trackEvent({ event_type: 'press_reviewed', metadata: { press_id: id, status } });
+  return result;
+}
+
 export async function getChallengeReceipt(id: string) {
   return unwrap<any>(await api.get(`/challenges/${id}/receipt`));
 }
