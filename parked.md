@@ -26,6 +26,30 @@
 ## External / operational (real-world gaps for the notice-gate to be real)
 - [ ] Production email/SMS + a **real served-notice channel** to a candidate's verified contact. Until this exists, "verified served-notice record" has no delivery mechanism — non-response can only be counted for candidates who claimed a profile, not merely served in-app. (Codex flagged.)
 
+## Next epic — candidate profiles + video + cold-start outreach (post-redesign)
+Mostly wiring on existing infra (R2 uploads / media_uploads / ContentMedia, computeFactScore, loaded FEC cn26 incl. committee contact, issue_positions stub, notice-gate in docs/neutrality-architecture.md). Build order:
+1. **Notice-gate + outreach FIRST (with legal/ToS review — highest risk).** Deliver a callout notice to a non-participating candidate's PUBLIC official channels only: FEC committee email → official site contact → listed social handle. Log each attempt (method + timestamp) in the audit chain as a served-notice record. Rules: notice is strictly procedural/factual ("a public callout naming you was filed on [date]; receipt: … ; you may respond"), never characterizes the claim; rate-limited so no one mass-notifies (naming N opponents ≠ N spam blasts); CAN-SPAM compliant (identify sender + opt-out) for email; social @mention = platform publicly naming a person → defamation surface, keep factual, ToS per platform. Expired status only after a *verified* delivery attempt.
+2. **Two-layer profiles.** Layer 1 = public-sourced, attributed per source ("per FEC filing X" / "per [outlet] [date]"), platform asserts nothing as true, **no score/no clock until served-notice**; candidate may append corrections, not delete. Layer 2 = candidate-owned, opt-in after claim, badged "Stated by [Name]"; auto fact-check only on specific claims.
+3. **Video slots** (R2 + media_uploads + ContentMedia): intro 90s + up to 5×120s platform videos + up to 5×60–90s response videos. Response video names an opponent → notification + outreach to that opponent (the viral loop; rate-limited per #1).
+4. **Money equalizer.** Posting new content costs credits; **replying to anything aimed at you is ALWAYS FREE** (never paywall the defense); proactively posting content that names/attacks an opponent may cost ($0–100, configurable); fact-check meter is automatic + never pay-influenced. More spend = more fact-check meters attached, not bought silence. Must pass the neutrality-invariant CI test (no billing input in accountability/public files).
+5. Candidate profile **claim flow** UX that triggers the notice-gate and unlocks Layer 2 self-authoring.
+
+## Response-video evasion meter (extends public_statements answer_status/evasion_score)
+- [ ] response video tethered at submission: response_to_id + response_to_type (ad/callout/statement); untagged → paid ad pipeline, not a free reply.
+- [ ] post-publish evasion review vs the tagged claim: answer_status direct/partial/evasive/off_topic + evasion_score, shown publicly under the video. **Never auto-revoke the free reply before publish** (suppression argument) — score post-publish, throttle prospectively.
+- [ ] prospective throttle: after N consecutive evasive/off_topic vs the same opponent, next reply routes to paid pipeline (configurable, like CHALLENGE_SLA_HOURS). Log score + scorer in audit chain.
+- Schema: response_to_id/type, answer_status, evasion_score on the response-video table; reply_throttle_log.
+
+## Gaps beyond the deep-research list (Claude review — highest-leverage first)
+- [ ] **Correction/appeal workflow.** The neutrality disclaimer now *promises* corrections; there is no mechanism to receive a dispute (Layer 1 data, a fact-check, an evasion score), act on it, and version the fix into the audit chain. Build the process behind the promise.
+- [ ] **Moderator accountability.** The whole moat rests on moderator calls (evasion, recite/candidate verify, disclaimer approval). Add: every mod action logged with *who*; contested/high-stakes calls need 2+ reviewers or an appeal path; a *published* moderation rubric. Must exist BEFORE the first published evasion score.
+- [ ] **Layer 1 identity/accuracy.** Disambiguation/identity-confidence before publishing a public-sourced profile (avoid wrong-person/stale/misattributed data) + prominent "report an error" → correction workflow.
+- [ ] **Inbound abuse + jurisdiction.** Velocity/dedup limits on callouts/questions so a brigade can't manufacture an "unanswered" wall; jurisdiction eligibility (or out-of-jurisdiction labeling) on voter accountability actions.
+- [ ] **ToS + content agreement + retention/deletion policy** before candidates upload video (ownership, post-election lifecycle, deletion vs append-only chain).
+- [ ] **Accessibility (WCAG contrast on the near-black/gray design) + Spanish** for real FL/TX/CA civic reach (ADA exposure).
+- [ ] **Password reset email** (parked separately below) and **served-notice email provider** are the two launch-blocking email gaps.
+- [ ] Also surfaced: sub-issue drill-down UI (parent_category_id planted), cross-candidate statement comparison UI, write-in aggregate surfacing (data collected, nowhere shown), press-citation source weight in fact scores, top-voted-question → challenge escalation, FEC disclaimer language enforcement on ad approval, DMCA/takedown workflow, state ballot-certification source.
+
 ## Infra (only when usage proves it)
 - [ ] Migrate the accountability ledger D1 → Neon Postgres via Hyperdrive when real records accumulate (D1 10 GB/DB ceiling). Not before.
 - [ ] Stack currency: Vite 8 (Rolldown) upgrade; confirm Zod v3 vs v4; pin React ≥ 19.2.1.
