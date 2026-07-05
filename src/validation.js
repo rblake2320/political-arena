@@ -367,6 +367,15 @@ export const registerPressSchema = z.object({
   ).optional(),
 });
 
+export const pressNewsSourceSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  url: z.string().trim().url().max(1000).refine(
+    (url) => /^https?:\/\//i.test(url),
+    { message: 'URL must use http or https' }
+  ),
+  description: z.string().trim().max(500).optional(),
+});
+
 // ===== Credit Schemas =====
 
 export const grantCreditsSchema = z.object({
