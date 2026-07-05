@@ -59,7 +59,48 @@ describe('races & demo seed (test env only)', () => {
     expect(res.status).toBe(200);
     const races = res.body.data.races;
     expect(races.length).toBeGreaterThanOrEqual(3);
-    expect(races.some(r => r.id === 'race-1')).toBe(true);
+    const race = races.find(r => r.id === 'race-1');
+    expect(race).toBeTruthy();
+    expect(Array.isArray(race.candidates_summary)).toBe(true);
+    expect(race.candidates_summary.length).toBeLessThanOrEqual(2);
+    expect(race.candidates_summary[0]).toMatchObject({
+      name: expect.any(String),
+      party: expect.any(String),
+    });
+    expect(Object.prototype.hasOwnProperty.call(race, 'open_callout')).toBe(true);
+    if (race.open_callout) {
+      expect(race.open_callout).toMatchObject({
+        target_name: expect.any(String),
+        claim_text: expect.any(String),
+        response_deadline: expect.any(String),
+      });
+    }
+  });
+
+  it('serves public launch stats and live feed events', async () => {
+    const stats = await get('/api/stats/cycle');
+    expect(stats.status).toBe(200);
+    expect(stats.body.data).toMatchObject({
+      races_live: expect.any(Number),
+      open_callouts: expect.any(Number),
+      response_rate: expect.any(Number),
+      election_date: '2026-11-03',
+    });
+
+    const feed = await get('/api/feed/live');
+    expect(feed.status).toBe(200);
+    expect(Array.isArray(feed.body.data.events)).toBe(true);
+    expect(feed.body.data.limit).toBe(20);
+    expect(feed.body.data.events.length).toBeGreaterThan(0);
+    expect(feed.body.data.events[0]).toMatchObject({
+      event_type: expect.stringMatching(/^(issued|responded|refused|expired)$/),
+      event_at: expect.any(String),
+      challenge_id: expect.any(String),
+      race_id: expect.any(String),
+      race_label: expect.any(String),
+      challenger_name: expect.any(String),
+      target_name: expect.any(String),
+    });
   });
 
   it('serves active ads for a race with paired rebuttals', async () => {

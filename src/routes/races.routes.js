@@ -46,9 +46,71 @@ router.get('/', async (request, env) => {
   const result = await env.ARENA_DB.prepare(sql).bind(...binds).all();
 
   // Compute activity_score for each race
-  const races = (result.results || []).map(r => ({
+  const baseRaces = result.results || [];
+  const raceIds = baseRaces.map(r => r.id);
+  const candidatesByRace = new Map();
+  const openCalloutByRace = new Map();
+
+  if (raceIds.length > 0) {
+    const placeholders = raceIds.map(() => '?').join(',');
+    const [candidateSummaries, openCallouts] = await Promise.all([
+      env.ARENA_DB.prepare(
+        `SELECT race_id, name, party FROM (
+           SELECT
+             c.race_id,
+             c.name,
+             c.party,
+             ROW_NUMBER() OVER (
+               PARTITION BY c.race_id
+               ORDER BY CASE WHEN c.verification_status = 'verified' THEN 0 ELSE 1 END, c.name ASC
+             ) as rn
+           FROM candidates c
+           WHERE c.race_id IN (${placeholders}) AND c.is_active = 1
+         )
+         WHERE rn <= 2
+         ORDER BY race_id, rn`
+      ).bind(...raceIds).all(),
+      env.ARENA_DB.prepare(
+        `SELECT race_id, target_name, claim_text, response_deadline FROM (
+           SELECT
+             ch.race_id,
+             target.name as target_name,
+             COALESCE(ch.claim_text, ch.challenge_text) as claim_text,
+             ch.response_deadline,
+             ROW_NUMBER() OVER (
+               PARTITION BY ch.race_id
+               ORDER BY ch.created_at DESC, ch.id DESC
+             ) as rn
+           FROM challenges ch
+           JOIN candidates target ON target.id = ch.target_candidate_id
+           WHERE ch.race_id IN (${placeholders})
+             AND ch.status = 'open'
+             AND ch.is_visible = 1
+         )
+         WHERE rn = 1`
+      ).bind(...raceIds).all(),
+    ]);
+
+    for (const candidate of candidateSummaries.results || []) {
+      const list = candidatesByRace.get(candidate.race_id) || [];
+      list.push({ name: candidate.name, party: candidate.party });
+      candidatesByRace.set(candidate.race_id, list);
+    }
+
+    for (const callout of openCallouts.results || []) {
+      openCalloutByRace.set(callout.race_id, {
+        target_name: callout.target_name,
+        claim_text: callout.claim_text,
+        response_deadline: callout.response_deadline,
+      });
+    }
+  }
+
+  const races = baseRaces.map(r => ({
     ...r,
     activity_score: (r.challenge_count || 0) + (r.ad_count || 0) + (r.question_count || 0) + (r.response_count || 0),
+    candidates_summary: candidatesByRace.get(r.id) || [],
+    open_callout: openCalloutByRace.get(r.id) || null,
   }));
 
   // Total count for pagination
