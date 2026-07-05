@@ -994,6 +994,137 @@ async function seedDemoQuestions(db) {
   ));
 }
 
+async function seedDemoRecites(db) {
+  const [demoChallenges, demoResponses] = await Promise.all([
+    db.prepare(`SELECT id FROM challenges WHERE id IN ('chal-1', 'chal-4')`).all(),
+    db.prepare(`SELECT id FROM challenge_responses WHERE id IN ('resp-1', 'resp-2')`).all(),
+  ]);
+  const existingContentIds = {
+    challenge: new Set((demoChallenges.results || []).map(row => row.id)),
+    challenge_response: new Set((demoResponses.results || []).map(row => row.id)),
+  };
+  if (existingContentIds.challenge.size === 0 && existingContentIds.challenge_response.size === 0) return;
+
+  await db.prepare(
+    `INSERT OR IGNORE INTO users (id, email, username, display_name, password_hash, role, email_verified, verification_status, is_active)
+     VALUES ('system', 'system@arena.internal', 'system', 'System', 'no-login', 'super_admin', 1, 'verified', 1)`
+  ).run();
+
+  const reviewNote = 'Demo seed for source-backed receipt and race previews; not a real-world claim assessment.';
+  const recites = [
+    {
+      id: 'rec-demo-chal-1-health-costs',
+      contentType: 'challenge',
+      contentId: 'chal-1',
+      url: 'https://www.kff.org/health-costs/',
+      title: 'Health care affordability and household spending data',
+      publisher: 'KFF',
+      sourceType: 'research',
+      stance: 'context',
+      claimText: 'Health policy proposals can be evaluated against household premium, deductible, and out-of-pocket cost data.',
+      quote: 'Tracks premium, deductible, and out-of-pocket cost trends voters can use to evaluate health policy claims.',
+      sourcePublishedAt: '2026-06-01',
+      archiveUrl: 'https://arena.vote/demo-archive/health-costs',
+    },
+    {
+      id: 'rec-demo-chal-1-plan',
+      contentType: 'challenge',
+      contentId: 'chal-1',
+      url: 'https://arena.vote/demo-sources/jane-doe-healthcare-plan',
+      title: 'Jane Doe healthcare plan summary',
+      publisher: 'Jane Doe for Senate',
+      sourceType: 'campaign_material',
+      stance: 'supports',
+      claimText: 'Jane Doe has proposed a healthcare plan with household cost savings claims.',
+      quote: 'The plan claims an average annual household savings target and expanded coverage mechanisms.',
+      sourcePublishedAt: '2026-06-12',
+      archiveUrl: 'https://arena.vote/demo-archive/jane-doe-healthcare-plan',
+    },
+    {
+      id: 'rec-demo-resp-1-savings',
+      contentType: 'challenge_response',
+      contentId: 'resp-1',
+      url: 'https://arena.vote/demo-sources/jane-doe-healthcare-savings',
+      title: 'Healthcare savings estimate worksheet',
+      publisher: 'Jane Doe for Senate',
+      sourceType: 'campaign_material',
+      stance: 'supports',
+      claimText: 'The campaign claims its plan saves families an average of $2,000 per year.',
+      quote: 'The campaign worksheet estimates an average $2,000 annual savings figure under its assumptions.',
+      sourcePublishedAt: '2026-06-18',
+      archiveUrl: 'https://arena.vote/demo-archive/jane-doe-healthcare-savings',
+    },
+    {
+      id: 'rec-demo-resp-1-baseline',
+      contentType: 'challenge_response',
+      contentId: 'resp-1',
+      url: 'https://www.cbo.gov/topics/health-care',
+      title: 'Federal health insurance coverage and subsidy baseline',
+      publisher: 'Congressional Budget Office',
+      sourceType: 'official_record',
+      stance: 'context',
+      claimText: 'Federal health insurance baselines provide context for coverage and subsidy cost assumptions.',
+      quote: 'Federal baseline data offers context for coverage and subsidy cost assumptions.',
+      sourcePublishedAt: '2026-06-01',
+      archiveUrl: 'https://arena.vote/demo-archive/cbo-health-baseline',
+    },
+    {
+      id: 'rec-demo-chal-4-education-vote',
+      contentType: 'challenge',
+      contentId: 'chal-4',
+      url: 'https://arena.vote/demo-sources/education-investment-roll-call',
+      title: 'Education Investment Act roll call summary',
+      publisher: 'Alabama Public Record Demo Archive',
+      sourceType: 'public_document',
+      stance: 'supports',
+      claimText: 'The challenged candidate is alleged to have voted against the Education Investment Act.',
+      quote: 'The roll call summary records opposition to the Education Investment Act.',
+      sourcePublishedAt: '2026-05-20',
+      archiveUrl: 'https://arena.vote/demo-archive/education-investment-roll-call',
+    },
+    {
+      id: 'rec-demo-resp-2-budget',
+      contentType: 'challenge_response',
+      contentId: 'resp-2',
+      url: 'https://arena.vote/demo-sources/public-school-funding-offsets',
+      title: 'Public school funding offset memo',
+      publisher: 'John Smith for Senate',
+      sourceType: 'campaign_material',
+      stance: 'supports',
+      claimText: 'The response claims school funding can increase by redirecting other spending without raising taxes.',
+      quote: 'The response memo identifies spending offsets the campaign says would increase school funding without tax increases.',
+      sourcePublishedAt: '2026-06-22',
+      archiveUrl: 'https://arena.vote/demo-archive/public-school-funding-offsets',
+    },
+  ];
+
+  const existingRecites = recites.filter(recite => existingContentIds[recite.contentType]?.has(recite.contentId));
+  if (existingRecites.length === 0) return;
+
+  await db.batch(existingRecites.map(recite =>
+    db.prepare(
+      `INSERT OR IGNORE INTO recites
+       (id, content_type, content_id, user_id, url, title, publisher, source_type, stance, claim_text, quote,
+        source_published_at, accessed_at, archive_url, status, reviewed_by, reviewed_at, review_note)
+       VALUES (?, ?, ?, 'system', ?, ?, ?, ?, ?, ?, ?, ?, '2026-07-05', ?, 'verified', 'system', '2026-07-05T00:00:00.000Z', ?)`
+    ).bind(
+      recite.id,
+      recite.contentType,
+      recite.contentId,
+      recite.url,
+      recite.title,
+      recite.publisher,
+      recite.sourceType,
+      recite.stance,
+      recite.claimText,
+      recite.quote,
+      recite.sourcePublishedAt,
+      recite.archiveUrl,
+      reviewNote
+    )
+  ));
+}
+
 // Seed demo races and candidates from store.ts data
 export async function seedDemoData(db) {
   // Check if fully seeded (races + ads)
@@ -1004,6 +1135,7 @@ export async function seedDemoData(db) {
   if (adCount.count > 0) {
     await repairDemoMediaData(db);
     await seedDemoQuestions(db);
+    await seedDemoRecites(db);
     return;
   }
 
@@ -1091,8 +1223,9 @@ export async function seedDemoData(db) {
   ]);
 
   await seedDemoQuestions(db);
+  await seedDemoRecites(db);
 
-  console.log('Arena demo data seeded: 3 races, 6 candidates, 3 ads, 1 rebuttal, 4 challenges, 2 responses, 8 questions, 10 credits each');
+  console.log('Arena demo data seeded: 3 races, 6 candidates, 3 ads, 1 rebuttal, 4 challenges, 2 responses, 8 questions, 6 recites, 10 credits each');
 }
 
 // Generate unique IDs with crypto-grade randomness
