@@ -182,9 +182,9 @@ export function Race() {
       </div>
 
       {/* tabs */}
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 40px", borderBottom: "1px solid rgba(255,255,255,.08)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: isMobile ? "0 12px" : "0 40px", borderBottom: "1px solid rgba(255,255,255,.08)", overflowX: "auto", whiteSpace: "nowrap" }}>
         {TABS.map(([k, label, n]) => (
-          <button key={k} onClick={() => setTab(k)} style={{ cursor: "pointer", background: "none", border: "none", font: `${tab === k ? 600 : 500} 13px 'Hanken Grotesk',sans-serif`, color: tab === k ? "#F2F2F7" : "#9B9BAB", padding: "16px 16px 14px", borderBottom: tab === k ? "2px solid #6E6EF7" : "2px solid transparent", display: "inline-flex", alignItems: "center", gap: 7 }}>
+          <button key={k} onClick={() => setTab(k)} style={{ flexShrink: 0, cursor: "pointer", background: "none", border: "none", font: `${tab === k ? 600 : 500} 13px 'Hanken Grotesk',sans-serif`, color: tab === k ? "#F2F2F7" : "#9B9BAB", padding: isMobile ? "14px 11px 12px" : "16px 16px 14px", borderBottom: tab === k ? "2px solid #6E6EF7" : "2px solid transparent", display: "inline-flex", alignItems: "center", gap: 7 }}>
             {label}{n != null && <span style={{ font: `600 9.5px ${mono}`, background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 99, padding: "2px 7px", color: "#9B9BAB" }}>{n}</span>}
           </button>
         ))}

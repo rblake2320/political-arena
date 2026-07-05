@@ -423,9 +423,10 @@ function AppContent() {
             <Route path="*" element={<NotFound />} />
           </Routes>
         </main>
-        <footer className="border-t border-zinc-800 mt-20 py-8 text-center text-xs text-zinc-600">
-          Arena &mdash; A fair, structured environment for political candidates.{' '}
-          {user && <span>Signed in as {user.display_name || user.username}.</span>}
+        <footer style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 40, padding: '22px 40px', textAlign: 'center' }}>
+          <span style={{ font: "500 10px 'IBM Plex Mono', ui-monospace, monospace", letterSpacing: '.18em', color: '#5C5C6E' }}>
+            ARENA · THE PUBLIC RECORD · EVERY CLAIM ON THE RECORD{user ? ` · SIGNED IN AS ${String(user.display_name || user.username || '').toUpperCase()}` : ''}
+          </span>
         </footer>
       </div>
     </CandidateContext.Provider>
