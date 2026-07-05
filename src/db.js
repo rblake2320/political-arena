@@ -237,45 +237,156 @@ export async function runRuntimeMigrations(db) {
   }
 
   const correctionRequestsResult = await db.prepare(`PRAGMA table_info(correction_requests)`).all();
+  const correctionRequestColumns = new Set((correctionRequestsResult.results || []).map(c => c.name));
+  const correctionEventsResult = await db.prepare(`PRAGMA table_info(correction_request_events)`).all();
+  const correctionEventColumns = new Set((correctionEventsResult.results || []).map(c => c.name));
+  const correctionTableStatements = [
+    db.prepare(`CREATE TABLE IF NOT EXISTS correction_requests (
+      id TEXT PRIMARY KEY,
+      requester_id TEXT NOT NULL REFERENCES users(id),
+      content_type TEXT NOT NULL CHECK(content_type IN ('statement','recite','challenge','challenge_response','candidate','ad','rebuttal')),
+      content_id TEXT NOT NULL,
+      candidate_id TEXT REFERENCES candidates(id),
+      reason TEXT NOT NULL DEFAULT 'factual_error' CHECK(reason IN ('factual_error','missing_context','source_error','identity_error','score_dispute','other')),
+      requested_change TEXT NOT NULL,
+      evidence_url TEXT,
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','under_review','upheld','revised','rejected')),
+      reviewed_by TEXT REFERENCES users(id),
+      reviewed_at TEXT,
+      resolution_note TEXT,
+      public_note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS correction_request_events (
+      id TEXT PRIMARY KEY,
+      correction_request_id TEXT NOT NULL REFERENCES correction_requests(id),
+      actor_id TEXT REFERENCES users(id),
+      event_type TEXT NOT NULL CHECK(event_type IN ('submitted','status_changed','public_note')),
+      before_status TEXT,
+      after_status TEXT,
+      note TEXT,
+      public_note TEXT,
+      metadata TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_status
+      ON correction_requests(status, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_content
+      ON correction_requests(content_type, content_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_requester
+      ON correction_requests(requester_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_correction_events_request
+      ON correction_request_events(correction_request_id, created_at)`),
+  ];
+
   if ((correctionRequestsResult.results || []).length === 0) {
+    await db.batch(correctionTableStatements);
+  } else if (
+    correctionRequestColumns.has('submitted_by') ||
+    correctionRequestColumns.has('request_text') ||
+    !correctionRequestColumns.has('requester_id') ||
+    !correctionRequestColumns.has('reason') ||
+    !correctionRequestColumns.has('resolution_note') ||
+    !correctionEventColumns.has('event_type')
+  ) {
+    const requesterExpr = correctionRequestColumns.has('requester_id')
+      ? correctionRequestColumns.has('submitted_by')
+        ? 'COALESCE(requester_id, submitted_by)'
+        : 'requester_id'
+      : correctionRequestColumns.has('submitted_by')
+        ? 'submitted_by'
+        : "'system'";
+    const reasonExpr = correctionRequestColumns.has('reason') ? "COALESCE(reason, 'factual_error')" : "'factual_error'";
+    const requestedChangeExpr = correctionRequestColumns.has('request_text')
+      ? 'COALESCE(requested_change, request_text)'
+      : 'requested_change';
+    const resolutionNoteExpr = correctionRequestColumns.has('resolution_note') ? 'resolution_note' : 'NULL';
+
+    const rebuildStatements = [
+      db.prepare(`DROP TABLE IF EXISTS correction_request_events_legacy`),
+      db.prepare(`DROP TABLE IF EXISTS correction_requests_legacy`),
+    ];
+
+    if (correctionEventColumns.size > 0) {
+      rebuildStatements.push(db.prepare(`ALTER TABLE correction_request_events RENAME TO correction_request_events_legacy`));
+    }
+
+    rebuildStatements.push(
+      db.prepare(`ALTER TABLE correction_requests RENAME TO correction_requests_legacy`),
+      ...correctionTableStatements,
+      db.prepare(
+        `INSERT OR IGNORE INTO correction_requests
+         (id, requester_id, content_type, content_id, candidate_id, reason, requested_change, evidence_url,
+          status, reviewed_by, reviewed_at, resolution_note, public_note, created_at, updated_at)
+         SELECT
+           id,
+           ${requesterExpr},
+           CASE content_type
+             WHEN 'candidate_profile' THEN 'candidate'
+             ELSE content_type
+           END,
+           content_id,
+           candidate_id,
+           ${reasonExpr},
+           ${requestedChangeExpr},
+           evidence_url,
+           CASE status
+             WHEN 'submitted' THEN 'open'
+             WHEN 'withdrawn' THEN 'rejected'
+             ELSE status
+           END,
+           reviewed_by,
+           reviewed_at,
+           ${resolutionNoteExpr},
+           public_note,
+           created_at,
+           updated_at
+         FROM correction_requests_legacy`
+      ),
+    );
+
+    if (correctionEventColumns.has('action_type')) {
+      rebuildStatements.push(db.prepare(
+        `INSERT OR IGNORE INTO correction_request_events
+         (id, correction_request_id, actor_id, event_type, before_status, after_status, note, public_note, metadata, created_at)
+         SELECT
+           id,
+           correction_request_id,
+           actor_id,
+           CASE action_type
+             WHEN 'submitted' THEN 'submitted'
+             WHEN 'note_added' THEN 'public_note'
+             ELSE 'status_changed'
+           END,
+           previous_status,
+           CASE new_status
+             WHEN 'submitted' THEN 'open'
+             WHEN 'withdrawn' THEN 'rejected'
+             ELSE new_status
+           END,
+           note,
+           CASE action_type WHEN 'note_added' THEN note ELSE NULL END,
+           metadata,
+           created_at
+         FROM correction_request_events_legacy`
+      ));
+    } else if (correctionEventColumns.has('event_type')) {
+      rebuildStatements.push(db.prepare(
+        `INSERT OR IGNORE INTO correction_request_events
+         (id, correction_request_id, actor_id, event_type, before_status, after_status, note, public_note, metadata, created_at)
+         SELECT id, correction_request_id, actor_id, event_type, before_status, after_status, note, public_note, metadata, created_at
+         FROM correction_request_events_legacy`
+      ));
+    }
+
+    rebuildStatements.push(
+      db.prepare(`DROP TABLE IF EXISTS correction_request_events_legacy`),
+      db.prepare(`DROP TABLE IF EXISTS correction_requests_legacy`),
+    );
+
     await db.batch([
-      db.prepare(`CREATE TABLE IF NOT EXISTS correction_requests (
-        id TEXT PRIMARY KEY,
-        requester_id TEXT NOT NULL REFERENCES users(id),
-        content_type TEXT NOT NULL CHECK(content_type IN ('statement','recite','challenge','challenge_response','candidate','ad','rebuttal')),
-        content_id TEXT NOT NULL,
-        candidate_id TEXT REFERENCES candidates(id),
-        reason TEXT NOT NULL DEFAULT 'factual_error' CHECK(reason IN ('factual_error','missing_context','source_error','identity_error','score_dispute','other')),
-        requested_change TEXT NOT NULL,
-        evidence_url TEXT,
-        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','under_review','upheld','revised','rejected')),
-        reviewed_by TEXT REFERENCES users(id),
-        reviewed_at TEXT,
-        resolution_note TEXT,
-        public_note TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )`),
-      db.prepare(`CREATE TABLE IF NOT EXISTS correction_request_events (
-        id TEXT PRIMARY KEY,
-        correction_request_id TEXT NOT NULL REFERENCES correction_requests(id),
-        actor_id TEXT REFERENCES users(id),
-        event_type TEXT NOT NULL CHECK(event_type IN ('submitted','status_changed','public_note')),
-        before_status TEXT,
-        after_status TEXT,
-        note TEXT,
-        public_note TEXT,
-        metadata TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )`),
-      db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_status
-        ON correction_requests(status, created_at)`),
-      db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_content
-        ON correction_requests(content_type, content_id, created_at)`),
-      db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_requester
-        ON correction_requests(requester_id, created_at)`),
-      db.prepare(`CREATE INDEX IF NOT EXISTS idx_correction_events_request
-        ON correction_request_events(correction_request_id, created_at)`),
+      ...rebuildStatements,
     ]);
   }
 
