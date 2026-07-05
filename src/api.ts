@@ -89,8 +89,12 @@ export async function getMe() {
 
 // ---- Races ----
 export async function getRaces(sort?: string) {
-  const params = sort ? `?sort=${sort}` : '';
-  return unwrap<{ races: any[]; total: number }>(await api.get(`/races${params}`));
+  const params = new URLSearchParams({
+    status: 'all',
+    limit: '600',
+  });
+  if (sort) params.set('sort', sort);
+  return unwrap<{ races: any[]; total: number }>(await api.get(`/races?${params.toString()}`));
 }
 
 export async function getRace(id: string) {
@@ -112,6 +116,26 @@ export async function getCandidates(raceId?: string) {
 
 export async function getCandidatePublicProfile(candidateId: string) {
   return unwrap<any>(await api.get(`/candidates/${candidateId}/public-profile`));
+}
+
+export async function createCandidate(data: {
+  race_id: string;
+  name: string;
+  party: string;
+  biography?: string;
+  issue_positions?: string[];
+  website_url?: string;
+}) {
+  const result = unwrap<any>(await api.post('/candidates', data));
+  void trackEvent({
+    event_type: 'candidate_registered',
+    race_id: data.race_id,
+    candidate_id: result.id,
+    content_type: 'candidate',
+    content_id: result.id,
+    metadata: { verification_status: result.verification_status || 'pending' },
+  });
+  return result;
 }
 
 // ---- Ads ----
@@ -174,6 +198,29 @@ export async function createExternalAdResponse(data: {
   return result;
 }
 
+export async function createExternalAdSource(data: {
+  race_id: string;
+  source_candidate_id: string;
+  posting_candidate_id: string;
+  source_title: string;
+  source_media_url: string;
+  source_description?: string;
+  source_disclaimer_text?: string;
+}) {
+  const result = unwrap<{ ad_id: string; status: string; response_slot_open: boolean }>(await api.post('/ads/external-source', data));
+  void trackEvents([
+    {
+      event_type: 'external_ad_source_created',
+      race_id: data.race_id,
+      candidate_id: data.posting_candidate_id,
+      content_type: 'ad',
+      content_id: result.ad_id,
+      metadata: { source_candidate_id: data.source_candidate_id, response_slot_open: result.response_slot_open },
+    },
+  ]);
+  return result;
+}
+
 // ---- Challenges ----
 export async function createChallenge(data: {
   race_id: string; challenger_candidate_id: string; target_candidate_id: string;
@@ -217,6 +264,28 @@ export async function respondToChallenge(challengeId: string, data: { response_t
     content_type: 'challenge',
     content_id: challengeId,
     metadata: { response_id: result.response_id, has_media: Boolean(data.media_url) },
+  });
+  return result;
+}
+
+export async function refuseChallenge(challengeId: string, data: { refusal_reason?: string }) {
+  const result = unwrap<any>(await api.post(`/challenges/${challengeId}/refuse`, data));
+  void trackEvent({
+    event_type: 'challenge_refused',
+    content_type: 'challenge',
+    content_id: challengeId,
+    metadata: { has_reason: Boolean(data.refusal_reason) },
+  });
+  return result;
+}
+
+export async function withdrawChallenge(challengeId: string) {
+  const result = unwrap<any>(await api.post(`/challenges/${challengeId}/withdraw`, {}));
+  void trackEvent({
+    event_type: 'challenge_withdrawn',
+    content_type: 'challenge',
+    content_id: challengeId,
+    metadata: { credit_refunded: Boolean(result.credit_refunded) },
   });
   return result;
 }
@@ -313,6 +382,24 @@ export async function reviewRecite(id: string, status: 'pending' | 'verified' | 
 
 export async function getPendingRecites(params?: { status?: 'pending' | 'verified' | 'rejected'; page?: number }) {
   return unwrap<any>(await api.get('/recites/pending', { params }));
+}
+
+// ---- Applications to clear (moderation) ----
+export async function getPendingCandidates() {
+  return unwrap<any>(await api.get('/candidates/pending'));
+}
+export async function verifyCandidate(id: string, action: 'verify' | 'reject') {
+  const result = unwrap<any>(await api.post(`/candidates/${id}/verify`, { action }));
+  void trackEvent({ event_type: 'candidate_reviewed', candidate_id: id, metadata: { action } });
+  return result;
+}
+export async function getPendingPress() {
+  return unwrap<any>(await api.get('/press/pending'));
+}
+export async function reviewPress(id: string, status: 'approved' | 'rejected', review_note?: string) {
+  const result = unwrap<any>(await api.put(`/press/${id}/review`, { status, review_note }));
+  void trackEvent({ event_type: 'press_reviewed', metadata: { press_id: id, status } });
+  return result;
 }
 
 export async function getChallengeReceipt(id: string) {
@@ -478,6 +565,31 @@ export async function registerPress(data: { outlet_name: string; outlet_type: st
 
 export async function getPressStatus() {
   return unwrap<{ credential: any }>(await api.get('/press/my-status'));
+}
+
+export type PressFeedItem = {
+  id: string;
+  source: string;
+  source_type: 'official_record' | 'news' | 'press_release';
+  title: string;
+  url: string;
+  publisher: string;
+  section?: string;
+  published_at?: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  change_status: 'new' | 'updated' | 'removed';
+};
+
+export async function getPressFeed(params?: { source?: string; section?: string; limit?: number }) {
+  const search = new URLSearchParams();
+  if (params?.source) search.set('source', params.source);
+  if (params?.section) search.set('section', params.section);
+  if (params?.limit) search.set('limit', String(params.limit));
+  const query = search.toString();
+  return unwrap<{ items: PressFeedItem[]; sources: any[]; limit: number }>(
+    await api.get(`/press/feed${query ? `?${query}` : ''}`)
+  );
 }
 
 // ---- Credits ----

@@ -1,1907 +1,946 @@
-import React, { useState, useContext, useEffect } from "react";
+import { useContext, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
-import { Shield, ShieldAlert, AlertCircle, ThumbsUp, ThumbsDown, MessageSquare, Plus, X, Clock, ArrowBigUp, HelpCircle, FileCheck2, ExternalLink } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
 import { CandidateContext } from "../App";
-import { useArenaStore, type RaceDetail } from "../store";
 import * as api from "../api";
+import { useArenaStore } from "../store";
 import { useAuth } from "../stores/auth";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { ContentMedia, MediaUploadField } from "../components/Media";
+
+const mono = "'IBM Plex Mono', ui-monospace, monospace";
+const display = "'Space Grotesk', system-ui, sans-serif";
+const serif = "'Instrument Serif', ui-serif, Georgia, serif";
+
+const isDem = (p?: string) => /^dem/i.test(p || "");
+const isRep = (p?: string) => /^rep/i.test(p || "");
+const partyC = (p?: string) => isDem(p)
+  ? { text: "#4D8AF0", ring: "rgba(77,138,240,.65)", grad: "linear-gradient(145deg,#1C2C4E,#101A30)", soft: "#7FA8F5", bar: "#4D8AF0" }
+  : isRep(p)
+    ? { text: "#E5636A", ring: "rgba(229,72,77,.6)", grad: "linear-gradient(145deg,#4A1D22,#2A1114)", soft: "#F08085", bar: "#E5484D" }
+    : { text: "#9B9BAB", ring: "rgba(255,255,255,.25)", grad: "linear-gradient(145deg,#25252E,#16161C)", soft: "#C7C7D2", bar: "#6E6EF7" };
+const initials = (n?: string) => (n || "").split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase() || "").join("") || "-";
+const fmtDT = (iso?: string) => {
+  const d = new Date((iso || "").replace(" ", "T"));
+  if (isNaN(d.getTime())) return "";
+  return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase()} · ${d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })} ET`;
+};
+const errorText = (err: any) => err?.response?.data?.error || err?.response?.data?.data?.error || err?.message || "Request failed";
+
+type Notice = { kind: "success" | "error"; text: string } | null;
+type ActionKey = "claim" | "challenge" | "post-ad" | "outside-ad" | "question" | "challenge-action" | "rebuttal";
+
+function Stat({ v, label, color = "#F2F2F7", align = "start" }: { v: ReactNode; label: string; color?: string; align?: string }) {
+  return (
+    <span style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: align === "end" ? "flex-end" : "flex-start" }}>
+      <span style={{ font: `600 20px ${display}`, color }}>{v}</span>
+      <span style={{ font: `500 8.5px ${mono}`, letterSpacing: ".12em", color: "#5C5C6E" }}>{label}</span>
+    </span>
+  );
+}
+
+function ActionButton({
+  children, onClick, type = "button", variant = "primary", disabled = false,
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  type?: "button" | "submit";
+  variant?: "primary" | "secondary" | "danger" | "ghost";
+  disabled?: boolean;
+}) {
+  const styles = {
+    primary: { color: "#F2F2F7", background: "#6E6EF7", border: "1px solid rgba(143,143,249,.75)" },
+    secondary: { color: "#F2F2F7", background: "rgba(255,255,255,.045)", border: "1px solid rgba(255,255,255,.13)" },
+    danger: { color: "#FFE8E8", background: "rgba(229,72,77,.14)", border: "1px solid rgba(229,72,77,.45)" },
+    ghost: { color: "#9B9BAB", background: "transparent", border: "1px solid rgba(255,255,255,.08)" },
+  }[variant];
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        ...styles,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? .55 : 1,
+        borderRadius: 9,
+        padding: "9px 13px",
+        font: `700 10px ${mono}`,
+        letterSpacing: ".11em",
+        textTransform: "uppercase",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ModalFrame({ title, kicker, children, onClose }: { title: string; kicker?: string; children: ReactNode; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div role="dialog" aria-modal="true" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 18, background: "rgba(0,0,0,.78)", backdropFilter: "blur(10px)" }}>
+      <div onClick={event => event.stopPropagation()} style={{ width: "min(760px, 100%)", maxHeight: "92vh", overflowY: "auto", border: "1px solid rgba(255,255,255,.12)", borderRadius: 18, background: "#0C0C13", boxShadow: "0 30px 90px rgba(0,0,0,.55)" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, padding: "18px 22px", borderBottom: "1px solid rgba(255,255,255,.08)" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {kicker && <span style={{ font: `600 9px ${mono}`, letterSpacing: ".16em", color: "#8F8FF9" }}>{kicker}</span>}
+            <h2 style={{ margin: 0, font: `600 22px ${display}`, color: "#F2F2F7" }}>{title}</h2>
+          </div>
+          <button onClick={onClose} style={{ cursor: "pointer", border: "1px solid rgba(255,255,255,.12)", background: "rgba(255,255,255,.04)", color: "#9B9BAB", borderRadius: 8, width: 34, height: 34, fontSize: 20, lineHeight: "30px" }}>×</button>
+        </div>
+        <div style={{ padding: 22 }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, required, placeholder, type = "text" }: { label: string; value: string; onChange: (value: string) => void; required?: boolean; placeholder?: string; type?: string }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      <span style={{ font: `600 10px ${mono}`, letterSpacing: ".12em", color: "#9B9BAB" }}>{label}{required ? " *" : ""}</span>
+      <input
+        type={type}
+        required={required}
+        value={value}
+        placeholder={placeholder}
+        onChange={event => onChange(event.target.value)}
+        style={{ width: "100%", border: "1px solid rgba(255,255,255,.12)", borderRadius: 10, background: "#08080C", color: "#F2F2F7", padding: "11px 12px", font: "400 14px 'Hanken Grotesk', system-ui, sans-serif", outline: "none" }}
+      />
+    </label>
+  );
+}
+
+function TextAreaField({ label, value, onChange, required, placeholder, rows = 4, maxLength }: { label: string; value: string; onChange: (value: string) => void; required?: boolean; placeholder?: string; rows?: number; maxLength?: number }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      <span style={{ font: `600 10px ${mono}`, letterSpacing: ".12em", color: "#9B9BAB" }}>{label}{required ? " *" : ""}</span>
+      <textarea
+        required={required}
+        rows={rows}
+        maxLength={maxLength}
+        value={value}
+        placeholder={placeholder}
+        onChange={event => onChange(event.target.value)}
+        style={{ width: "100%", border: "1px solid rgba(255,255,255,.12)", borderRadius: 10, background: "#08080C", color: "#F2F2F7", padding: "11px 12px", font: "400 14px/1.55 'Hanken Grotesk', system-ui, sans-serif", outline: "none", resize: "vertical" }}
+      />
+      {maxLength && <span style={{ alignSelf: "flex-end", font: `500 9px ${mono}`, color: "#5C5C6E" }}>{value.length}/{maxLength}</span>}
+    </label>
+  );
+}
+
+function SelectField({ label, value, onChange, children, required }: { label: string; value: string; onChange: (value: string) => void; children: ReactNode; required?: boolean }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      <span style={{ font: `600 10px ${mono}`, letterSpacing: ".12em", color: "#9B9BAB" }}>{label}{required ? " *" : ""}</span>
+      <select
+        required={required}
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        style={{ width: "100%", border: "1px solid rgba(255,255,255,.12)", borderRadius: 10, background: "#08080C", color: "#F2F2F7", padding: "11px 12px", font: "400 14px 'Hanken Grotesk', system-ui, sans-serif", outline: "none" }}
+      >
+        {children}
+      </select>
+    </label>
+  );
+}
+
+function FormMessage({ notice }: { notice: Notice }) {
+  if (!notice) return null;
+  const color = notice.kind === "success" ? "#34C384" : "#E5636A";
+  return (
+    <div style={{ border: `1px solid ${color}55`, background: `${color}12`, color, borderRadius: 10, padding: "10px 12px", font: "500 13px 'Hanken Grotesk', system-ui, sans-serif" }}>
+      {notice.text}
+    </div>
+  );
+}
+
+function ReciteChip({ r }: { r: any }) {
+  const stance = (r.stance || r.status || "").toLowerCase();
+  const c = stance.includes("support") ? "#34C384" : stance.includes("context") ? "#EFB643" : "#E5636A";
+  const lbl = stance.includes("support") ? "SUPPORTS" : stance.includes("context") ? "CONTEXT" : "REFUTES";
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, font: `500 10px ${mono}`, color: "#9B9BAB", border: "1px solid rgba(255,255,255,.1)", background: "rgba(255,255,255,.02)", padding: "5px 10px", borderRadius: 7 }}>
+      ↗ RECITE · {(r.title || r.source_type || "SOURCE").toUpperCase().slice(0, 42)} · <span style={{ color: c }}>{lbl}</span>
+    </span>
+  );
+}
+
+function FactBar({ label, fs }: { label: string; fs?: any }) {
+  const val = fs?.score ?? 50;
+  const good = val >= 60;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <span style={{ font: `600 8.5px ${mono}`, letterSpacing: ".12em", color: "#5C5C6E" }}>{label}</span>
+      <div style={{ width: 76, height: 4, borderRadius: 2, background: "rgba(255,255,255,.08)", overflow: "hidden" }}><div style={{ width: `${Math.max(4, Math.min(100, val))}%`, height: "100%", background: good ? "linear-gradient(90deg,#EFB643,#34C384)" : "linear-gradient(90deg,#E5636A,#EFB643)" }} /></div>
+      <span style={{ font: `600 11px ${mono}`, color: good ? "#34C384" : "#EFB643" }}>{val} · {(fs?.label || "MIXED").toUpperCase().replace(/_/g, "-")}</span>
+    </div>
+  );
+}
+
+function EmptyPanel({ title, detail, action }: { title: string; detail: string; action?: ReactNode }) {
+  return (
+    <div style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 16, background: "#0C0C13", padding: 24, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <span style={{ font: `600 17px ${display}`, color: "#F2F2F7" }}>{title}</span>
+        <span style={{ font: "400 13px/1.55 'Hanken Grotesk', system-ui, sans-serif", color: "#9B9BAB", maxWidth: 660 }}>{detail}</span>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function CalloutCard({
+  ch, cands, responses, activeCandidateId, onAction,
+}: {
+  ch: any;
+  cands: any[];
+  responses: any[];
+  activeCandidateId: string | null;
+  onAction: (challenge: any) => void;
+}) {
+  const challenger = cands.find(c => c.id === ch.challenger_candidate_id);
+  const target = cands.find(c => c.id === ch.target_candidate_id);
+  const resp = responses.find(r => r.challenge_id === ch.id);
+  const respCand = resp && cands.find(c => c.id === resp.candidate_id);
+  const crs = ch.challenge_recite_summary || {};
+  const responded = ch.status === "responded";
+  const openForStaff = ch.status === "open" && activeCandidateId && [ch.target_candidate_id, ch.challenger_candidate_id].includes(activeCandidateId);
+  const statusPill = responded ? { t: "RESPONDED · ON TIME", c: "#34C384" } : ch.status === "expired" ? { t: "NO RESPONSE", c: "#E5484D" } : ch.status === "refused" ? { t: "REFUSED", c: "#E5636A" } : { t: "AWAITING RESPONSE", c: "#EFB643" };
+  const cc = partyC(challenger?.party), tc = partyC(target?.party);
+  return (
+    <div style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 16, background: "#0C0C13", overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "14px 22px", borderBottom: "1px solid rgba(255,255,255,.07)", background: "rgba(255,255,255,.015)", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ font: `600 10px ${mono}`, letterSpacing: ".14em", color: "#9B9BAB" }}>CALLOUT · {String(ch.public_receipt_slug || ch.id).toUpperCase()}</span>
+          <span style={{ font: `700 8.5px ${mono}`, letterSpacing: ".12em", color: "#EFB643", background: "rgba(239,182,67,.09)", border: "1px solid rgba(239,182,67,.3)", padding: "3px 8px", borderRadius: 99 }}>{(ch.challenge_type || "FACT CHECK").toUpperCase().replace(/_/g, " ")}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {openForStaff && <ActionButton onClick={() => onAction(ch)} variant="secondary">Act</ActionButton>}
+          <span style={{ font: `700 8.5px ${mono}`, letterSpacing: ".12em", color: statusPill.c, background: `${statusPill.c}17`, border: `1px solid ${statusPill.c}4d`, padding: "3px 8px", borderRadius: 99, whiteSpace: "nowrap" }}>{statusPill.t}</span>
+        </div>
+      </div>
+      <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ width: 30, height: 30, borderRadius: "50%", background: cc.grad, border: `1.5px solid ${cc.ring}`, display: "flex", alignItems: "center", justifyContent: "center", font: `600 10.5px ${display}`, color: cc.soft }}>{initials(challenger?.name)}</div>
+          <span style={{ font: `600 13px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{challenger?.name?.split(/\s+/).slice(-1)[0] || "Campaign"}</span>
+          <span style={{ color: "#5C5C6E" }}>→</span>
+          <div style={{ width: 30, height: 30, borderRadius: "50%", background: tc.grad, border: `1.5px solid ${tc.ring}`, display: "flex", alignItems: "center", justifyContent: "center", font: `600 10.5px ${display}`, color: tc.soft }}>{initials(target?.name)}</div>
+          <span style={{ font: `600 13px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{target?.name?.split(/\s+/).slice(-1)[0] || "Campaign"}</span>
+          <span style={{ font: `500 10px ${mono}`, color: "#5C5C6E", marginLeft: "auto" }}>FILED {fmtDT(ch.created_at)}</span>
+        </div>
+        <div style={{ font: `italic 400 21px/1.45 ${serif}`, color: "#E8E8EF", borderLeft: "2px solid #EFB643", paddingLeft: 18 }}>"{ch.claim_text || ch.challenge_text}"</div>
+        {crs.top_source && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><ReciteChip r={crs.top_source} />{crs.recite_count > 1 && <span style={{ font: `500 10px ${mono}`, color: "#5C5C6E", alignSelf: "center" }}>+{crs.recite_count - 1} more on receipt</span>}</div>}
+        {resp && (
+          <div style={{ border: "1px solid rgba(52,195,132,.22)", borderLeft: "3px solid #34C384", borderRadius: 12, background: "rgba(52,195,132,.04)", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ width: 26, height: 26, borderRadius: "50%", background: tc.grad, border: `1.5px solid ${tc.ring}`, display: "flex", alignItems: "center", justifyContent: "center", font: `600 9.5px ${display}`, color: tc.soft }}>{initials(respCand?.name)}</div>
+              <span style={{ font: `600 12.5px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{respCand?.name?.split(/\s+/).slice(-1)[0] || "Campaign"} responds</span>
+              <span style={{ font: `500 9.5px ${mono}`, color: "#5C5C6E" }}>{fmtDT(resp.created_at)}</span>
+            </div>
+            <div style={{ font: `400 14px/1.65 'Hanken Grotesk',sans-serif`, color: "#C9C9D4" }}>{resp.response_text}</div>
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderTop: "1px solid rgba(255,255,255,.07)", background: "rgba(255,255,255,.015)", flexWrap: "wrap", gap: 10 }}>
+        <FactBar label="CLAIM FACT SCORE" fs={crs.fact_score} />
+        <Link to={`/challenge/${ch.public_receipt_slug || ch.id}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, font: `600 12.5px 'Hanken Grotesk',sans-serif`, color: "#8F8FF9", textDecoration: "none" }}>View public receipt →</Link>
+      </div>
+    </div>
+  );
+}
 
 export function Race() {
   const { id } = useParams();
-  const [activeTab, setActiveTab] = useState<"ads" | "challenges" | "questions">("ads");
-  const { activeCandidateId } = useContext(CandidateContext);
-  const [isIssueChallengeModalOpen, setIsIssueChallengeModalOpen] = useState(false);
-  const [isOutsideAdModalOpen, setIsOutsideAdModalOpen] = useState(false);
-  const [claimingRebuttalForAd, setClaimingRebuttalForAd] = useState<string | null>(null);
+  const isMobile = useIsMobile();
   const { user } = useAuth();
+  const { activeCandidateId, setActiveCandidateId } = useContext(CandidateContext);
+  const { raceDetails, fetchRace } = useArenaStore();
+  const [questions, setQuestions] = useState<any[]>([]);
+  const [tab, setTab] = useState<"wire" | "callouts" | "ads" | "questions">("wire");
+  const [action, setAction] = useState<ActionKey | null>(null);
+  const [activeChallenge, setActiveChallenge] = useState<any | null>(null);
+  const [activeAd, setActiveAd] = useState<any | null>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+  const race = id ? raceDetails[id] : null;
 
-  const { raceDetails, fetchRace, loading } = useArenaStore();
-  const raceData = raceDetails[id!] || null;
+  const fetchQuestions = () => {
+    if (!id) return;
+    api.getQuestions(id).then(data => setQuestions((data?.questions ?? []) as any[])).catch(() => setQuestions([]));
+  };
+
+  const refresh = () => {
+    if (id) fetchRace(id);
+    fetchQuestions();
+  };
 
   useEffect(() => {
-    if (id) fetchRace(id);
+    if (id) {
+      fetchRace(id);
+      fetchQuestions();
+    }
   }, [id]);
 
-  if (loading && !raceData) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <div className="w-6 h-6 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+  if (!race) return <div style={{ padding: 80, textAlign: "center", font: `400 13px ${mono}`, color: "#5C5C6E" }}>Loading race...</div>;
+
+  const cands = race.candidates || [];
+  const dem = cands.find(c => isDem(c.party)) || cands[0];
+  const rep = cands.find(c => isRep(c.party)) || cands.find(c => c.id !== dem?.id);
+  const activeCandidate = activeCandidateId ? cands.find((c: any) => c.id === activeCandidateId) : null;
+  const isCandidateInRace = Boolean(user && activeCandidate);
+  const challenges = race.challenges || [];
+  const responses = race.challengeResponses || [];
+  const ads = race.ads || [];
+  const rebuttals = race.rebuttals || [];
+  const level = /senate|house|president/i.test(race.office) ? "FEDERAL" : "STATE";
+  const hasWire = challenges.length > 0 || ads.length > 0 || questions.length > 0;
+
+  const statsFor = (c: any) => {
+    if (!c) return { filed: 0, answered: 0, recites: 0, received: 0 };
+    const filed = challenges.filter((x: any) => x.challenger_candidate_id === c.id).length;
+    const received = challenges.filter((x: any) => x.target_candidate_id === c.id);
+    const answered = received.filter((x: any) => x.status === "responded").length;
+    const recites = challenges.filter((x: any) => x.challenger_candidate_id === c.id).reduce((s: number, x: any) => s + (x.challenge_recite_summary?.fact_score?.verified_count || 0), 0);
+    return { filed, answered, received: received.length, recites };
+  };
+  const dS = statsFor(dem), rS = statsFor(rep);
+  const TABS: [typeof tab, string, number | null][] = [["wire", "The Wire", null], ["callouts", "Callouts", challenges.length], ["ads", "Ads & Rebuttals", ads.length], ["questions", "Voter Questions", questions.length]];
+
+  const closeModal = (shouldRefresh = false, success?: string) => {
+    setAction(null);
+    setActiveChallenge(null);
+    setActiveAd(null);
+    if (success) setNotice({ kind: "success", text: success });
+    if (shouldRefresh) refresh();
+  };
+
+  const voteQuestion = async (questionId: string) => {
+    try {
+      const result = await api.voteQuestion(questionId);
+      setQuestions(prev => prev.map(q => q.id === questionId ? { ...q, has_voted: result.voted, vote_count: result.vote_count } : q));
+    } catch (err: any) {
+      setNotice({ kind: "error", text: errorText(err) });
+    }
+  };
+
+  const CandCol = ({ c, s, side }: { c: any; s: any; side: "l" | "r" }) => {
+    const pc = partyC(c?.party);
+    const av = <div style={{ flex: "none", width: 76, height: 76, borderRadius: "50%", background: pc.grad, border: `2px solid ${pc.ring}`, boxShadow: `0 0 34px ${pc.ring}`, display: "flex", alignItems: "center", justifyContent: "center", font: `600 22px ${display}`, color: pc.soft }}>{initials(c?.name)}</div>;
+    const body = (
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: side === "l" ? "flex-end" : "flex-start", textAlign: side === "l" ? "right" : "left" }}>
+        <span style={{ font: `600 9.5px ${mono}`, letterSpacing: ".16em", color: pc.text }}>{(c?.party || "candidate").toUpperCase()}</span>
+        <span style={{ font: `600 24px ${display}`, color: "#F2F2F7", lineHeight: 1.1 }}>{c?.name}</span>
+        <span style={{ font: `400 12px/1.5 'Hanken Grotesk',sans-serif`, color: "#9B9BAB", maxWidth: 300 }}>{(c?.biography || "Campaign profile awaiting source-backed activity.").slice(0, 92)}</span>
+        <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
+          <Stat v={s.filed} label="CALLOUTS FILED" align={side === "l" ? "end" : "start"} />
+          <Stat v={`${s.answered}/${s.received || 0}`} label="ANSWERED" color="#34C384" align={side === "l" ? "end" : "start"} />
+          <Stat v={s.recites} label="RECITES VERIF" color="#34C384" align={side === "l" ? "end" : "start"} />
+        </div>
       </div>
     );
-  }
-
-  if (!raceData) return <div className="p-12 text-center text-zinc-500">Race not found.</div>;
-
-  const isCandidateInRace = user && activeCandidateId && raceData.candidates.some(c => c.id === activeCandidateId);
-
-  const refreshRace = () => {
-    if (id) fetchRace(id);
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 18, justifyContent: side === "l" ? "flex-end" : "flex-start", padding: "22px 26px", border: `1px solid ${pc.ring}`, borderRadius: side === "l" ? "16px 4px 4px 16px" : "4px 16px 16px 4px", background: side === "l" ? `linear-gradient(270deg,${pc.ring},transparent)` : `linear-gradient(90deg,${pc.ring},transparent)` }}>
+        {side === "l" ? <>{body}{av}</> : <>{av}{body}</>}
+      </div>
+    );
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-4">
-          <span className="px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-medium uppercase tracking-wider">
-            {raceData.state} {raceData.office}
-          </span>
-          <span className="flex items-center gap-1.5 text-xs text-zinc-400">
-            <Shield className="w-3.5 h-3.5" /> Verified Voters Only
-          </span>
-        </div>
-        <h1 className="text-3xl md:text-4xl font-bold tracking-tight mb-6">{raceData.name}</h1>
+    <div style={{ background: "#08080C", color: "#F2F2F7", fontFamily: "'Hanken Grotesk', system-ui, sans-serif" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: isMobile ? "12px 16px" : "14px 40px", borderBottom: "1px solid rgba(255,255,255,.06)", gap: 12 }}>
+        <Link to="/" style={{ font: `500 12px 'Hanken Grotesk',sans-serif`, color: "#9B9BAB", textDecoration: "none" }}>‹ All races</Link>
+        <span style={{ font: `500 9.5px ${mono}`, letterSpacing: ".12em", color: "#44444F", textAlign: "right" }}>RECORD ID · {String(race.id).toUpperCase()}</span>
+      </div>
 
-        {/* Candidates Overview */}
-        <div className="flex gap-4 overflow-x-auto pb-4 -mx-4 px-4">
-          {raceData.candidates.map(c => (
-            <Link key={c.id} to={`/profile/candidate/${c.id}`} className="flex-shrink-0 w-64 p-4 rounded-xl border border-zinc-800 bg-zinc-900/30 hover:border-zinc-700 transition-colors">
-              <div className="flex items-center gap-3 mb-3">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white ${
-                  c.party === "Democrat" ? "bg-blue-600" : c.party === "Republican" ? "bg-red-600" : "bg-zinc-700"
-                }`}>
-                  {c.name.charAt(0)}
-                </div>
-                <div>
-                  <div className="font-medium text-white">{c.name}</div>
-                  <div className="text-xs text-zinc-400">{c.party}</div>
-                </div>
-              </div>
-              <div className="text-xs text-zinc-500 line-clamp-2">{c.biography}</div>
-            </Link>
+      <div style={{ padding: isMobile ? "34px 16px 28px" : "44px 40px 36px", borderBottom: "1px solid rgba(255,255,255,.08)", background: "linear-gradient(90deg,rgba(77,138,240,.09),transparent 32%,transparent 68%,rgba(229,72,77,.09)),#0A0A10" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginBottom: 24 }}>
+          <span style={{ font: `600 10px ${mono}`, letterSpacing: ".16em", color: "#8F8FF9" }}>{race.state} · {level} · {(race.office || "").toUpperCase()}</span>
+        </div>
+        <div style={{ textAlign: "center", marginBottom: 34 }}>
+          <div style={{ font: `400 ${isMobile ? 32 : 54}px/1.05 ${serif}`, color: "#F2F2F7" }}>{race.name}</div>
+          {(race as any).description && <div style={{ marginTop: 12, font: `400 14px/1.6 'Hanken Grotesk',sans-serif`, color: "#9B9BAB", maxWidth: 640, margin: "12px auto 0" }}>{(race as any).description}</div>}
+        </div>
+        {dem && rep ? (
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 120px 1fr", gap: isMobile ? 12 : 0, alignItems: "stretch", maxWidth: 1080, margin: "0 auto" }}>
+            <CandCol c={dem} s={dS} side="l" />
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <span style={{ font: `italic 400 34px ${serif}`, color: "#5C5C6E" }}>vs</span>
+              <span style={{ font: `600 8.5px ${mono}`, letterSpacing: ".18em", color: "#44444F" }}>{cands.filter((c: any) => c.verification_status === "verified").length} VERIFIED</span>
+            </div>
+            <CandCol c={rep} s={rS} side="r" />
+          </div>
+        ) : (
+          <div style={{ maxWidth: 760, margin: "0 auto" }}>
+            <EmptyPanel
+              title="No claimed campaign profiles yet"
+              detail="This race can go live as a neutral public reference record. Candidate speech and accountability clocks start only after a campaign registers or has a verified served-notice record."
+              action={<ActionButton onClick={() => setAction("claim")}>Claim profile</ActionButton>}
+            />
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: isMobile ? "0 12px" : "0 40px", borderBottom: "1px solid rgba(255,255,255,.08)", overflowX: "auto", whiteSpace: "nowrap" }}>
+        {TABS.map(([k, label, n]) => (
+          <button key={k} onClick={() => setTab(k)} style={{ flexShrink: 0, cursor: "pointer", background: "none", border: "none", font: `${tab === k ? 600 : 500} 13px 'Hanken Grotesk',sans-serif`, color: tab === k ? "#F2F2F7" : "#9B9BAB", padding: isMobile ? "14px 11px 12px" : "16px 16px 14px", borderBottom: tab === k ? "2px solid #6E6EF7" : "2px solid transparent", display: "inline-flex", alignItems: "center", gap: 7 }}>
+            {label}{n != null && <span style={{ font: `600 9.5px ${mono}`, background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.1)", borderRadius: 99, padding: "2px 7px", color: "#9B9BAB" }}>{n}</span>}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ padding: isMobile ? "16px 16px 0" : "20px 40px 0" }}>
+        <div style={{ maxWidth: "none", border: "1px solid rgba(255,255,255,.1)", borderRadius: 14, background: "rgba(255,255,255,.025)", padding: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ font: `700 9.5px ${mono}`, letterSpacing: ".14em", color: "#8F8FF9" }}>STAFF ACTIONS</span>
+            <span style={{ font: "400 12.5px/1.5 'Hanken Grotesk', system-ui, sans-serif", color: "#9B9BAB" }}>
+              {isCandidateInRace ? `Acting as ${activeCandidate?.name}. Public actions are server-gated by campaign staff link.` : "Claim/register a campaign profile before issuing campaign speech or callouts."}
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <ActionButton onClick={() => setAction("claim")} variant={isCandidateInRace ? "secondary" : "primary"}>{isCandidateInRace ? "Add profile" : "Claim profile"}</ActionButton>
+            <ActionButton onClick={() => setAction("challenge")} disabled={!isCandidateInRace || cands.length < 2} variant="secondary">Issue callout</ActionButton>
+            <ActionButton onClick={() => setAction("post-ad")} disabled={!isCandidateInRace} variant="secondary">Post ad</ActionButton>
+            <ActionButton onClick={() => setAction("outside-ad")} disabled={!isCandidateInRace || cands.length < 2} variant="secondary">Link outside ad</ActionButton>
+            <ActionButton onClick={() => setAction("question")} variant="ghost">Ask question</ActionButton>
+          </div>
+        </div>
+        {notice && <div style={{ marginTop: 12 }}><FormMessage notice={notice} /></div>}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) 332px", gap: isMobile ? 18 : 26, padding: isMobile ? "24px 16px 40px" : "30px 40px 44px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+          {tab === "wire" && !hasWire && (
+            <EmptyPanel title="No public activity yet" detail="The race record is live. Callouts, ad pairs, rebuttals, and voter questions will appear here once campaigns and verified users participate." action={<ActionButton onClick={() => setAction(isCandidateInRace ? "challenge" : "claim")}>{isCandidateInRace ? "Issue callout" : "Claim profile"}</ActionButton>} />
+          )}
+          {tab === "callouts" && challenges.length === 0 && (
+            <EmptyPanel title="No callouts filed" detail="Fact-check callouts require a specific claim and an initial source recite before any response clock starts." action={<ActionButton onClick={() => setAction("challenge")} disabled={!isCandidateInRace || cands.length < 2}>Issue callout</ActionButton>} />
+          )}
+          {(tab === "wire" || tab === "callouts") && challenges.map((ch: any) => (
+            <CalloutCard
+              key={ch.id}
+              ch={ch}
+              cands={cands}
+              responses={responses}
+              activeCandidateId={activeCandidateId}
+              onAction={(challenge) => { setActiveChallenge(challenge); setAction("challenge-action"); }}
+            />
           ))}
-        </div>
-      </div>
-
-      {/* Tab Navigation */}
-      <div className="flex gap-6 border-b border-zinc-800 mb-8">
-        <button
-          onClick={() => setActiveTab("ads")}
-          className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "ads"
-              ? "border-indigo-500 text-white"
-              : "border-transparent text-zinc-400 hover:text-zinc-200"
-          }`}
-        >
-          Ads & Rebuttals ({raceData.ads.length})
-        </button>
-        <button
-          onClick={() => setActiveTab("challenges")}
-          className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "challenges"
-              ? "border-indigo-500 text-white"
-              : "border-transparent text-zinc-400 hover:text-zinc-200"
-          }`}
-        >
-          Challenges ({raceData.challenges.length})
-        </button>
-        <button
-          onClick={() => setActiveTab("questions")}
-          className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === "questions"
-              ? "border-indigo-500 text-white"
-              : "border-transparent text-zinc-400 hover:text-zinc-200"
-          }`}
-        >
-          <span className="flex items-center gap-1.5">
-            <HelpCircle className="w-3.5 h-3.5" />
-            Questions
-          </span>
-        </button>
-      </div>
-
-      {/* Ads Tab */}
-      {activeTab === "ads" && (
-        <div className="space-y-8">
-          {isCandidateInRace && activeCandidateId && (
-            <div className="flex justify-end">
-              <button
-                onClick={() => setIsOutsideAdModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors text-sm"
-              >
-                <Plus className="w-4 h-4" />
-                Respond to Outside Ad
-              </button>
-            </div>
+          {tab === "ads" && ads.length === 0 && (
+            <EmptyPanel title="No ad pairs yet" detail="Campaign ads and linked TV/digital ads appear here with reserved response slots for opposing campaigns." action={<ActionButton onClick={() => setAction("outside-ad")} disabled={!isCandidateInRace || cands.length < 2}>Link outside ad</ActionButton>} />
           )}
-          {raceData.ads.length === 0 ? (
-            <EmptyState title="No ads yet" description="Post an ad, or answer an outside TV/digital ad with a side-by-side response." />
-          ) : (
-            raceData.ads.map(ad => {
-              const candidate = raceData.candidates.find(c => c.id === ad.candidate_id);
-              const rebuttal = raceData.rebuttals.find(r => r.parent_ad_id === ad.id);
-              const rebuttalCandidate = rebuttal ? raceData.candidates.find(c => c.id === rebuttal.candidate_id) : null;
-
-              return (
-                <div key={ad.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/50 overflow-hidden">
-                  <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${
-                        candidate?.party === "Democrat" ? "bg-blue-600" : candidate?.party === "Republican" ? "bg-red-600" : "bg-zinc-700"
-                      }`}>
-                        {candidate?.name?.charAt(0) ?? "?"}
-                      </div>
-                      <div>
-                        {candidate ? (
-                          <Link to={`/profile/candidate/${candidate.id}`} className="text-sm font-medium text-white hover:text-indigo-200">
-                            {candidate.name}
-                          </Link>
-                        ) : (
-                          <div className="text-sm font-medium text-white">Unknown candidate</div>
-                        )}
-                        <div className="text-xs text-zinc-500">
-                          {ad.source_type === 'external' ? 'Outside ad being answered' : (ad.title || 'Sponsored Ad')}
-                        </div>
-                      </div>
+          {(tab === "wire" || tab === "ads") && ads.map((ad: any) => {
+            const cand = cands.find((c: any) => c.id === ad.candidate_id);
+            const pc = partyC(cand?.party);
+            const reb = rebuttals.filter((r: any) => r.parent_ad_id === ad.id);
+            const canClaimRebuttal = Boolean(isCandidateInRace && activeCandidateId && ad.candidate_id !== activeCandidateId && !reb.some((r: any) => r.candidate_id === activeCandidateId));
+            const slotCount = Math.max(1, Math.min(Number(ad.max_rebuttals || 3), 3));
+            const adSources = ad.ad_recite_summary;
+            return (
+              <div key={ad.id} style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 16, background: "#0C0C13", overflow: "hidden" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: "1px solid rgba(255,255,255,.07)", background: "rgba(255,255,255,.015)", gap: 12, flexWrap: "wrap" }}>
+                  <span style={{ font: `600 10px ${mono}`, letterSpacing: ".14em", color: "#9B9BAB" }}>AD FLIGHT · {String(ad.id).toUpperCase()}</span>
+                  <span style={{ font: `600 10px ${mono}`, letterSpacing: ".1em", color: "#5C5C6E" }}>SERVED AS A PAIRED UNIT — CLAIM + ANSWER</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
+                  <div style={{ padding: 22, borderRight: isMobile ? "none" : "1px solid rgba(255,255,255,.07)", borderBottom: isMobile ? "1px solid rgba(255,255,255,.07)" : "none", display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 30, height: 30, borderRadius: "50%", background: pc.grad, border: `1.5px solid ${pc.ring}`, display: "flex", alignItems: "center", justifyContent: "center", font: `600 10.5px ${display}`, color: pc.soft }}>{initials(cand?.name)}</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 1 }}><span style={{ font: `600 13px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{cand?.name || "Campaign"} campaign</span><span style={{ font: `500 9px ${mono}`, letterSpacing: ".1em", color: pc.text }}>{(cand?.party || "").toUpperCase().slice(0, 3)} · {ad.source_type === "external" ? "OUTSIDE AD" : "VERIFIED"}</span></div>
                     </div>
-                    <div className="text-xs text-zinc-500">
-                      {ad.start_date ? formatDistanceToNow(new Date(ad.start_date)) + " ago" : ""}
-                    </div>
-                  </div>
-
-                  <div className="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-zinc-800">
-                    {/* Main Ad */}
-                    <div className="p-6">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${
-                          candidate?.party === "Democrat" ? "bg-blue-600" : candidate?.party === "Republican" ? "bg-red-600" : "bg-zinc-700"
-                        }`}>
-                          {candidate?.name?.charAt(0) ?? "?"}
-                        </div>
-                        <div>
-                          {candidate ? (
-                            <Link to={`/profile/candidate/${candidate.id}`} className="text-sm font-medium text-white hover:text-indigo-200">
-                              {candidate.name}
-                            </Link>
-                          ) : (
-                            <div className="text-sm font-medium text-white">Unknown candidate</div>
-                          )}
-                          <div className="text-xs text-indigo-400">
-                            {ad.source_type === 'external' ? 'Outside TV/Digital Ad' : 'Original Ad'}
-                          </div>
-                        </div>
-                      </div>
-                      {ad.source_type === 'external' && (
-                        <div className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                          Shared as context so the response can be seen beside the original claim.
-                        </div>
-                      )}
-                      {ad.media_url ? (
-                        <ContentMedia url={ad.media_url} mediaType={ad.media_type} alt="Ad media" />
-                      ) : ad.ad_content_text ? (
-                        <div className="p-4 rounded-lg bg-zinc-950 border border-zinc-800 mb-4">
-                          <p className="text-zinc-200 text-sm leading-relaxed">{ad.ad_content_text}</p>
-                        </div>
-                      ) : null}
-                      <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-4 border border-zinc-800 p-2 rounded bg-zinc-950/50">
-                        {ad.disclaimer_text}
-                      </div>
-                      <ReactionButtons contentId={ad.id} contentType="ad" />
-                    </div>
-
-                    {/* Rebuttal Slot */}
-                    {rebuttal ? (
-                      <div className="p-6 bg-zinc-900/30">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${
-                            rebuttalCandidate?.party === "Democrat" ? "bg-blue-600" : rebuttalCandidate?.party === "Republican" ? "bg-red-600" : "bg-zinc-700"
-                          }`}>
-                            {rebuttalCandidate?.name?.charAt(0) ?? "?"}
-                          </div>
-                          <div>
-                            {rebuttalCandidate ? (
-                              <Link to={`/profile/candidate/${rebuttalCandidate.id}`} className="text-sm font-medium text-white hover:text-indigo-200">
-                                {rebuttalCandidate.name}
-                              </Link>
-                            ) : (
-                              <div className="text-sm font-medium text-white">Unknown candidate</div>
-                            )}
-                            <div className="text-xs text-emerald-400">Rebuttal</div>
-                          </div>
-                        </div>
-                        {rebuttal.media_url ? (
-                          <ContentMedia url={rebuttal.media_url} alt="Rebuttal media" />
-                        ) : null}
-                        <p className="text-sm text-zinc-300 mb-4 italic">"{rebuttal.response_text}"</p>
-                        <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-4 border border-zinc-800 p-2 rounded bg-zinc-950/50">
-                          {rebuttal.disclaimer_text}
-                        </div>
-                        <ReactionButtons contentId={rebuttal.id} contentType="rebuttal" />
-                      </div>
-                    ) : (
-                      <div className="p-6 bg-zinc-900/30 flex flex-col justify-center items-center text-center min-h-[300px]">
-                        <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center mb-4 text-zinc-500">
-                          <MessageSquare className="w-5 h-5" />
-                        </div>
-                        <h3 className="text-sm font-medium text-white mb-2">Rebuttal Slot Available</h3>
-                        <p className="text-xs text-zinc-500 max-w-[200px] mb-4">
-                          Opposing candidates can respond directly to this ad.
-                        </p>
-                        {isCandidateInRace && ad.candidate_id !== activeCandidateId && (
-                          <button
-                            onClick={() => setClaimingRebuttalForAd(ad.id)}
-                            className="text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
-                          >
-                            Claim Rebuttal Slot
-                          </button>
-                        )}
+                    {ad.title && <div style={{ font: `600 19px/1.3 ${display}`, color: "#F2F2F7" }}>{ad.title}</div>}
+                    {ad.media_url && <ContentMedia url={ad.media_url} mediaType={ad.media_type} alt={ad.title || "Campaign ad media"} compact />}
+                    <div style={{ font: `400 13.5px/1.65 'Hanken Grotesk',sans-serif`, color: "#C9C9D4" }}>{ad.ad_content_text}</div>
+                    {ad.source_type === "external" && (
+                      <div style={{ border: "1px solid rgba(239,182,67,.26)", background: "rgba(239,182,67,.06)", borderRadius: 10, padding: "10px 12px", font: `400 12px/1.45 'Hanken Grotesk',sans-serif`, color: "#D6B464" }}>
+                        Linked TV/digital ad. This is source context, not a fact-check callout. An opposing verified campaign can claim the response slot with video, image, audio, or text.
                       </div>
                     )}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
-
-      {/* Challenges Tab */}
-      {activeTab === "challenges" && (
-        <div className="space-y-6">
-          {isCandidateInRace && (
-            <div className="flex justify-end mb-4">
-              <button
-                onClick={() => setIsIssueChallengeModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Issue Challenge
-              </button>
-            </div>
-          )}
-
-          {raceData.challenges.length === 0 ? (
-            <EmptyState title="No challenges yet" description="Candidates haven't issued any challenges in this race." />
-          ) : (
-            raceData.challenges.map(challenge => {
-              const challenger = raceData.candidates.find(c => c.id === challenge.challenger_candidate_id);
-              const target = raceData.candidates.find(c => c.id === challenge.target_candidate_id);
-              const response = raceData.challengeResponses.find(r => r.challenge_id === challenge.id);
-
-              return (
-                <div key={challenge.id} className="p-6 rounded-2xl border border-zinc-800 bg-zinc-900/50">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="font-medium text-white">{challenger?.name}</span>
-                      <span className="text-zinc-500">challenged</span>
-                      <span className="font-medium text-white">{target?.name}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Link
-                        to={`/challenge/${challenge.public_receipt_slug || challenge.id}`}
-                        className="text-xs font-medium text-indigo-300 hover:text-indigo-200 transition-colors"
-                      >
-                        Receipt
-                      </Link>
-                      <span className={`px-2 py-1 rounded text-[10px] font-medium uppercase tracking-wider ${
-                        challenge.status === "open"
-                          ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                          : challenge.status === "responded"
-                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                          : challenge.status === "expired"
-                          ? "bg-red-500/10 text-red-400 border border-red-500/20"
-                          : challenge.status === "refused"
-                          ? "bg-orange-500/10 text-orange-400 border border-orange-500/20"
-                          : "bg-zinc-800 text-zinc-400"
-                      }`}>
-                        {challenge.status === "expired" ? "NO RESPONSE" : challenge.status === "refused" ? "REFUSED" : challenge.status}
-                      </span>
-                    </div>
-                  </div>
-
-                  {challenge.status === "open" ? (
-                    <>
-                      <div className="pl-4 border-l-2 border-indigo-500/30 py-2 mb-4">
-                        <p className="text-lg text-zinc-200 font-serif italic">"{challenge.challenge_text}"</p>
-                      </div>
-                      {challenge.media_url ? (
-                        <ContentMedia url={challenge.media_url} alt="Challenge media" />
-                      ) : null}
-                      <ChallengeCountdown deadline={challenge.response_deadline} businessDays={challenge.deadline_business_days} />
-                    </>
-                  ) : response ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative mt-4">
-                      <div className="absolute left-1/2 top-0 bottom-0 w-px bg-zinc-800 -translate-x-1/2 hidden md:block" />
-                      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-zinc-900 border border-zinc-800 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-zinc-500 hidden md:block z-10">
-                        VS
-                      </div>
-
-                      <div className="p-6 rounded-xl bg-zinc-950 border border-zinc-800">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${
-                            challenger?.party === "Democrat" ? "bg-blue-600" : challenger?.party === "Republican" ? "bg-red-600" : "bg-zinc-700"
-                          }`}>
-                            {challenger?.name?.charAt(0) ?? "?"}
-                          </div>
-                          <div>
-                            <div className="text-sm font-medium text-white">{challenger?.name}</div>
-                            <div className="text-xs text-amber-400">Challenger</div>
-                          </div>
+                    {adSources?.recite_count > 0 && (
+                      <div style={{ border: "1px solid rgba(110,110,247,.25)", background: "rgba(110,110,247,.06)", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                          <span style={{ font: `600 9px ${mono}`, letterSpacing: ".13em", color: "#8F8FF9" }}>SOURCE CHECK · {adSources.recite_count} RECITES</span>
+                          <span style={{ font: `700 10px ${mono}`, color: "#F2F2F7" }}>{adSources.fact_score?.score ?? 0}/100</span>
                         </div>
-                        <p className="text-lg text-zinc-200 font-serif italic">"{challenge.challenge_text}"</p>
-                        {challenge.media_url ? (
-                          <div className="mt-3">
-                            <ContentMedia url={challenge.media_url} alt="Challenge media" />
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="p-6 rounded-xl bg-zinc-950 border border-zinc-800">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${
-                            target?.party === "Democrat" ? "bg-blue-600" : target?.party === "Republican" ? "bg-red-600" : "bg-indigo-600"
-                          }`}>
-                            {target?.name?.charAt(0) ?? "?"}
-                          </div>
-                          <div>
-                            <div className="text-sm font-medium text-white">{target?.name}</div>
-                            <div className="text-xs text-emerald-400">Response</div>
-                          </div>
-                        </div>
-                        {response.media_url ? (
-                          <ContentMedia url={response.media_url} alt="Response media" />
-                        ) : null}
-                        <p className="text-sm text-zinc-300">"{response.response_text}"</p>
-                        <div className="mt-4">
-                          <ReactionButtons contentId={response.id} contentType="challenge_response" />
-                        </div>
-                      </div>
-                    </div>
-                  ) : challenge.status === "expired" ? (
-                    <>
-                      <div className="pl-4 border-l-2 border-red-500/30 py-2 mb-4">
-                        <p className="text-lg text-zinc-200 font-serif italic">"{challenge.challenge_text}"</p>
-                      </div>
-                      {challenge.media_url ? (
-                        <ContentMedia url={challenge.media_url} alt="Challenge media" />
-                      ) : null}
-                      <div className="flex items-center gap-3 p-4 rounded-lg bg-red-950/30 border border-red-500/20">
-                        <ShieldAlert className="w-6 h-6 text-red-400 flex-shrink-0" />
-                        <div>
-                          <div className="text-sm font-bold text-red-400 uppercase tracking-wider">No Response</div>
-                          <div className="text-xs text-zinc-400 mt-0.5">
-                            {target?.name} did not respond within the {challenge.deadline_business_days || 3} business day deadline.
-                            Challenge expired {challenge.expired_at ? formatDistanceToNow(new Date(challenge.expired_at), { addSuffix: true }) : ""}.
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  ) : challenge.status === "refused" ? (
-                    <>
-                      <div className="pl-4 border-l-2 border-orange-500/30 py-2 mb-4">
-                        <p className="text-lg text-zinc-200 font-serif italic">"{challenge.challenge_text}"</p>
-                      </div>
-                      <div className="flex items-center gap-3 p-4 rounded-lg bg-orange-950/30 border border-orange-500/20">
-                        <ShieldAlert className="w-6 h-6 text-orange-400 flex-shrink-0" />
-                        <div>
-                          <div className="text-sm font-bold text-orange-400 uppercase tracking-wider">Challenge Refused</div>
-                          <div className="text-xs text-zinc-400 mt-0.5">
-                            {target?.name} refused to respond.{challenge.refusal_reason ? ` Reason: "${challenge.refusal_reason}"` : ""}
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="pl-4 border-l-2 border-indigo-500/30 py-2">
-                      <p className="text-lg text-zinc-200 font-serif italic">"{challenge.challenge_text}"</p>
-                    </div>
-                  )}
-                  <div className="mt-4">
-                    <ReactionButtons contentId={challenge.id} contentType="challenge" />
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
-
-      {/* Questions Tab */}
-      {activeTab === "questions" && (
-        <QuestionsTab raceId={id!} />
-      )}
-
-      {/* Issue Challenge Modal */}
-      {isIssueChallengeModalOpen && (
-        <IssueChallengeModal
-          onClose={(refresh) => {
-            setIsIssueChallengeModalOpen(false);
-            if (refresh) refreshRace();
-          }}
-          raceId={id!}
-          challengerId={activeCandidateId!}
-          candidates={raceData.candidates.filter(c => c.id !== activeCandidateId)}
-        />
-      )}
-
-      {/* Outside Ad Response Modal */}
-      {isOutsideAdModalOpen && activeCandidateId && (
-        <OutsideAdResponseModal
-          onClose={(refresh) => {
-            setIsOutsideAdModalOpen(false);
-            if (refresh) refreshRace();
-          }}
-          raceId={id!}
-          responderCandidateId={activeCandidateId}
-          candidates={raceData.candidates.filter(c => c.id !== activeCandidateId)}
-        />
-      )}
-
-      {/* Claim Rebuttal Modal */}
-      {claimingRebuttalForAd && (
-        <ClaimRebuttalModal
-          onClose={(refresh) => {
-            setClaimingRebuttalForAd(null);
-            if (refresh) refreshRace();
-          }}
-          adId={claimingRebuttalForAd}
-          raceId={id!}
-          candidateId={activeCandidateId!}
-        />
-      )}
-    </div>
-  );
-}
-
-// ---- Sub-components ----
-
-function ChallengeCountdown({ deadline, businessDays }: { deadline: string; businessDays?: number }) {
-  const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(timer);
-  }, []);
-
-  if (!deadline) return null;
-  const deadlineMs = new Date(deadline).getTime();
-  const remaining = deadlineMs - now;
-
-  if (remaining <= 0) {
-    return (
-      <div className="flex items-center gap-3 p-4 rounded-lg bg-red-950/30 border border-red-500/20">
-        <Clock className="w-5 h-5 text-red-400 flex-shrink-0" />
-        <div className="text-sm font-medium text-red-400">Deadline has passed</div>
-      </div>
-    );
-  }
-
-  const days = Math.floor(remaining / 86400000);
-  const hours = Math.floor((remaining % 86400000) / 3600000);
-  const minutes = Math.floor((remaining % 3600000) / 60000);
-
-  const totalHours = remaining / 3600000;
-  const color = totalHours > 48 ? "emerald" : totalHours > 24 ? "amber" : "red";
-  const pulse = totalHours < 6;
-
-  return (
-    <div className={`flex items-center gap-3 p-4 rounded-lg border ${
-      color === "emerald" ? "bg-emerald-950/20 border-emerald-500/20" :
-      color === "amber" ? "bg-amber-950/20 border-amber-500/20" :
-      "bg-red-950/30 border-red-500/20"
-    }`}>
-      <Clock className={`w-5 h-5 flex-shrink-0 ${
-        color === "emerald" ? "text-emerald-400" : color === "amber" ? "text-amber-400" : "text-red-400"
-      } ${pulse ? "animate-pulse" : ""}`} />
-      <div className="flex items-center gap-2">
-        <div className="flex gap-1.5">
-          {days > 0 && (
-            <span className={`px-2 py-1 rounded text-sm font-bold ${
-              color === "emerald" ? "bg-emerald-500/10 text-emerald-300" :
-              color === "amber" ? "bg-amber-500/10 text-amber-300" :
-              "bg-red-500/10 text-red-300"
-            }`}>{days}d</span>
-          )}
-          <span className={`px-2 py-1 rounded text-sm font-bold ${
-            color === "emerald" ? "bg-emerald-500/10 text-emerald-300" :
-            color === "amber" ? "bg-amber-500/10 text-amber-300" :
-            "bg-red-500/10 text-red-300"
-          }`}>{hours}h</span>
-          <span className={`px-2 py-1 rounded text-sm font-bold ${
-            color === "emerald" ? "bg-emerald-500/10 text-emerald-300" :
-            color === "amber" ? "bg-amber-500/10 text-amber-300" :
-            "bg-red-500/10 text-red-300"
-          }`}>{minutes}m</span>
-        </div>
-        <span className="text-xs text-zinc-500">remaining ({businessDays || 3} business day deadline)</span>
-      </div>
-    </div>
-  );
-}
-
-function EmptyState({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="p-12 text-center border border-zinc-800 rounded-2xl bg-zinc-900/30">
-      <div className="text-zinc-400 mb-2">{title}</div>
-      <div className="text-sm text-zinc-500">{description}</div>
-    </div>
-  );
-}
-
-type Recite = {
-  id: string;
-  url: string;
-  title: string;
-  publisher?: string | null;
-  source_type: api.ReciteSourceType;
-  stance: api.ReciteStance;
-  status: "pending" | "verified" | "rejected";
-  quote?: string | null;
-  source_published_at?: string | null;
-  accessed_at?: string | null;
-  archive_url?: string | null;
-  evidence_media_url?: string | null;
-  review_note?: string | null;
-  author_name?: string | null;
-  created_at?: string;
-};
-
-type FactScore = {
-  score: number;
-  label: string;
-  confidence: number;
-  verified_count: number;
-  pending_count: number;
-};
-
-const RECITE_SOURCE_OPTIONS: { value: api.ReciteSourceType; label: string }[] = [
-  { value: "official_record", label: "Official record" },
-  { value: "court_record", label: "Court record" },
-  { value: "public_document", label: "Public document" },
-  { value: "research", label: "Research" },
-  { value: "news", label: "News report" },
-  { value: "campaign_material", label: "Campaign material" },
-  { value: "other", label: "Other" },
-];
-
-const RECITE_STANCE_OPTIONS: { value: api.ReciteStance; label: string }[] = [
-  { value: "supports", label: "Supports" },
-  { value: "refutes", label: "Refutes" },
-  { value: "context", label: "Adds context" },
-];
-
-function factScoreLabel(label?: string) {
-  if (label === "source-supported") return "Source-supported";
-  if (label === "source-disputed") return "Source-disputed";
-  if (label === "mixed") return "Mixed recites";
-  return "Under-recited";
-}
-
-function factScoreClass(label?: string) {
-  if (label === "source-supported") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
-  if (label === "source-disputed") return "border-red-500/30 bg-red-500/10 text-red-300";
-  if (label === "mixed") return "border-amber-500/30 bg-amber-500/10 text-amber-300";
-  return "border-zinc-700 bg-zinc-900 text-zinc-300";
-}
-
-function stanceClass(stance: string) {
-  if (stance === "supports") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
-  if (stance === "refutes") return "border-red-500/30 bg-red-500/10 text-red-300";
-  return "border-sky-500/30 bg-sky-500/10 text-sky-300";
-}
-
-function sourceLabel(value: string) {
-  return RECITE_SOURCE_OPTIONS.find(option => option.value === value)?.label || "Other";
-}
-
-function ReactionButtons({ contentId, contentType }: { contentId: string; contentType: api.ReciteContentType }) {
-  const { user } = useAuth();
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const [activeReaction, setActiveReaction] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    api.getReactions(contentType, contentId).then((data: any) => {
-      if (cancelled) return;
-      if (data?.counts) {
-        setCounts(data.counts);
-      }
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [contentId, contentType]);
-
-  const handleReact = async (type: string) => {
-    if (!user) return; // Must be logged in
-    if (activeReaction === type) return; // Already reacted with this type
-
-    const prevReaction = activeReaction;
-    const prevCounts = { ...counts };
-
-    // Optimistic: remove old reaction, add new
-    setActiveReaction(type);
-    setCounts(prev => {
-      const next = { ...prev };
-      if (prevReaction) next[prevReaction] = Math.max((next[prevReaction] || 1) - 1, 0);
-      next[type] = (next[type] || 0) + 1;
-      return next;
-    });
-
-    try {
-      await api.addReaction({ content_type: contentType, content_id: contentId, reaction_type: type });
-    } catch {
-      // Rollback on failure
-      setActiveReaction(prevReaction);
-      setCounts(prevCounts);
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-3">
-        <button
-          onClick={() => handleReact("helpful")}
-          disabled={!user}
-          title={!user ? "Sign in to react" : "Mark as helpful"}
-          aria-label={`Mark as helpful (${counts["helpful"] || 0} votes)`}
-          className={`flex items-center gap-2 text-xs font-medium transition-colors px-3 py-1.5 rounded-full border ${
-            activeReaction === "helpful"
-              ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
-              : "text-zinc-400 hover:text-white bg-zinc-950 border-zinc-800 hover:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-zinc-400"
-          }`}
-        >
-          <ThumbsUp className="w-4 h-4" />
-          <span>{counts["helpful"] || 0}</span>
-        </button>
-        <button
-          onClick={() => handleReact("misleading")}
-          disabled={!user}
-          title={!user ? "Sign in to react" : "Mark as misleading"}
-          aria-label={`Mark as misleading (${counts["misleading"] || 0} votes)`}
-          className={`flex items-center gap-2 text-xs font-medium transition-colors px-3 py-1.5 rounded-full border ${
-            activeReaction === "misleading"
-              ? "bg-red-500/20 text-red-400 border-red-500/30"
-              : "text-zinc-400 hover:text-white bg-zinc-950 border-zinc-800 hover:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-zinc-400"
-          }`}
-        >
-          <ThumbsDown className="w-4 h-4" />
-          <span>{counts["misleading"] || 0}</span>
-        </button>
-      </div>
-      <RecitePanel contentId={contentId} contentType={contentType} />
-    </div>
-  );
-}
-
-function RecitePanel({ contentId, contentType }: { contentId: string; contentType: api.ReciteContentType }) {
-  const { user } = useAuth();
-  const [recites, setRecites] = useState<Recite[]>([]);
-  const [factScore, setFactScore] = useState<FactScore | null>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [reviewingId, setReviewingId] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [formData, setFormData] = useState({
-    url: "",
-    title: "",
-    publisher: "",
-    source_type: "news" as api.ReciteSourceType,
-    stance: "supports" as api.ReciteStance,
-    claim_text: "",
-    quote: "",
-    source_published_at: "",
-    accessed_at: new Date().toISOString().slice(0, 10),
-    archive_url: "",
-  });
-
-  const refreshRecites = async () => {
-    const data = await api.getRecites(contentType, contentId);
-    setRecites(data.recites || []);
-    setFactScore(data.fact_score || null);
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    api.getRecites(contentType, contentId).then((data: any) => {
-      if (cancelled) return;
-      setRecites(data.recites || []);
-      setFactScore(data.fact_score || null);
-    }).catch(() => {
-      if (cancelled) return;
-      setRecites([]);
-      setFactScore(null);
-    });
-    return () => { cancelled = true; };
-  }, [contentId, contentType]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
-    setSubmitting(true);
-    setError("");
-    try {
-      await api.addRecite({
-        content_type: contentType,
-        content_id: contentId,
-        url: formData.url.trim(),
-        title: formData.title.trim(),
-        publisher: formData.publisher.trim() || undefined,
-        source_type: formData.source_type,
-        stance: formData.stance,
-        claim_text: formData.claim_text.trim() || undefined,
-        quote: formData.quote.trim() || undefined,
-        source_published_at: formData.source_published_at || undefined,
-        accessed_at: formData.accessed_at || undefined,
-        archive_url: formData.archive_url.trim() || undefined,
-      });
-      setFormData({
-        url: "",
-        title: "",
-        publisher: "",
-        source_type: "news",
-        stance: "supports",
-        claim_text: "",
-        quote: "",
-        source_published_at: "",
-        accessed_at: new Date().toISOString().slice(0, 10),
-        archive_url: "",
-      });
-      await refreshRecites();
-    } catch (err: any) {
-      setError(err.response?.data?.error || err.message || "Failed to add recite");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleReview = async (reciteId: string, status: "pending" | "verified" | "rejected") => {
-    setReviewingId(reciteId);
-    setError("");
-    try {
-      await api.reviewRecite(reciteId, status);
-      await refreshRecites();
-    } catch (err: any) {
-      setError(err.response?.data?.error || err.message || "Failed to review recite");
-    } finally {
-      setReviewingId(null);
-    }
-  };
-
-  const score = factScore?.score ?? 50;
-  const label = factScoreLabel(factScore?.label);
-  const confidence = factScore?.confidence ?? 0;
-  const canSubmit = Boolean(user && formData.url.trim() && formData.title.trim());
-  const canReview = Boolean(user && ["moderator", "admin", "super_admin"].includes(user.role));
-
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-2 text-xs font-medium text-zinc-300">
-          <FileCheck2 className="w-4 h-4 text-indigo-300" />
-          <span>Fact score</span>
-        </div>
-        <span className={`px-2 py-1 rounded-full border text-xs font-semibold ${factScoreClass(factScore?.label)}`}>
-          {score}/100
-        </span>
-        <span className="text-xs text-zinc-400">{label}</span>
-        <span className="text-xs text-zinc-600">Confidence {confidence}%</span>
-        <span className="text-xs text-zinc-600">{recites.length} recite{recites.length === 1 ? "" : "s"}</span>
-        <button
-          type="button"
-          onClick={() => setExpanded(value => !value)}
-          className="ml-auto text-xs font-medium text-indigo-300 hover:text-indigo-200 transition-colors"
-        >
-          {expanded ? "Close" : user ? "Add or view recites" : "View recites"}
-        </button>
-      </div>
-
-      {expanded && (
-        <div className="mt-3 border-t border-zinc-800 pt-3 space-y-3">
-          {recites.length > 0 ? (
-            <div className="space-y-2">
-              {recites.slice(0, 5).map(recite => (
-                <div
-                  key={recite.id}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3"
-                >
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className={`px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider ${stanceClass(recite.stance)}`}>
-                      {recite.stance}
-                    </span>
-                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{sourceLabel(recite.source_type)}</span>
-                    <span className="text-[10px] text-zinc-500">{recite.status}</span>
-                    {recite.created_at && (
-                      <span className="text-[10px] text-zinc-600">
-                        {formatDistanceToNow(new Date(recite.created_at), { addSuffix: true })}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-start gap-2 min-w-0">
-                    <div className="flex-1 min-w-0">
-                      <a
-                        href={recite.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-start gap-1 text-xs font-medium text-zinc-100 hover:text-indigo-200 break-words"
-                      >
-                        <span>{recite.title}</span>
-                        <ExternalLink className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0 mt-0.5" />
-                      </a>
-                      {recite.publisher && <div className="text-[11px] text-zinc-500 break-words">{recite.publisher}</div>}
-                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-zinc-600">
-                        {recite.source_published_at && <span>Published {recite.source_published_at}</span>}
-                        {recite.accessed_at && <span>Accessed {recite.accessed_at.slice(0, 10)}</span>}
-                        {recite.archive_url && (
-                          <a href={recite.archive_url} target="_blank" rel="noreferrer" className="text-indigo-300 hover:text-indigo-200">
-                            Archived copy
+                        {adSources.top_source && (
+                          <a href={adSources.top_source.url} target="_blank" rel="noreferrer" style={{ font: `500 12px/1.35 'Hanken Grotesk',sans-serif`, color: "#C9C9D4", textDecoration: "none" }}>
+                            {adSources.top_source.publisher || "Source"} · {adSources.top_source.title}
                           </a>
                         )}
                       </div>
-                      {recite.quote && <div className="mt-1 text-[11px] text-zinc-400 line-clamp-2 break-words">"{recite.quote}"</div>}
+                    )}
+                    <div style={{ marginTop: "auto", display: "flex", alignItems: "center", gap: 7, border: "1px solid rgba(255,255,255,.1)", background: "rgba(255,255,255,.025)", borderRadius: 8, padding: "8px 12px" }}><span style={{ font: `500 9.5px ${mono}`, letterSpacing: ".1em", color: "#9B9BAB" }}>ⓘ {ad.disclaimer_text || "PAID FOR BY THE CAMPAIGN · MANDATORY DISCLAIMER"}</span></div>
+                  </div>
+                  <div style={{ padding: 22, background: "rgba(110,110,247,.025)", display: "flex", flexDirection: "column", gap: 10 }}>
+                    <span style={{ font: `600 10px ${mono}`, letterSpacing: ".14em", color: "#8F8FF9" }}>◷ {ad.source_type === "external" ? "OPEN RESPONSE SLOT" : "EQUAL TIME · REBUTTAL WINDOW"}</span>
+                    {Array.from({ length: slotCount }).map((_, i) => {
+                      const r = reb[i];
+                      const rc = r && cands.find((c: any) => c.id === r.candidate_id);
+                      return r ? (
+                        <div key={i} style={{ display: "flex", flexDirection: "column", gap: 10, border: "1px solid rgba(52,195,132,.3)", background: "rgba(52,195,132,.05)", borderRadius: 10, padding: "12px 14px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div style={{ width: 26, height: 26, borderRadius: "50%", background: partyC(rc?.party).grad, border: `1.5px solid ${partyC(rc?.party).ring}`, display: "flex", alignItems: "center", justifyContent: "center", font: `600 9.5px ${display}`, color: partyC(rc?.party).soft }}>{initials(rc?.name)}</div>
+                            <span style={{ font: `600 12px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>Slot {i + 1} — {rc?.name?.split(/\s+/).slice(-1)[0] || "Campaign"}</span>
+                            <span style={{ marginLeft: "auto", font: `700 8.5px ${mono}`, letterSpacing: ".1em", color: "#34C384" }}>ANSWERED</span>
+                          </div>
+                          <div style={{ font: `400 12.5px/1.55 'Hanken Grotesk',sans-serif`, color: "#C9C9D4" }}>{r.response_text}</div>
+                          {r.media_url && <ContentMedia url={r.media_url} alt="Response media" compact />}
+                        </div>
+                      ) : (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, border: "1px dashed rgba(255,255,255,.16)", borderRadius: 10, padding: "12px 14px" }}>
+                          <div style={{ width: 26, height: 26, borderRadius: "50%", border: "1.5px dashed rgba(255,255,255,.2)", display: "flex", alignItems: "center", justifyContent: "center", font: `600 11px ${display}`, color: "#5C5C6E" }}>{i + 1}</div>
+                          <span style={{ font: `500 12px 'Hanken Grotesk',sans-serif`, color: "#9B9BAB" }}>{ad.source_type === "external" ? "Open — respond with video, image, audio, or text" : "Open — any opposing campaign"}</span>
+                          {canClaimRebuttal ? <ActionButton onClick={() => { setActiveAd(ad); setAction("rebuttal"); }} variant="ghost">Respond</ActionButton> : <span style={{ marginLeft: "auto", font: `600 8.5px ${mono}`, letterSpacing: ".1em", color: "#5C5C6E" }}>OPEN</span>}
+                        </div>
+                      );
+                    })}
+                    <div style={{ marginTop: "auto", font: `400 11px/1.55 'Hanken Grotesk',sans-serif`, color: "#5C5C6E" }}>{ad.source_type === "external" ? "Outside ads stay attached to the race record as source links. The reply appears beside the original media once a verified opposing campaign submits it." : "When an Arena ad goes live, opposing candidates get a reserved rebuttal window. Voters always see claim and answer together."}</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {tab === "questions" && questions.length === 0 && (
+            <EmptyPanel title="No questions yet" detail="Verified voters and approved press can ask questions. Top unanswered questions can later feed formal callout suggestions." action={<ActionButton onClick={() => setAction("question")}>Ask question</ActionButton>} />
+          )}
+          {(tab === "wire" || tab === "questions") && (
+            <div style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 16, background: "#0C0C13", overflow: "hidden" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: "1px solid rgba(255,255,255,.07)", background: "rgba(255,255,255,.015)", gap: 12 }}>
+                <span style={{ font: `600 10px ${mono}`, letterSpacing: ".14em", color: "#9B9BAB" }}>VOTER QUESTIONS · RANKED BY UPVOTES</span>
+                <ActionButton onClick={() => setAction("question")} variant="ghost">Submit</ActionButton>
+              </div>
+              {questions.length === 0 && <div style={{ padding: "22px", font: `400 13px 'Hanken Grotesk',sans-serif`, color: "#5C5C6E" }}>No questions yet — be the first to ask the candidates.</div>}
+              {questions.map((q: any) => (
+                <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 22px", borderBottom: "1px solid rgba(255,255,255,.06)" }}>
+                  <button onClick={() => voteQuestion(q.id)} style={{ cursor: "pointer", flex: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, border: `1px solid ${q.has_voted ? "rgba(52,195,132,.55)" : "rgba(110,110,247,.4)"}`, background: q.has_voted ? "rgba(52,195,132,.08)" : "rgba(110,110,247,.08)", borderRadius: 9, padding: "7px 12px" }}>
+                    <span style={{ color: q.has_voted ? "#34C384" : "#8F8FF9" }}>▲</span><span style={{ font: `600 13px ${display}`, color: "#F2F2F7" }}>{q.vote_count ?? 0}</span>
+                  </button>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ font: `500 14.5px/1.45 'Hanken Grotesk',sans-serif`, color: "#E8E8EF" }}>{q.question_text}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, font: `500 9.5px ${mono}`, letterSpacing: ".08em", color: "#5C5C6E" }}>
+                      <span style={{ color: q.source_type === "press" ? "#8F8FF9" : "#5C5C6E" }}>{(q.source_type || "voter").toUpperCase()}{q.author_name ? ` · ${q.author_name.toUpperCase()}` : ""}</span>
                     </div>
                   </div>
-                  {canReview && (
-                    <div className="mt-3 flex flex-wrap gap-2 border-t border-zinc-800 pt-2">
-                      {recite.status !== "verified" && (
-                        <button
-                          type="button"
-                          disabled={reviewingId === recite.id}
-                          onClick={() => handleReview(recite.id, "verified")}
-                          className="px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[11px] font-medium hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
-                        >
-                          Verify
-                        </button>
-                      )}
-                      {recite.status !== "pending" && (
-                        <button
-                          type="button"
-                          disabled={reviewingId === recite.id}
-                          onClick={() => handleReview(recite.id, "pending")}
-                          className="px-2 py-1 rounded-md bg-zinc-800 text-zinc-300 border border-zinc-700 text-[11px] font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-                        >
-                          Mark pending
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        disabled={reviewingId === recite.id}
-                        onClick={() => handleReview(recite.id, "rejected")}
-                        className="px-2 py-1 rounded-md bg-red-500/10 text-red-300 border border-red-500/20 text-[11px] font-medium hover:bg-red-500/20 disabled:opacity-50 transition-colors"
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
-          ) : (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-xs text-zinc-500">
-              No recites yet. Add a link to an official record, article, document, or other source that supports, refutes, or adds context.
-            </div>
-          )}
-
-          {user ? (
-            <form onSubmit={handleSubmit} className="space-y-3">
-              {error && (
-                <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-                  {error}
-                </div>
-              )}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Recite URL</label>
-                  <input
-                    required
-                    inputMode="url"
-                    type="url"
-                    maxLength={1000}
-                    placeholder="https://..."
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                    value={formData.url}
-                    onChange={e => setFormData({ ...formData, url: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Title</label>
-                  <input
-                    required
-                    type="text"
-                    maxLength={240}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                    value={formData.title}
-                    onChange={e => setFormData({ ...formData, title: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Publisher</label>
-                  <input
-                    type="text"
-                    maxLength={120}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                    value={formData.publisher}
-                    onChange={e => setFormData({ ...formData, publisher: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">How it applies</label>
-                  <select
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                    value={formData.stance}
-                    onChange={e => setFormData({ ...formData, stance: e.target.value as api.ReciteStance })}
-                  >
-                    {RECITE_STANCE_OPTIONS.map(option => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Source type</label>
-                  <select
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                    value={formData.source_type}
-                    onChange={e => setFormData({ ...formData, source_type: e.target.value as api.ReciteSourceType })}
-                  >
-                    {RECITE_SOURCE_OPTIONS.map(option => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Relevant quote or note</label>
-                  <textarea
-                    rows={2}
-                    maxLength={1000}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
-                    value={formData.quote}
-                    onChange={e => setFormData({ ...formData, quote: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Publication date</label>
-                  <input
-                    type="date"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                    value={formData.source_published_at}
-                    onChange={e => setFormData({ ...formData, source_published_at: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Accessed date</label>
-                  <input
-                    type="date"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                    value={formData.accessed_at}
-                    onChange={e => setFormData({ ...formData, accessed_at: e.target.value })}
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Archive URL</label>
-                  <input
-                    inputMode="url"
-                    type="url"
-                    maxLength={1000}
-                    placeholder="https://web.archive.org/..."
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                    value={formData.archive_url}
-                    onChange={e => setFormData({ ...formData, archive_url: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  disabled={submitting || !canSubmit}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-xs font-medium rounded-lg transition-colors"
-                >
-                  {submitting ? "Adding..." : "Add recite"}
-                </button>
-              </div>
-            </form>
-          ) : (
-            <a href="/login" className="inline-block text-xs text-indigo-300 hover:text-indigo-200 transition-colors">
-              Sign in to add a recite
-            </a>
           )}
         </div>
-      )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 14, background: "rgba(255,255,255,.02)", overflow: "hidden" }}>
+            <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.08)", font: `600 9.5px ${mono}`, letterSpacing: ".16em", color: "#5C5C6E" }}>RULES OF THIS ARENA</div>
+            {[["RESPONSE SLA", "72 HOURS"], ["REBUTTAL WINDOW", "48 HOURS"], ["REBUTTAL SLOTS", "3 PER AD"], ["CALLOUT CAPS", "3 / DAY · 10 / WK"]].map(([k, v], i, a) => (
+              <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "11px 16px", borderBottom: i < a.length - 1 ? "1px solid rgba(255,255,255,.05)" : "none" }}><span style={{ font: `500 10.5px ${mono}`, color: "#9B9BAB" }}>{k}</span><span style={{ font: `600 10.5px ${mono}`, color: "#F2F2F7" }}>{v}</span></div>
+            ))}
+          </div>
+          <div style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 14, background: "rgba(255,255,255,.02)", overflow: "hidden" }}>
+            <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.08)", font: `600 9.5px ${mono}`, letterSpacing: ".16em", color: "#5C5C6E" }}>TRUST LEDGER · THIS RACE</div>
+            {[[dem, dS], [rep, rS]].filter(([c]) => c).map(([c, s]: any, i) => (
+              <div key={c.id} style={{ padding: "14px 16px", borderBottom: i === 0 ? "1px solid rgba(255,255,255,.05)" : "none", display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><span style={{ font: `600 12px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{c.name?.split(/\s+/).slice(-1)[0]}</span><span style={{ font: `600 11px ${mono}`, color: "#9B9BAB" }}>{s.received ? Math.round((s.answered / s.received) * 100) : 100}% ANS</span></div>
+                <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,.07)", overflow: "hidden" }}><div style={{ width: `${s.received ? (s.answered / s.received) * 100 : 100}%`, height: "100%", background: partyC(c.party).bar }} /></div>
+                <span style={{ font: `500 9px ${mono}`, letterSpacing: ".08em", color: "#5C5C6E" }}>{s.filed} FILED · {s.answered}/{s.received || 0} ANSWERED · {s.recites} RECITES VERIFIED</span>
+              </div>
+            ))}
+            {cands.length === 0 && <div style={{ padding: "14px 16px", font: "400 12px/1.5 'Hanken Grotesk', system-ui, sans-serif", color: "#5C5C6E" }}>No campaign profiles have been claimed for this race.</div>}
+          </div>
+          <div style={{ border: "1px solid rgba(52,195,132,.25)", borderRadius: 14, background: "rgba(52,195,132,.04)", padding: "14px 16px", display: "flex", gap: 11, alignItems: "flex-start" }}>
+            <span style={{ color: "#34C384", flex: "none" }}>◆</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ font: `600 11.5px 'Hanken Grotesk',sans-serif`, color: "#7BE0B2" }}>Tamper-evident record</span>
+              <span style={{ font: `400 11px/1.55 'Hanken Grotesk',sans-serif`, color: "#9B9BAB" }}>Every action in this race is hash-chained in an append-only audit log. Verify any receipt independently.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {action === "claim" && id && <ClaimCandidateModal raceId={id} raceName={race.name} onCreated={(candidateId) => { setActiveCandidateId(candidateId); closeModal(true, "Campaign profile registered for review."); }} onClose={() => closeModal()} />}
+      {action === "challenge" && id && activeCandidateId && <IssueChallengeModal raceId={id} challengerId={activeCandidateId} candidates={cands} onClose={(refreshNeeded, success) => closeModal(refreshNeeded, success)} />}
+      {action === "post-ad" && id && activeCandidateId && <PostAdModal raceId={id} candidateId={activeCandidateId} onClose={(refreshNeeded, success) => closeModal(refreshNeeded, success)} />}
+      {action === "outside-ad" && id && activeCandidateId && <OutsideAdModal raceId={id} responderId={activeCandidateId} candidates={cands} onClose={(refreshNeeded, success) => closeModal(refreshNeeded, success)} />}
+      {action === "question" && id && <AskQuestionModal raceId={id} onClose={(refreshNeeded, success) => closeModal(refreshNeeded, success)} />}
+      {action === "challenge-action" && activeChallenge && activeCandidateId && <ChallengeActionModal challenge={activeChallenge} activeCandidateId={activeCandidateId} onClose={(refreshNeeded, success) => closeModal(refreshNeeded, success)} />}
+      {action === "rebuttal" && id && activeAd && activeCandidateId && <ClaimRebuttalModal ad={activeAd} raceId={id} candidateId={activeCandidateId} onClose={(refreshNeeded, success) => closeModal(refreshNeeded, success)} />}
     </div>
   );
 }
 
-function IssueChallengeModal({
-  onClose, raceId, challengerId, candidates
-}: {
-  onClose: (refresh?: boolean) => void;
-  raceId: string;
-  challengerId: string;
-  candidates: { id: string; name: string }[];
-}) {
-  const [formData, setFormData] = useState({
-    target_candidate_id: candidates.length > 0 ? candidates[0].id : "",
-    challenge_type: "fact_check",
-    claim_text: "",
-    dispute_summary: "",
-    requested_response: "",
-    challenge_text: "",
-    media_url: "",
-    deadline_business_days: 3,
-    recite_url: "",
-    recite_title: "",
-    recite_publisher: "",
-    recite_source_type: "official_record" as api.ReciteSourceType,
-    recite_quote: "",
-    recite_source_published_at: "",
-    recite_accessed_at: new Date().toISOString().slice(0, 10),
-    recite_archive_url: "",
-  });
+function ClaimCandidateModal({ raceId, raceName, onCreated, onClose }: { raceId: string; raceName: string; onCreated: (candidateId: string) => void; onClose: () => void }) {
+  const [name, setName] = useState("");
+  const [party, setParty] = useState("");
+  const [biography, setBiography] = useState("");
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [notice, setNotice] = useState<Notice>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const isFactCheck = formData.challenge_type === "fact_check";
-    if (isFactCheck && (!formData.recite_url.trim() || !formData.recite_title.trim())) {
-      setError("Fact-check callouts need at least one recite URL and title.");
-      return;
-    }
-    if (isFactCheck && formData.claim_text.trim().length < 10) {
-      setError("Fact-check callouts need the specific claim being disputed.");
-      return;
-    }
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
     setSubmitting(true);
-    setError('');
-    const initialRecites = formData.recite_url.trim() && formData.recite_title.trim()
-      ? [{
-          url: formData.recite_url.trim(),
-          title: formData.recite_title.trim(),
-          publisher: formData.recite_publisher.trim() || undefined,
-          source_type: formData.recite_source_type,
-          stance: "supports" as api.ReciteStance,
-          claim_text: formData.claim_text.trim() || undefined,
-          quote: formData.recite_quote.trim() || undefined,
-          source_published_at: formData.recite_source_published_at || undefined,
-          accessed_at: formData.recite_accessed_at || undefined,
-          archive_url: formData.recite_archive_url.trim() || undefined,
-        }]
-      : undefined;
+    setNotice(null);
     try {
+      const candidate = await api.createCandidate({
+        race_id: raceId,
+        name: name.trim(),
+        party: party.trim(),
+        biography: biography.trim() || undefined,
+        website_url: websiteUrl.trim() || undefined,
+      });
+      onCreated(candidate.id);
+    } catch (err: any) {
+      setNotice({ kind: "error", text: errorText(err) });
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalFrame title="Claim campaign profile" kicker={raceName} onClose={onClose}>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+        <FormMessage notice={notice} />
+        <div style={{ border: "1px solid rgba(239,182,67,.28)", background: "rgba(239,182,67,.06)", color: "#D6B464", borderRadius: 10, padding: "10px 12px", font: "400 12.5px/1.5 'Hanken Grotesk', system-ui, sans-serif" }}>
+          This creates a pending campaign profile and staff link. It does not mark the candidate as state ballot-certified.
+        </div>
+        <Field label="Candidate name" required value={name} onChange={setName} placeholder="Full candidate name" />
+        <Field label="Party / affiliation" required value={party} onChange={setParty} placeholder="Democrat, Republican, Independent..." />
+        <TextAreaField label="Short campaign bio" value={biography} onChange={setBiography} maxLength={5000} rows={4} />
+        <Field label="Campaign website" value={websiteUrl} onChange={setWebsiteUrl} type="url" placeholder="https://..." />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <ActionButton onClick={onClose} variant="ghost">Cancel</ActionButton>
+          <ActionButton type="submit" disabled={submitting}>{submitting ? "Saving" : "Register"}</ActionButton>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}
+
+function IssueChallengeModal({ raceId, challengerId, candidates, onClose }: { raceId: string; challengerId: string; candidates: any[]; onClose: (refresh?: boolean, success?: string) => void }) {
+  const targets = candidates.filter(c => c.id !== challengerId);
+  const [targetId, setTargetId] = useState(targets[0]?.id || "");
+  const [challengeType, setChallengeType] = useState("fact_check");
+  const [claimText, setClaimText] = useState("");
+  const [challengeText, setChallengeText] = useState("");
+  const [requestedResponse, setRequestedResponse] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [sourceTitle, setSourceTitle] = useState("");
+  const [publisher, setPublisher] = useState("");
+  const [sourceType, setSourceType] = useState("official_record");
+  const [notice, setNotice] = useState<Notice>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setNotice(null);
+    try {
+      const factCheck = challengeType === "fact_check";
       await api.createChallenge({
         race_id: raceId,
         challenger_candidate_id: challengerId,
-        target_candidate_id: formData.target_candidate_id,
-        challenge_text: formData.challenge_text,
-        challenge_type: formData.challenge_type,
-        claim_text: formData.claim_text.trim() || undefined,
-        dispute_summary: formData.dispute_summary.trim() || undefined,
-        requested_response: formData.requested_response.trim() || undefined,
-        media_url: formData.media_url || undefined,
-        deadline_business_days: formData.deadline_business_days,
-        initial_recites: initialRecites,
+        target_candidate_id: targetId,
+        challenge_type: challengeType,
+        claim_text: claimText.trim() || undefined,
+        challenge_text: challengeText.trim(),
+        requested_response: requestedResponse.trim() || undefined,
+        deadline_business_days: 3,
+        initial_recites: factCheck ? [{
+          url: sourceUrl.trim(),
+          title: sourceTitle.trim(),
+          publisher: publisher.trim() || undefined,
+          source_type: sourceType as any,
+          stance: "supports",
+          claim_text: claimText.trim() || challengeText.trim(),
+        }] : undefined,
       });
-      onClose(true);
+      onClose(true, "Callout filed. The receipt and response clock are now public.");
     } catch (err: any) {
-      setError(err.response?.data?.error || err.message || 'Failed to create challenge');
+      setNotice({ kind: "error", text: errorText(err) });
       setSubmitting(false);
     }
   };
 
-  React.useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
   return (
-    <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => onClose()}>
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-white">Issue Challenge</h2>
-          <button onClick={() => onClose()} className="text-zinc-400 hover:text-white p-1 rounded-md hover:bg-zinc-800 transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {error && (
-          <div className="mx-6 mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
-            {error}
+    <ModalFrame title="Issue callout" kicker="Specific claim + source-backed record" onClose={() => onClose()}>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+        <FormMessage notice={notice} />
+        <SelectField label="Target campaign" required value={targetId} onChange={setTargetId}>
+          {targets.map(c => <option key={c.id} value={c.id}>{c.name} ({c.party})</option>)}
+        </SelectField>
+        <SelectField label="Callout type" value={challengeType} onChange={setChallengeType}>
+          <option value="fact_check">Fact-check callout</option>
+          <option value="policy_question">Policy question</option>
+          <option value="debate_request">Debate request</option>
+          <option value="open">Open callout</option>
+        </SelectField>
+        <TextAreaField label="Specific claim" value={claimText} onChange={setClaimText} required={challengeType === "fact_check"} maxLength={500} rows={3} placeholder="Quote or summarize the claim being challenged." />
+        <TextAreaField label="Challenge statement" value={challengeText} onChange={setChallengeText} required maxLength={2000} rows={5} placeholder="Explain what the target campaign should answer." />
+        <TextAreaField label="Requested response" value={requestedResponse} onChange={setRequestedResponse} maxLength={500} rows={3} placeholder="What would answer this cleanly?" />
+        {challengeType === "fact_check" && (
+          <div style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 12, padding: 14, display: "grid", gap: 12 }}>
+            <span style={{ font: `700 10px ${mono}`, letterSpacing: ".14em", color: "#34C384" }}>INITIAL RECITE REQUIRED</span>
+            <Field label="Source title" required value={sourceTitle} onChange={setSourceTitle} />
+            <Field label="Source URL" required type="url" value={sourceUrl} onChange={setSourceUrl} placeholder="https://..." />
+            <Field label="Publisher" value={publisher} onChange={setPublisher} />
+            <SelectField label="Source type" value={sourceType} onChange={setSourceType}>
+              <option value="official_record">Official record</option>
+              <option value="public_document">Public document</option>
+              <option value="court_record">Court record</option>
+              <option value="research">Research</option>
+              <option value="news">News</option>
+              <option value="campaign_material">Campaign material</option>
+              <option value="other">Other</option>
+            </SelectField>
           </div>
         )}
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Target Candidate</label>
-            <select
-              required
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-              value={formData.target_candidate_id}
-              onChange={e => setFormData({ ...formData, target_candidate_id: e.target.value })}
-            >
-              {candidates.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Challenge Type</label>
-            <select
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-              value={formData.challenge_type}
-              onChange={e => setFormData({ ...formData, challenge_type: e.target.value })}
-            >
-              <option value="fact_check">Fact-check callout</option>
-              <option value="policy_question">Policy question</option>
-              <option value="debate_request">Debate request</option>
-              <option value="open">Open challenge</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Specific Claim</label>
-            <textarea
-              required={formData.challenge_type === "fact_check"}
-              rows={2}
-              minLength={formData.challenge_type === "fact_check" ? 10 : undefined}
-              maxLength={500}
-              placeholder="Quote or summarize the exact claim being disputed."
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
-              value={formData.claim_text}
-              onChange={e => setFormData({ ...formData, claim_text: e.target.value })}
-            />
-            <div className="text-xs text-zinc-500 mt-1">{formData.claim_text.length}/500</div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Challenge Statement</label>
-            <textarea
-              required
-              autoFocus
-              rows={4}
-              minLength={10}
-              maxLength={2000}
-              placeholder="Name the claim and what the other candidate needs to answer."
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
-              value={formData.challenge_text}
-              onChange={e => setFormData({ ...formData, challenge_text: e.target.value })}
-            />
-            <div className="text-xs text-zinc-500 mt-1">{formData.challenge_text.length}/2000</div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Why it's disputed</label>
-              <textarea
-                rows={3}
-                maxLength={1000}
-                placeholder="Explain how the source contradicts or clarifies the claim."
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
-                value={formData.dispute_summary}
-                onChange={e => setFormData({ ...formData, dispute_summary: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-1.5">Requested response</label>
-              <textarea
-                rows={3}
-                maxLength={500}
-                placeholder="What should the tagged campaign answer?"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
-                value={formData.requested_response}
-                onChange={e => setFormData({ ...formData, requested_response: e.target.value })}
-              />
-            </div>
-          </div>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3 space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-white">
-              <FileCheck2 className="w-4 h-4 text-indigo-300" />
-              Initial Recite
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">Recite URL</label>
-              <input
-                required={formData.challenge_type === "fact_check"}
-                inputMode="url"
-                type="url"
-                maxLength={1000}
-                placeholder="https://..."
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                value={formData.recite_url}
-                onChange={e => setFormData({ ...formData, recite_url: e.target.value })}
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">Title</label>
-                <input
-                  required={formData.challenge_type === "fact_check"}
-                  type="text"
-                  maxLength={240}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                  value={formData.recite_title}
-                  onChange={e => setFormData({ ...formData, recite_title: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">Publisher</label>
-                <input
-                  type="text"
-                  maxLength={120}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                  value={formData.recite_publisher}
-                  onChange={e => setFormData({ ...formData, recite_publisher: e.target.value })}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">Source type</label>
-              <select
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                value={formData.recite_source_type}
-                onChange={e => setFormData({ ...formData, recite_source_type: e.target.value as api.ReciteSourceType })}
-              >
-                {RECITE_SOURCE_OPTIONS.map(option => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">Relevant quote or note</label>
-              <textarea
-                rows={2}
-                maxLength={1000}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
-                value={formData.recite_quote}
-                onChange={e => setFormData({ ...formData, recite_quote: e.target.value })}
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">Publication date</label>
-                <input
-                  type="date"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                  value={formData.recite_source_published_at}
-                  onChange={e => setFormData({ ...formData, recite_source_published_at: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">Accessed date</label>
-                <input
-                  type="date"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                  value={formData.recite_accessed_at}
-                  onChange={e => setFormData({ ...formData, recite_accessed_at: e.target.value })}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1">Archive URL</label>
-              <input
-                inputMode="url"
-                type="url"
-                maxLength={1000}
-                placeholder="https://web.archive.org/..."
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                value={formData.recite_archive_url}
-                onChange={e => setFormData({ ...formData, recite_archive_url: e.target.value })}
-              />
-            </div>
-          </div>
-          <MediaUploadField candidateId={challengerId} onMediaUrl={url => setFormData({ ...formData, media_url: url })} label="Attach Evidence (video, image, audio)" />
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Response Deadline</label>
-            <select
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-              value={formData.deadline_business_days}
-              onChange={e => setFormData({ ...formData, deadline_business_days: parseInt(e.target.value) })}
-            >
-              <option value={3}>3 business days (minimum)</option>
-              <option value={5}>5 business days</option>
-              <option value={7}>7 business days</option>
-              <option value={10}>10 business days (maximum)</option>
-            </select>
-            <p className="text-xs text-zinc-500 mt-1">Weekends (Sat/Sun) are not counted. Minimum 3 business days.</p>
-          </div>
-          <div className="pt-4 flex justify-end gap-3">
-            <button type="button" onClick={() => onClose()} className="px-4 py-2 text-sm font-medium text-zinc-300 hover:text-white transition-colors">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              {submitting ? 'Submitting...' : 'Issue Challenge'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <ActionButton onClick={() => onClose()} variant="ghost">Cancel</ActionButton>
+          <ActionButton type="submit" disabled={submitting || !targetId}>{submitting ? "Filing" : "Issue callout"}</ActionButton>
+        </div>
+      </form>
+    </ModalFrame>
   );
 }
 
-function OutsideAdResponseModal({
-  onClose, raceId, responderCandidateId, candidates
-}: {
-  onClose: (refresh?: boolean) => void;
-  raceId: string;
-  responderCandidateId: string;
-  candidates: { id: string; name: string }[];
-}) {
-  const [formData, setFormData] = useState({
-    source_candidate_id: candidates.length > 0 ? candidates[0].id : "",
-    source_title: "",
-    source_media_url: "",
-    source_description: "",
-    response_text: "",
-    response_media_url: "",
-    disclaimer_text: "",
-  });
+function ChallengeActionModal({ challenge, activeCandidateId, onClose }: { challenge: any; activeCandidateId: string; onClose: (refresh?: boolean, success?: string) => void }) {
+  const canRespond = activeCandidateId === challenge.target_candidate_id;
+  const canWithdraw = activeCandidateId === challenge.challenger_candidate_id;
+  const [mode, setMode] = useState<"respond" | "refuse" | "withdraw">(canRespond ? "respond" : "withdraw");
+  const [responseText, setResponseText] = useState("");
+  const [mediaUrl, setMediaUrl] = useState("");
+  const [refusalReason, setRefusalReason] = useState("");
+  const [notice, setNotice] = useState<Notice>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.source_media_url) {
-      setError("Attach or link the outside ad first");
-      return;
-    }
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
     setSubmitting(true);
-    setError("");
+    setNotice(null);
     try {
-      await api.createExternalAdResponse({
-        race_id: raceId,
-        source_candidate_id: formData.source_candidate_id,
-        responder_candidate_id: responderCandidateId,
-        source_title: formData.source_title,
-        source_media_url: formData.source_media_url,
-        source_description: formData.source_description || undefined,
-        response_text: formData.response_text,
-        response_media_url: formData.response_media_url || undefined,
-        disclaimer_text: formData.disclaimer_text,
-      });
-      onClose(true);
+      if (mode === "respond") {
+        await api.respondToChallenge(challenge.id, { response_text: responseText.trim(), media_url: mediaUrl.trim() || undefined });
+        onClose(true, "Response posted to the public receipt.");
+      } else if (mode === "refuse") {
+        await api.refuseChallenge(challenge.id, { refusal_reason: refusalReason.trim() || undefined });
+        onClose(true, "Refusal recorded on the public receipt.");
+      } else {
+        await api.withdrawChallenge(challenge.id);
+        onClose(true, "Callout withdrawn and credit refunded.");
+      }
     } catch (err: any) {
-      setError(err.response?.data?.error || err.message || "Failed to publish response");
+      setNotice({ kind: "error", text: errorText(err) });
       setSubmitting(false);
     }
   };
 
-  React.useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
   return (
-    <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => onClose()}>
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-white">Respond to Outside Ad</h2>
-          <button onClick={() => onClose()} className="text-zinc-400 hover:text-white p-1 rounded-md hover:bg-zinc-800 transition-colors">
-            <X className="w-5 h-5" />
-          </button>
+    <ModalFrame title="Act on callout" kicker={String(challenge.public_receipt_slug || challenge.id).toUpperCase()} onClose={() => onClose()}>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+        <FormMessage notice={notice} />
+        <div style={{ font: `italic 400 20px/1.4 ${serif}`, color: "#E8E8EF", borderLeft: "2px solid #EFB643", paddingLeft: 16 }}>"{challenge.claim_text || challenge.challenge_text}"</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {canRespond && <ActionButton onClick={() => setMode("respond")} variant={mode === "respond" ? "primary" : "secondary"}>Respond</ActionButton>}
+          {canRespond && <ActionButton onClick={() => setMode("refuse")} variant={mode === "refuse" ? "danger" : "secondary"}>Refuse</ActionButton>}
+          {canWithdraw && <ActionButton onClick={() => setMode("withdraw")} variant={mode === "withdraw" ? "danger" : "secondary"}>Withdraw</ActionButton>}
         </div>
-
-        {error && (
-          <div className="mx-6 mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
-            {error}
-          </div>
+        {mode === "respond" && (
+          <>
+            <TextAreaField label="Public response" required value={responseText} onChange={setResponseText} maxLength={5000} rows={6} />
+            <Field label="Response media URL" type="url" value={mediaUrl} onChange={setMediaUrl} placeholder="https://..." />
+          </>
         )}
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-            Use this when an ad is running on TV, streaming, or social media outside Arena and your campaign needs a lower-cost answer beside it.
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Candidate Behind the Outside Ad</label>
-            <select
-              required
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-              value={formData.source_candidate_id}
-              onChange={e => setFormData({ ...formData, source_candidate_id: e.target.value })}
-            >
-              {candidates.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Outside Ad Title</label>
-            <input
-              required
-              type="text"
-              maxLength={200}
-              placeholder="e.g. TV ad about taxes"
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-              value={formData.source_title}
-              onChange={e => setFormData({ ...formData, source_title: e.target.value })}
-            />
-          </div>
-
-          <MediaUploadField
-            candidateId={responderCandidateId}
-            onMediaUrl={url => setFormData({ ...formData, source_media_url: url })}
-            label="Upload or link the outside ad"
-          />
-
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">What claim are you answering?</label>
-            <textarea
-              rows={3}
-              maxLength={5000}
-              placeholder="Briefly describe the claim, attack, or context for voters."
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
-              value={formData.source_description}
-              onChange={e => setFormData({ ...formData, source_description: e.target.value })}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Your Response</label>
-            <textarea
-              required
-              rows={4}
-              maxLength={5000}
-              placeholder="Answer the claim directly with your explanation, evidence, or correction."
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
-              value={formData.response_text}
-              onChange={e => setFormData({ ...formData, response_text: e.target.value })}
-            />
-          </div>
-
-          <MediaUploadField
-            candidateId={responderCandidateId}
-            onMediaUrl={url => setFormData({ ...formData, response_media_url: url })}
-            label="Upload or link your response video/audio"
-          />
-
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Your Disclaimer</label>
-            <input
-              required
-              type="text"
-              maxLength={500}
-              placeholder="Paid for by..."
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-              value={formData.disclaimer_text}
-              onChange={e => setFormData({ ...formData, disclaimer_text: e.target.value })}
-            />
-          </div>
-
-          <div className="pt-2 flex justify-end gap-3">
-            <button type="button" onClick={() => onClose()} className="px-4 py-2 text-sm font-medium text-zinc-300 hover:text-white transition-colors">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting || !formData.source_media_url || candidates.length === 0}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              {submitting ? "Publishing..." : "Publish Side-by-Side Response"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        {mode === "refuse" && <TextAreaField label="Refusal reason" value={refusalReason} onChange={setRefusalReason} maxLength={1000} rows={4} />}
+        {mode === "withdraw" && <div style={{ color: "#D6B464", font: "400 13px/1.55 'Hanken Grotesk', system-ui, sans-serif" }}>Withdrawing an open callout removes it from the active clock and refunds the callout credit.</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <ActionButton onClick={() => onClose()} variant="ghost">Cancel</ActionButton>
+          <ActionButton type="submit" disabled={submitting || (mode === "respond" && responseText.trim().length === 0)} variant={mode === "respond" ? "primary" : "danger"}>{submitting ? "Saving" : mode}</ActionButton>
+        </div>
+      </form>
+    </ModalFrame>
   );
 }
 
-function QuestionsTab({ raceId }: { raceId: string }) {
-  const { user } = useAuth();
-  const [subTab, setSubTab] = useState<"voter" | "press">("voter");
-  const [questions, setQuestions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(false);
-  const [voteError, setVoteError] = useState("");
-  const [askModalOpen, setAskModalOpen] = useState(false);
-  const [pressStatus, setPressStatus] = useState<string | null>(null);
-  const [votingId, setVotingId] = useState<string | null>(null); // lock for rapid-click prevention
+function PostAdModal({ raceId, candidateId, onClose }: { raceId: string; candidateId: string; onClose: (refresh?: boolean, success?: string) => void }) {
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [disclaimer, setDisclaimer] = useState("");
+  const [mediaUrl, setMediaUrl] = useState("");
+  const [notice, setNotice] = useState<Notice>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const fetchQuestions = () => {
-    setLoading(true);
-    setFetchError(false);
-    api.getQuestions(raceId, subTab)
-      .then(data => setQuestions(data.questions || []))
-      .catch(() => { setQuestions([]); setFetchError(true); })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    fetchQuestions();
-  }, [raceId, subTab]);
-
-  // Fetch press credential status for logged-in users
-  useEffect(() => {
-    if (user) {
-      api.getPressStatus()
-        .then(data => setPressStatus(data.credential?.status || null))
-        .catch(() => setPressStatus(null));
-    }
-  }, [user]);
-
-  // Check if user can participate in current sub-tab
-  const isVerifiedVoter = user && user.verification_status === 'verified';
-  const isApprovedPress = pressStatus === 'approved';
-  const canParticipate = subTab === 'voter' ? isVerifiedVoter : isApprovedPress;
-
-  const handleVote = async (questionId: string) => {
-    if (!user) return;
-    if (votingId) return; // Lock: prevent rapid double-click
-    if (!canParticipate) {
-      setVoteError(subTab === 'voter'
-        ? 'You must be a verified voter to vote on voter questions.'
-        : 'You need approved press credentials to vote on press questions.');
-      setTimeout(() => setVoteError(""), 4000);
-      return;
-    }
-    setVoteError("");
-    setVotingId(questionId);
-    // Optimistic update
-    setQuestions(prev => prev.map(q => {
-      if (q.id === questionId) {
-        const newVoted = !q.has_voted;
-        return { ...q, has_voted: newVoted, vote_count: q.vote_count + (newVoted ? 1 : -1) };
-      }
-      return q;
-    }));
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setNotice(null);
     try {
-      const result = await api.voteQuestion(questionId);
-      // Reconcile with server truth
-      setQuestions(prev => prev.map(q =>
-        q.id === questionId ? { ...q, has_voted: result.voted, vote_count: result.vote_count } : q
-      ));
+      await api.createAd({
+        race_id: raceId,
+        candidate_id: candidateId,
+        title: title.trim(),
+        ad_content_text: content.trim(),
+        disclaimer_text: disclaimer.trim(),
+        media_url: mediaUrl.trim() || undefined,
+        media_type: mediaUrl.trim() ? "video" : "text",
+      });
+      onClose(true, "Ad draft created for moderation.");
     } catch (err: any) {
-      const msg = err.response?.data?.error || err.message || 'Vote failed';
-      setVoteError(msg);
-      setTimeout(() => setVoteError(""), 4000);
-      fetchQuestions();
-    } finally {
-      setVotingId(null);
+      setNotice({ kind: "error", text: errorText(err) });
+      setSubmitting(false);
     }
   };
 
   return (
-    <div>
-      {/* Sub-tabs */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <button
-          onClick={() => setSubTab("voter")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            subTab === "voter"
-              ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
-              : "text-zinc-400 hover:text-white border border-zinc-800 hover:border-zinc-700"
-          }`}
-        >
-          Voter Questions
-        </button>
-        <button
-          onClick={() => setSubTab("press")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            subTab === "press"
-              ? "bg-violet-500/20 text-violet-300 border border-violet-500/30"
-              : "text-zinc-400 hover:text-white border border-zinc-800 hover:border-zinc-700"
-          }`}
-        >
-          Press Questions
-        </button>
-        <div className="flex-1" />
-        {user && canParticipate ? (
-          <button
-            onClick={() => setAskModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors flex-shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            Ask a Question
-          </button>
-        ) : user && !canParticipate ? (
-          <div className="text-xs text-zinc-500 max-w-[200px] text-right">
-            {subTab === 'voter'
-              ? 'Verify your voter status to ask questions'
-              : 'Get press credentials to ask questions'}
-          </div>
-        ) : !user ? (
-          <a href="/login" className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors flex-shrink-0">
-            Sign in to ask a question
-          </a>
-        ) : null}
-      </div>
-
-      {/* Vote error toast */}
-      {voteError && (
-        <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          {voteError}
+    <ModalFrame title="Post campaign ad" kicker="Creates moderated ad draft" onClose={() => onClose()}>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+        <FormMessage notice={notice} />
+        <Field label="Ad title" required value={title} onChange={setTitle} />
+        <TextAreaField label="Ad text / transcript" required value={content} onChange={setContent} maxLength={5000} rows={6} />
+        <Field label="Media URL" value={mediaUrl} onChange={setMediaUrl} type="url" placeholder="https://..." />
+        <TextAreaField label="FEC disclaimer" required value={disclaimer} onChange={setDisclaimer} maxLength={500} rows={3} placeholder="Paid for by..." />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <ActionButton onClick={() => onClose()} variant="ghost">Cancel</ActionButton>
+          <ActionButton type="submit" disabled={submitting}>{submitting ? "Creating" : "Create draft"}</ActionButton>
         </div>
-      )}
-
-      {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <div className="w-6 h-6 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
-        </div>
-      ) : fetchError ? (
-        <div className="p-12 text-center border border-red-500/20 rounded-2xl bg-red-950/10">
-          <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-3" />
-          <div className="text-zinc-400 mb-2">Failed to load questions</div>
-          <button onClick={fetchQuestions} className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors">
-            Try again
-          </button>
-        </div>
-      ) : questions.length === 0 ? (
-        <EmptyState
-          title={`No ${subTab} questions yet`}
-          description={subTab === "voter"
-            ? "Verified voters can submit questions for candidates to see."
-            : "Credentialed press members can submit questions here."}
-        />
-      ) : (
-        <div className="space-y-3">
-          {questions.map((q, idx) => (
-            <div
-              key={q.id}
-              className={`flex gap-4 p-4 rounded-xl border transition-colors ${
-                q.is_top
-                  ? "border-amber-500/30 bg-amber-500/5"
-                  : "border-zinc-800 bg-zinc-900/50"
-              }`}
-            >
-              {/* Vote button */}
-              <div className="flex flex-col items-center gap-1 flex-shrink-0">
-                <button
-                  onClick={() => handleVote(q.id)}
-                  disabled={!user || votingId === q.id}
-                  aria-label={q.has_voted ? `Remove vote (${q.vote_count} votes)` : `Upvote question (${q.vote_count} votes)`}
-                  className={`w-11 h-11 rounded-lg flex items-center justify-center transition-colors ${
-                    q.has_voted
-                      ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
-                      : "bg-zinc-950 text-zinc-500 hover:text-white border border-zinc-800 hover:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  }`}
-                  title={!user ? "Sign in to vote" : !canParticipate ? (subTab === 'voter' ? "Verify voter status to vote" : "Press credentials required") : q.has_voted ? "Remove vote" : "Upvote"}
-                >
-                  <ArrowBigUp className={`w-5 h-5 ${q.has_voted ? "fill-indigo-400" : ""}`} />
-                </button>
-                <span className={`text-sm font-bold ${q.has_voted ? "text-indigo-400" : "text-zinc-400"}`}>
-                  {q.vote_count}
-                </span>
-              </div>
-
-              {/* Content */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  {q.is_top && (
-                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                      TOP 5
-                    </span>
-                  )}
-                  <span className="text-xs text-zinc-500">{q.author_name || "Anonymous"}</span>
-                  <span className="text-xs text-zinc-600">
-                    {q.created_at ? formatDistanceToNow(new Date(q.created_at), { addSuffix: true }) : ""}
-                  </span>
-                </div>
-                <p className="text-sm text-zinc-200 leading-relaxed">{q.question_text}</p>
-                {q.media_url && (
-                  <div className="mt-2 max-w-full">
-                    <ContentMedia url={q.media_url} alt="Question media" />
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {askModalOpen && (
-        <AskQuestionModal
-          raceId={raceId}
-          sourceType={subTab}
-          onClose={(refresh) => {
-            setAskModalOpen(false);
-            if (refresh) fetchQuestions();
-          }}
-        />
-      )}
-    </div>
+      </form>
+    </ModalFrame>
   );
 }
 
-function AskQuestionModal({
-  raceId, sourceType, onClose,
-}: {
-  raceId: string;
-  sourceType: "voter" | "press";
-  onClose: (refresh?: boolean) => void;
-}) {
+function OutsideAdModal({ raceId, responderId, candidates, onClose }: { raceId: string; responderId: string; candidates: any[]; onClose: (refresh?: boolean, success?: string) => void }) {
+  const sourceCandidates = candidates.filter(c => c.id !== responderId);
+  const [sourceCandidateId, setSourceCandidateId] = useState(sourceCandidates[0]?.id || "");
+  const [sourceTitle, setSourceTitle] = useState("");
+  const [sourceMediaUrl, setSourceMediaUrl] = useState("");
+  const [sourceDescription, setSourceDescription] = useState("");
+  const [notice, setNotice] = useState<Notice>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setNotice(null);
+    try {
+      await api.createExternalAdSource({
+        race_id: raceId,
+        source_candidate_id: sourceCandidateId,
+        posting_candidate_id: responderId,
+        source_title: sourceTitle.trim(),
+        source_media_url: sourceMediaUrl.trim(),
+        source_description: sourceDescription.trim() || undefined,
+      });
+      onClose(true, "Outside ad linked with an open response slot.");
+    } catch (err: any) {
+      setNotice({ kind: "error", text: errorText(err) });
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalFrame title="Link outside ad" kicker="Creates public source context with an open response slot" onClose={() => onClose()}>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+        <FormMessage notice={notice} />
+        <SelectField label="Candidate behind outside ad" required value={sourceCandidateId} onChange={setSourceCandidateId}>
+          {sourceCandidates.map(c => <option key={c.id} value={c.id}>{c.name} ({c.party})</option>)}
+        </SelectField>
+        <Field label="Outside ad title" required value={sourceTitle} onChange={setSourceTitle} />
+        <Field label="Outside ad media/source URL" required type="url" value={sourceMediaUrl} onChange={setSourceMediaUrl} />
+        <TextAreaField label="Context / source description" value={sourceDescription} onChange={setSourceDescription} maxLength={5000} rows={4} />
+        <div style={{ border: "1px solid rgba(239,182,67,.28)", background: "rgba(239,182,67,.06)", color: "#D6B464", borderRadius: 10, padding: "10px 12px", font: "400 12.5px/1.5 'Hanken Grotesk', system-ui, sans-serif" }}>
+          This posts the original ad as linked source context only. It does not start a callout clock or write a claim verdict. The opposing campaign can claim the response slot with video, image, audio, or text.
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <ActionButton onClick={() => onClose()} variant="ghost">Cancel</ActionButton>
+          <ActionButton type="submit" disabled={submitting || !sourceCandidateId || !sourceMediaUrl.trim()}>{submitting ? "Linking" : "Link outside ad"}</ActionButton>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}
+
+function ClaimRebuttalModal({ ad, raceId, candidateId, onClose }: { ad: any; raceId: string; candidateId: string; onClose: (refresh?: boolean, success?: string) => void }) {
+  const [responseText, setResponseText] = useState("");
+  const [disclaimer, setDisclaimer] = useState("");
+  const [mediaUrl, setMediaUrl] = useState("");
+  const [notice, setNotice] = useState<Notice>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setNotice(null);
+    try {
+      await api.createRebuttal({
+        parent_ad_id: ad.id,
+        race_id: raceId,
+        candidate_id: candidateId,
+        response_text: responseText.trim(),
+        disclaimer_text: disclaimer.trim(),
+        media_url: mediaUrl.trim() || undefined,
+      });
+      onClose(true, "Rebuttal draft created for moderation.");
+    } catch (err: any) {
+      setNotice({ kind: "error", text: errorText(err) });
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalFrame title="Claim rebuttal slot" kicker={String(ad.title || ad.id).toUpperCase()} onClose={() => onClose()}>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+        <FormMessage notice={notice} />
+        <TextAreaField label="Rebuttal response" required value={responseText} onChange={setResponseText} maxLength={5000} rows={6} />
+        <MediaUploadField label="Response media" candidateId={candidateId} onMediaUrl={setMediaUrl} />
+        <TextAreaField label="FEC disclaimer" required value={disclaimer} onChange={setDisclaimer} maxLength={500} rows={3} />
+        <div style={{ font: "400 12px/1.45 'Hanken Grotesk', system-ui, sans-serif", color: "#5C5C6E" }}>
+          Use video for a TV-style response, or attach image/audio/text when that better fits the record.
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <ActionButton onClick={() => onClose()} variant="ghost">Cancel</ActionButton>
+          <ActionButton type="submit" disabled={submitting}>{submitting ? "Submitting" : "Submit rebuttal"}</ActionButton>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}
+
+function AskQuestionModal({ raceId, onClose }: { raceId: string; onClose: (refresh?: boolean, success?: string) => void }) {
+  const [sourceType, setSourceType] = useState("voter");
   const [questionText, setQuestionText] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
+  const [notice, setNotice] = useState<Notice>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
     setSubmitting(true);
-    setError("");
+    setNotice(null);
     try {
       await api.submitQuestion(raceId, {
         source_type: sourceType,
-        question_text: questionText,
-        media_url: mediaUrl || undefined,
+        question_text: questionText.trim(),
+        media_url: mediaUrl.trim() || undefined,
       });
-      onClose(true);
+      onClose(true, "Question submitted.");
     } catch (err: any) {
-      setError(err.response?.data?.error || err.message || "Failed to submit question");
+      setNotice({ kind: "error", text: errorText(err) });
       setSubmitting(false);
     }
   };
 
-  React.useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
   return (
-    <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => onClose()}>
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-white">
-            Ask a {sourceType === "voter" ? "Voter" : "Press"} Question
-          </h2>
-          <button onClick={() => onClose()} className="text-zinc-400 hover:text-white p-1 rounded-md hover:bg-zinc-800 transition-colors">
-            <X className="w-5 h-5" />
-          </button>
+    <ModalFrame title="Ask a question" kicker="Verified voter or approved press" onClose={() => onClose()}>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+        <FormMessage notice={notice} />
+        <SelectField label="Question source" value={sourceType} onChange={setSourceType}>
+          <option value="voter">Verified voter</option>
+          <option value="press">Approved press</option>
+        </SelectField>
+        <TextAreaField label="Question" required value={questionText} onChange={setQuestionText} maxLength={2000} rows={5} placeholder="What should candidates address on the record?" />
+        <Field label="Supporting media URL" value={mediaUrl} onChange={setMediaUrl} type="url" placeholder="https://..." />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <ActionButton onClick={() => onClose()} variant="ghost">Cancel</ActionButton>
+          <ActionButton type="submit" disabled={submitting || questionText.trim().length < 10}>{submitting ? "Submitting" : "Submit question"}</ActionButton>
         </div>
-
-        {error && (
-          <div className="mx-6 mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Your Question</label>
-            <textarea
-              required
-              autoFocus
-              rows={4}
-              minLength={10}
-              maxLength={2000}
-              placeholder="What question do you want candidates to address?"
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
-              value={questionText}
-              onChange={e => setQuestionText(e.target.value)}
-            />
-            <div className="text-xs text-zinc-500 mt-1">{questionText.length}/2000</div>
-          </div>
-          <MediaUploadField onMediaUrl={setMediaUrl} label="Attach Supporting Media (optional)" />
-          <div className="pt-2 text-xs text-zinc-500">
-            {sourceType === "voter"
-              ? "You must be a verified voter to submit. Other verified voters can upvote your question."
-              : "You must have approved press credentials. Other credentialed press can upvote."}
-          </div>
-          <div className="pt-2 flex justify-end gap-3">
-            <button type="button" onClick={() => onClose()} className="px-4 py-2 text-sm font-medium text-zinc-300 hover:text-white transition-colors">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting || questionText.length < 10}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              {submitting ? "Submitting..." : "Submit Question"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function ClaimRebuttalModal({
-  onClose, adId, raceId, candidateId
-}: {
-  onClose: (refresh?: boolean) => void;
-  adId: string;
-  raceId: string;
-  candidateId: string;
-}) {
-  const [responseText, setResponseText] = useState("");
-  const [disclaimerText, setDisclaimerText] = useState("");
-  const [mediaUrl, setMediaUrl] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError('');
-    try {
-      await api.createRebuttal({
-        parent_ad_id: adId,
-        race_id: raceId,
-        candidate_id: candidateId,
-        response_text: responseText,
-        disclaimer_text: disclaimerText,
-        media_url: mediaUrl || undefined,
-      });
-      onClose(true);
-    } catch (err: any) {
-      setError(err.response?.data?.error || err.message || 'Failed to create rebuttal');
-      setSubmitting(false);
-    }
-  };
-
-  React.useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  return (
-    <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => onClose()}>
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-white">Claim Rebuttal Slot</h2>
-          <button onClick={() => onClose()} className="text-zinc-400 hover:text-white p-1 rounded-md hover:bg-zinc-800 transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {error && (
-          <div className="mx-6 mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">Rebuttal Response</label>
-            <textarea
-              required
-              autoFocus
-              rows={4}
-              placeholder="Write your rebuttal to this ad..."
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors resize-none"
-              value={responseText}
-              onChange={e => setResponseText(e.target.value)}
-            />
-          </div>
-          <MediaUploadField candidateId={candidateId} onMediaUrl={setMediaUrl} label="Attach Rebuttal Media (video, image, audio)" />
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1.5">FEC Disclaimer</label>
-            <input
-              required
-              type="text"
-              placeholder="Paid for by..."
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-              value={disclaimerText}
-              onChange={e => setDisclaimerText(e.target.value)}
-            />
-          </div>
-          <div className="pt-4 flex justify-end gap-3">
-            <button type="button" onClick={() => onClose()} className="px-4 py-2 text-sm font-medium text-zinc-300 hover:text-white transition-colors">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              {submitting ? 'Submitting...' : 'Submit Rebuttal'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </ModalFrame>
   );
 }

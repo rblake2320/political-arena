@@ -49,6 +49,7 @@ async function registerUser(label) {
 
 describe('production workflow smoke', () => {
   let raceId;
+  let upcomingRaceId;
   let candidateA;
   let candidateB;
   let staffA;
@@ -61,6 +62,7 @@ describe('production workflow smoke', () => {
     await SELF.fetch(`${BASE}/api/health`);
     const suffix = Date.now().toString(36);
     raceId = `smoke-race-${suffix}`;
+    upcomingRaceId = `smoke-upcoming-race-${suffix}`;
     candidateA = `smoke-cand-a-${suffix}`;
     candidateB = `smoke-cand-b-${suffix}`;
 
@@ -82,6 +84,9 @@ describe('production workflow smoke', () => {
       env.ARENA_DB.prepare(
         `INSERT INTO races (id, name, office, state, district, status) VALUES (?, ?, 'House', 'AL', '99', 'active')`
       ).bind(raceId, `Smoke Race ${suffix}`),
+      env.ARENA_DB.prepare(
+        `INSERT INTO races (id, name, office, state, district, status) VALUES (?, ?, 'House', 'AL', '98', 'upcoming')`
+      ).bind(upcomingRaceId, `Smoke Upcoming Race ${suffix}`),
       env.ARENA_DB.prepare(
         `INSERT INTO candidates (id, race_id, user_id, name, party, verification_status, credit_balance, is_active)
          VALUES (?, ?, ?, 'Smoke Candidate A', 'Democrat', 'verified', 5, 1)`
@@ -115,6 +120,45 @@ describe('production workflow smoke', () => {
     expect(mediaUrls.length).toBeGreaterThan(0);
     expect(mediaUrls.every(url => !url.includes('example.com'))).toBe(true);
     expect(mediaUrls.every(url => /\.(png|mp4)(\?|#|$)/i.test(new URL(url).pathname))).toBe(true);
+  });
+
+  it('seeds source-backed demo recites for race summaries and receipts', async () => {
+    const race = await get('/api/races/race-1');
+    expect(race.status).toBe(200);
+
+    const challenges = race.body.data.challenges || [];
+    const sourceBackedDemoCallouts = challenges.filter(challenge => ['chal-1', 'chal-3', 'chal-4'].includes(challenge.id));
+    expect(sourceBackedDemoCallouts).toHaveLength(3);
+    for (const challenge of sourceBackedDemoCallouts) {
+      expect(challenge.challenge_recite_summary.recite_count).toBeGreaterThan(0);
+      expect(challenge.challenge_recite_summary.fact_score.verified_count).toBeGreaterThan(0);
+      expect(challenge.challenge_recite_summary.top_source).toMatchObject({
+        title: expect.any(String),
+        status: 'verified',
+        url: expect.any(String),
+      });
+    }
+
+    const receipt = await get('/api/challenges/chal-1/receipt');
+    expect(receipt.status).toBe(200);
+    expect(receipt.body.data.recites.length).toBeGreaterThan(0);
+    expect(receipt.body.data.response_recites.length).toBeGreaterThan(0);
+    expect(receipt.body.data.fact_score.verified_count).toBeGreaterThan(0);
+    expect(receipt.body.data.response_fact_score.verified_count).toBeGreaterThan(0);
+    expect(receipt.body.data.recites.some(recite => recite.archive_url && recite.review_note)).toBe(true);
+  });
+
+  it('keeps the default race list active-only while allowing an all-status directory query', async () => {
+    const defaultList = await get('/api/races?limit=100');
+    expect(defaultList.status).toBe(200);
+    expect(defaultList.body.data.races.some(race => race.id === raceId)).toBe(true);
+    expect(defaultList.body.data.races.some(race => race.id === upcomingRaceId)).toBe(false);
+
+    const allList = await get('/api/races?status=all&limit=100');
+    expect(allList.status).toBe(200);
+    expect(allList.body.data.races.some(race => race.id === raceId)).toBe(true);
+    expect(allList.body.data.races.some(race => race.id === upcomingRaceId)).toBe(true);
+    expect(allList.body.data.total).toBeGreaterThan(defaultList.body.data.total);
   });
 
   it('runs the core voter, press, ad, credit, and challenge workflows', async () => {
@@ -195,6 +239,25 @@ describe('production workflow smoke', () => {
     expect(outsideAd.source_type).toBe('external');
     expect(outsideAd.posted_for_rebuttal_by).toBe(candidateB);
     expect(outsideAd.rebuttals.some(item => item.id === outsideResponse.body.data.rebuttal_id && item.candidate_id === candidateB)).toBe(true);
+
+    const outsideSource = await post('/api/ads/external-source', {
+      race_id: raceId,
+      source_candidate_id: candidateA,
+      posting_candidate_id: candidateB,
+      source_title: 'Outside TV Ad With Open Slot',
+      source_media_url: SAMPLE_VIDEO_URL,
+      source_description: 'A linked outside ad that should leave the response slot open.',
+    }, staffB.token);
+    expect(outsideSource.status).toBe(200);
+    expect(outsideSource.body.data.response_slot_open).toBe(true);
+
+    const adsAfterOutsideSource = await get(`/api/ads/races/${raceId}`);
+    expect(adsAfterOutsideSource.status).toBe(200);
+    const openSlotAd = adsAfterOutsideSource.body.data.ads.find(item => item.id === outsideSource.body.data.ad_id);
+    expect(openSlotAd.source_type).toBe('external');
+    expect(openSlotAd.posted_for_rebuttal_by).toBe(candidateB);
+    expect(openSlotAd.max_rebuttals).toBe(1);
+    expect(openSlotAd.rebuttals.length).toBe(0);
 
     const creditsBefore = await get(`/api/credits/${candidateA}`, staffA.token);
     expect(creditsBefore.status).toBe(200);

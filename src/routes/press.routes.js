@@ -14,6 +14,62 @@ import { validate, registerPressSchema } from '../validation.js';
 const router = Router({ base: '/api/press' });
 
 /**
+ * GET /api/press/feed — Public source-link feed for press/public updates
+ */
+router.get('/feed', async (request, env) => {
+  const url = new URL(request.url);
+  const rawLimit = parseInt(url.searchParams.get('limit') || '12', 10);
+  const limit = Math.min(50, Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 12));
+  const source = url.searchParams.get('source');
+  const section = url.searchParams.get('section');
+
+  let sql = `SELECT
+      id,
+      source,
+      source_type,
+      title,
+      url,
+      publisher,
+      section,
+      published_at,
+      first_seen_at,
+      last_seen_at,
+      change_status
+    FROM press_feed_items
+    WHERE is_active = 1`;
+  const binds = [];
+
+  if (source) {
+    sql += ` AND source = ?`;
+    binds.push(source);
+  }
+  if (section) {
+    sql += ` AND section = ?`;
+    binds.push(section);
+  }
+
+  sql += ` ORDER BY COALESCE(published_at, first_seen_at) DESC, first_seen_at DESC LIMIT ?`;
+  binds.push(limit);
+
+  const [itemsResult, sourcesResult] = await Promise.all([
+    env.ARENA_DB.prepare(sql).bind(...binds).all(),
+    env.ARENA_DB.prepare(
+      `SELECT source, publisher, section, COUNT(*) as item_count
+       FROM press_feed_items
+       WHERE is_active = 1
+       GROUP BY source, publisher, section
+       ORDER BY publisher ASC, section ASC`
+    ).all(),
+  ]);
+
+  return successResponse({
+    items: itemsResult.results || [],
+    sources: sourcesResult.results || [],
+    limit,
+  });
+});
+
+/**
  * POST /api/press/register — Submit press credentials
  */
 router.post('/register', async (request, env) => {

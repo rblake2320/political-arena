@@ -7,7 +7,7 @@
  */
 
 import { Router } from 'itty-router';
-import { initDatabase, seedIssueCategories, seedDemoData } from './db.js';
+import { initDatabase, seedIssueCategories, seedPressFeedItems, seedOutsideAdExamples, seedDemoData } from './db.js';
 import { corsHeaders, json } from './middleware.js';
 import { r2MediaResponse } from './media.js';
 
@@ -29,6 +29,7 @@ import auditRoutes from './routes/audit.routes.js';
 import questionsRoutes from './routes/questions.routes.js';
 import pressRoutes from './routes/press.routes.js';
 import creditsRoutes from './routes/credits.routes.js';
+import statsRoutes from './routes/stats.routes.js';
 
 // Main API router
 const api = Router({ base: '/api' });
@@ -51,6 +52,8 @@ api.all('/audit/*', auditRoutes.fetch);
 api.all('/questions/*', questionsRoutes.fetch);
 api.all('/press/*', pressRoutes.fetch);
 api.all('/credits/*', creditsRoutes.fetch);
+api.all('/stats/*', statsRoutes.fetch);
+api.all('/feed/*', statsRoutes.fetch);
 
 // Health check fallback; fetch() handles /api/health directly so bootstrap
 // failures can return degraded health before route dispatch.
@@ -70,14 +73,16 @@ const SECURITY_HEADERS = {
 
 // CSP for HTML documents (the React SPA). Media/images may come from R2 or
 // external https hosts (e.g. campaign photo CDNs), so img/media allow https.
+// The redesign imports Google Fonts; keep that allowance explicit instead of
+// widening all style/font sources.
 const HTML_CSP = [
   "default-src 'self'",
   "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' https: data: blob:",
   "media-src 'self' https: blob:",
   "connect-src 'self'",
-  "font-src 'self' data:",
+  "font-src 'self' data: https://fonts.gstatic.com",
   "object-src 'none'",
   "frame-ancestors 'none'",
   "base-uri 'self'",
@@ -106,6 +111,8 @@ async function bootstrap(env) {
   if (bootstrappedDbs.has(env.ARENA_DB)) return;
   await initDatabase(env.ARENA_DB);
   await seedIssueCategories(env.ARENA_DB);
+  await seedPressFeedItems(env.ARENA_DB);
+  await seedOutsideAdExamples(env.ARENA_DB);
   if (env.ENVIRONMENT !== 'production' || env.SEED_DEMO_DATA === 'true') {
     await seedDemoData(env.ARENA_DB);
   }

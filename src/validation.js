@@ -136,6 +136,16 @@ export const createExternalAdResponseSchema = z.object({
   disclaimer_text: z.string().min(1).max(500),
 });
 
+export const createExternalAdSourceSchema = z.object({
+  race_id: z.string().min(1),
+  source_candidate_id: z.string().min(1),
+  posting_candidate_id: z.string().min(1),
+  source_title: z.string().min(1).max(200),
+  source_media_url: z.string().url().max(1000),
+  source_description: z.string().max(5000).optional(),
+  source_disclaimer_text: z.string().max(500).optional(),
+});
+
 // ===== Challenge Schemas =====
 
 const reciteEvidenceSchema = z.object({
@@ -309,6 +319,38 @@ export const submitPrioritiesSchema = z.object({
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['write_ins', index],
+        message: 'Write-in issues must be unique',
+      });
+    }
+    writeIns.add(normalized);
+  });
+});
+
+export const submitWriteinsSchema = z.object({
+  race_id: z.string().optional().nullable(),
+  writeins: z.array(z.object({
+    writein_text: z.string().trim().min(3).max(200),
+    writein_rank: z.number().int().min(1).max(3),
+  })).max(3),
+}).superRefine((data, ctx) => {
+  const ranks = new Set();
+  const writeIns = new Set();
+
+  data.writeins.forEach((writeIn, index) => {
+    if (ranks.has(writeIn.writein_rank)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['writeins', index, 'writein_rank'],
+        message: 'Write-in ranks must be unique',
+      });
+    }
+    ranks.add(writeIn.writein_rank);
+
+    const normalized = writeIn.writein_text.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (writeIns.has(normalized)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['writeins', index, 'writein_text'],
         message: 'Write-in issues must be unique',
       });
     }

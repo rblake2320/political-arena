@@ -85,9 +85,9 @@ describe('edge-case regressions', () => {
     const categoriesBySlug = Object.fromEntries(
       res.body.data.categories.map(category => [category.slug, category])
     );
-    expect(categoriesBySlug['democracy-elections'].name).toBe('Democracy & Elections');
-    expect(categoriesBySlug['democracy-elections'].description).toBe('Voting rights, election administration, election integrity');
-    expect(categoriesBySlug['reproductive-policy'].name).toBe('Abortion & Reproductive Policy');
+    expect(categoriesBySlug['elections-democracy'].name).toBe('Elections and Democracy');
+    expect(categoriesBySlug['elections-democracy'].description).toBe('Voting rights, election administration, election integrity');
+    expect(categoriesBySlug['reproductive-policy'].name).toBe('Abortion and Reproductive Policy');
     expect(categoriesBySlug['reproductive-policy'].description).toBe('Abortion, contraception, reproductive health policy');
     expect(categoriesBySlug['cost-of-living'].name).toBe('Cost of Living');
   });
@@ -312,6 +312,59 @@ describe('edge-case regressions', () => {
     const aggregate = await get('/api/surveys/priorities/aggregate');
     expect(aggregate.status).toBe(200);
     expect(aggregate.body.data.write_ins.some(writeIn => writeIn.normalized_text === 'local hospital closures')).toBe(true);
+  });
+
+  it('stores ranked voter write-ins through the dedicated endpoint', async () => {
+    const voter = await makeVerifiedVoter('rankedwriteinvoter');
+
+    const tooMany = await post('/api/surveys/my-writeins', {
+      writeins: [
+        { writein_text: 'local hospitals', writein_rank: 1 },
+        { writein_text: 'property insurance', writein_rank: 2 },
+        { writein_text: 'farm water', writein_rank: 3 },
+        { writein_text: 'transit deserts', writein_rank: 4 },
+      ],
+    }, voter.token);
+    expect(tooMany.status).toBe(400);
+
+    const duplicateRank = await post('/api/surveys/my-writeins', {
+      writeins: [
+        { writein_text: 'local hospitals', writein_rank: 1 },
+        { writein_text: 'property insurance', writein_rank: 1 },
+      ],
+    }, voter.token);
+    expect(duplicateRank.status).toBe(400);
+
+    const duplicateText = await post('/api/surveys/my-writeins', {
+      writeins: [
+        { writein_text: 'Local hospitals', writein_rank: 1 },
+        { writein_text: ' local   hospitals ', writein_rank: 2 },
+      ],
+    }, voter.token);
+    expect(duplicateText.status).toBe(400);
+
+    const valid = await post('/api/surveys/my-writeins', {
+      writeins: [
+        { writein_text: ' Property insurance ', writein_rank: 2 },
+        { writein_text: 'Local hospital closures', writein_rank: 1 },
+      ],
+    }, voter.token);
+    expect(valid.status).toBe(200);
+    expect(valid.body.data.saved).toBe(2);
+
+    const mine = await get('/api/surveys/my-writeins', voter.token);
+    expect(mine.status).toBe(200);
+    expect(mine.body.data.writeins.map(writeIn => [writeIn.writein_text, writeIn.writein_rank])).toEqual([
+      ['Local hospital closures', 1],
+      ['Property insurance', 2],
+    ]);
+
+    const cleared = await post('/api/surveys/my-writeins', { writeins: [] }, voter.token);
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.data.saved).toBe(0);
+
+    const empty = await get('/api/surveys/my-writeins', voter.token);
+    expect(empty.body.data.writeins).toEqual([]);
   });
 
   it('rejects subscriptions to missing targets and keeps duplicate detection', async () => {

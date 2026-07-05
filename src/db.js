@@ -64,6 +64,15 @@ export async function runRuntimeMigrations(db) {
   }
   if (challengeColumnMigrations.length > 0) await db.batch(challengeColumnMigrations);
 
+  const missingReceiptSlug = await db.prepare(
+    `SELECT id FROM challenges WHERE public_receipt_slug IS NULL OR public_receipt_slug = '' LIMIT 1`
+  ).first();
+  if (missingReceiptSlug) {
+    await db.batch([
+      db.prepare(`UPDATE challenges SET public_receipt_slug = id WHERE public_receipt_slug IS NULL OR public_receipt_slug = ''`),
+    ]);
+  }
+
   const reciteColumnsResult = await db.prepare(`PRAGMA table_info(recites)`).all();
   const reciteColumns = new Set((reciteColumnsResult.results || []).map(c => c.name));
   const reciteColumnMigrations = [];
@@ -89,6 +98,14 @@ export async function runRuntimeMigrations(db) {
   if (!issueCategoryColumns.has('parent_category_id')) {
     await db.batch([
       db.prepare(`ALTER TABLE issue_categories ADD COLUMN parent_category_id TEXT REFERENCES issue_categories(id)`),
+    ]);
+  }
+
+  const voterWriteinColumnsResult = await db.prepare(`PRAGMA table_info(voter_writeins)`).all();
+  const voterWriteinColumns = new Set((voterWriteinColumnsResult.results || []).map(c => c.name));
+  if (!voterWriteinColumns.has('writein_rank')) {
+    await db.batch([
+      db.prepare(`ALTER TABLE voter_writeins ADD COLUMN writein_rank INTEGER NOT NULL DEFAULT 1 CHECK(writein_rank BETWEEN 1 AND 3)`),
     ]);
   }
 
@@ -161,6 +178,33 @@ export async function runRuntimeMigrations(db) {
         `CREATE UNIQUE INDEX IF NOT EXISTS idx_vsr_user_survey_question
          ON voter_survey_responses(user_id, survey_id, question_id)`
       ),
+    ]);
+  }
+
+  const pressFeedResult = await db.prepare(`PRAGMA table_info(press_feed_items)`).all();
+  if ((pressFeedResult.results || []).length === 0) {
+    await db.batch([
+      db.prepare(`CREATE TABLE IF NOT EXISTS press_feed_items (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        source_type TEXT NOT NULL DEFAULT 'news' CHECK(source_type IN ('official_record','news','press_release')),
+        title TEXT NOT NULL,
+        url TEXT NOT NULL UNIQUE,
+        publisher TEXT NOT NULL,
+        section TEXT,
+        published_at TEXT,
+        first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        content_hash TEXT,
+        change_status TEXT NOT NULL DEFAULT 'new' CHECK(change_status IN ('new','updated','removed')),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_feed_active_published
+        ON press_feed_items(is_active, published_at DESC, first_seen_at DESC)`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_feed_source
+        ON press_feed_items(source, section)`),
     ]);
   }
 }
@@ -467,7 +511,8 @@ export async function initDatabase(db) {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id),
       race_id TEXT,
-      writein_text TEXT NOT NULL CHECK(length(writein_text) BETWEEN 3 AND 200),
+      writein_text TEXT NOT NULL CHECK(length(writein_text) <= 200),
+      writein_rank INTEGER NOT NULL CHECK(writein_rank BETWEEN 1 AND 3),
       normalized_text TEXT NOT NULL,
       party_affiliation TEXT,
       jurisdiction_state TEXT,
@@ -656,6 +701,25 @@ export async function initDatabase(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
 
+    // ========== PUBLIC PRESS / NEWS FEED ==========
+    db.prepare(`CREATE TABLE IF NOT EXISTS press_feed_items (
+      id TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      source_type TEXT NOT NULL DEFAULT 'news' CHECK(source_type IN ('official_record','news','press_release')),
+      title TEXT NOT NULL,
+      url TEXT NOT NULL UNIQUE,
+      publisher TEXT NOT NULL,
+      section TEXT,
+      published_at TEXT,
+      first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      content_hash TEXT,
+      change_status TEXT NOT NULL DEFAULT 'new' CHECK(change_status IN ('new','updated','removed')),
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
     // ========== RATE LIMITING ==========
     db.prepare(`CREATE TABLE IF NOT EXISTS auth_rate_limits (
       key TEXT PRIMARY KEY,
@@ -755,6 +819,8 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_question_votes_question ON question_votes(question_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_question_votes_user ON question_votes(user_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_creds_user ON press_credentials(user_id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_feed_active_published ON press_feed_items(is_active, published_at DESC, first_seen_at DESC)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_feed_source ON press_feed_items(source, section)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_credit_tx_candidate ON credit_transactions(candidate_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_challenges_candidate_created ON challenges(challenger_candidate_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_users_password_reset ON users(password_reset_token_hash, password_reset_expires_at)`),
@@ -763,7 +829,7 @@ export async function initDatabase(db) {
   ]);
 
   initializedDbs.add(db);
-  console.log('Arena database initialized: 32 tables + 57 indexes');
+  console.log('Arena database initialized');
 }
 
 // Seed issue categories (idempotent)
@@ -781,8 +847,8 @@ export async function seedIssueCategories(db) {
     { id: 'cat-10', name: 'Technology & AI', slug: 'technology', description: 'Tech regulation, AI policy, digital privacy', icon: 'cpu', display_order: 10 },
     { id: 'cat-11', name: 'Infrastructure', slug: 'infrastructure', description: 'Roads, bridges, broadband, public transit', icon: 'construction', display_order: 11 },
     { id: 'cat-12', name: 'Social Security & Retirement', slug: 'social-security', description: 'Social Security, Medicare, retirement benefits', icon: 'shield-check', display_order: 12 },
-    { id: 'cat-13', name: 'Democracy & Elections', slug: 'democracy-elections', description: 'Voting rights, election administration, election integrity', icon: 'vote', display_order: 13 },
-    { id: 'cat-14', name: 'Abortion & Reproductive Policy', slug: 'reproductive-policy', description: 'Abortion, contraception, reproductive health policy', icon: 'stethoscope', display_order: 14 },
+    { id: 'cat-13', name: 'Elections and Democracy', slug: 'elections-democracy', description: 'Voting rights, election administration, election integrity', icon: 'vote', display_order: 13 },
+    { id: 'cat-14', name: 'Abortion and Reproductive Policy', slug: 'reproductive-policy', description: 'Abortion, contraception, reproductive health policy', icon: 'stethoscope', display_order: 14 },
     { id: 'cat-15', name: 'Cost of Living', slug: 'cost-of-living', description: 'Prices, inflation, household expenses, affordability', icon: 'wallet', display_order: 15 },
   ];
 
@@ -800,6 +866,261 @@ export async function seedIssueCategories(db) {
          is_active = 1`
     ).bind(cat.id, cat.name, cat.slug, cat.description, cat.icon, cat.display_order, cat.parent_category_id || null).run();
   }
+}
+
+export async function seedPressFeedItems(db) {
+  const items = [
+    {
+      id: 'pressfeed-newser-politics-burgum-algae-20260705',
+      source: 'newser',
+      source_type: 'news',
+      title: "Burgum Says Algae Is 'All Gone'",
+      url: 'https://www.newser.com/story/392274/burgum-declares-algae-all-gone-from-reflecting-pool.html',
+      publisher: 'Newser',
+      section: 'Politics',
+      published_at: '2026-07-05T11:37:00-05:00',
+      content_hash: 'newser:392274:Burgum Says Algae Is All Gone',
+    },
+    {
+      id: 'pressfeed-newser-politics-pelosi-hit-run-20260705',
+      source: 'newser',
+      source_type: 'news',
+      title: "Pelosi's Husband Faces Hit-and-Run Charges",
+      url: 'https://www.newser.com/story/392262/pelosis-husband-faces-hit-and-run-charges.html',
+      publisher: 'Newser',
+      section: 'Politics',
+      published_at: '2026-07-05T06:07:00-05:00',
+      content_hash: 'newser:392262:Pelosis Husband Faces Hit-and-Run Charges',
+    },
+    {
+      id: 'pressfeed-newser-politics-epstein-files-20260704',
+      source: 'newser',
+      source_type: 'news',
+      title: 'DOJ Filing Opposes Unredacting Epstein Files',
+      url: 'https://www.newser.com/story/392244/doj-filing-opposes-unredacting-epstein-files.html',
+      publisher: 'Newser',
+      section: 'Politics',
+      published_at: '2026-07-04T13:05:00-05:00',
+      content_hash: 'newser:392244:DOJ Filing Opposes Unredacting Epstein Files',
+    },
+    {
+      id: 'pressfeed-san-politics-student-loans-20260630',
+      source: 'straight_arrow_news',
+      source_type: 'news',
+      title: 'New Trump admin rules tie federal student loans to graduate earnings',
+      url: 'https://san.com/cc/new-trump-admin-rules-tie-federal-student-loans-to-how-much-money-graduates-earn/',
+      publisher: 'Straight Arrow News',
+      section: 'Politics',
+      published_at: '2026-06-30T12:10:00-05:00',
+      content_hash: 'san:student-loans:20260630',
+    },
+    {
+      id: 'pressfeed-san-politics-alaska-senate-ballot-20260705',
+      source: 'straight_arrow_news',
+      source_type: 'news',
+      title: 'Both Dan Sullivans can appear in contested Alaska Senate race',
+      url: 'https://san.com/cc/both-dan-sullivans-can-appear-in-contested-alaska-senate-race-though-their-names-may-look-different/',
+      publisher: 'Straight Arrow News',
+      section: 'Politics',
+      published_at: '2026-07-05T10:00:00-05:00',
+      content_hash: 'san:alaska-senate-ballot:20260705',
+    },
+    {
+      id: 'pressfeed-san-oversight-mk-ultra-20260630',
+      source: 'straight_arrow_news',
+      source_type: 'news',
+      title: "Congress tries to crack open CIA's secret MKUltra program",
+      url: 'https://san.com/cc/congress-tries-to-crack-open-cias-secret-mkultra-program/',
+      publisher: 'Straight Arrow News',
+      section: 'Government Oversight',
+      published_at: '2026-06-30T12:00:00-05:00',
+      content_hash: 'san:mkultra:20260630',
+    },
+    {
+      id: 'pressfeed-san-oversight-ukraine-migs-20260702',
+      source: 'straight_arrow_news',
+      source_type: 'news',
+      title: "Polish minister says Ukraine stalled 'MiGs for drones' deal",
+      url: 'https://san.com/cc/polish-minister-says-ukraine-stalled-migs-for-drones-deal/',
+      publisher: 'Straight Arrow News',
+      section: 'Government Oversight',
+      published_at: '2026-07-02T12:00:00-05:00',
+      content_hash: 'san:ukraine-migs:20260702',
+    },
+  ];
+
+  await db.batch(items.map(item =>
+    db.prepare(
+      `INSERT INTO press_feed_items
+       (id, source, source_type, title, url, publisher, section, published_at, content_hash, change_status, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', 1)
+       ON CONFLICT(url) DO UPDATE SET
+         source = excluded.source,
+         source_type = excluded.source_type,
+         title = excluded.title,
+         publisher = excluded.publisher,
+         section = excluded.section,
+         published_at = excluded.published_at,
+         content_hash = excluded.content_hash,
+         last_seen_at = datetime('now'),
+         change_status = CASE
+           WHEN press_feed_items.content_hash IS NOT excluded.content_hash THEN 'updated'
+           ELSE press_feed_items.change_status
+         END,
+         is_active = 1,
+         updated_at = datetime('now')`
+    ).bind(
+      item.id,
+      item.source,
+      item.source_type,
+      item.title,
+      item.url,
+      item.publisher,
+      item.section,
+      item.published_at,
+      item.content_hash,
+    )
+  ));
+}
+
+export async function seedOutsideAdExamples(db) {
+  const examples = [
+    {
+      id: 'ad-ext-roy-cooper-easier-2026',
+      raceId: 'race-2026-NC-S',
+      candidateId: 'cand-fec-s6nc00407',
+      title: 'Roy Cooper releases first TV ad of Senate campaign',
+      mediaUrl: 'https://www.youtube.com/watch?v=UBZrOCTc4v0',
+      sourceUrl: 'https://roycooper.com/new-tv-ad-roy-cooper-releases-first-tv-ad-of-campaign-highlighting-how-hell-work-to-make-life-more-affordable-for-north-carolinians/',
+      sourceLabel: 'Official campaign TV ad link',
+      description: 'Outside TV/digital ad linked as source context. The original video remains hosted by the campaign; Arena provides an open response slot for eligible opposing campaigns.',
+      disclaimer: 'Outside ad linked for response context; original paid-for disclaimer remains with source media.',
+    },
+    {
+      id: 'ad-ext-andy-barr-stop-dei-2026',
+      raceId: 'race-2026-KY-S',
+      candidateId: 'cand-fec-s6ky00286',
+      title: 'Andy Barr for Senate: Stop DEI Ad',
+      mediaUrl: 'https://www.youtube.com/watch?v=P8dAXjJ-6Eo',
+      sourceUrl: 'https://barrforsenate.com/press-release/barr-stop-dei-ad-inflames-woke-leftists-kicks-off-1m-buy-throughout-the-commonwealth/',
+      sourceLabel: 'Official campaign TV ad link',
+      description: 'Outside TV/digital ad linked as source context. The original video remains hosted by the campaign; Arena provides an open response slot for eligible opposing campaigns.',
+      disclaimer: 'Outside ad linked for response context; original paid-for disclaimer remains with source media.',
+    },
+  ];
+
+  const candidateIds = examples.map(example => example.candidateId);
+  const placeholders = candidateIds.map(() => '?').join(',');
+  const candidates = await db.prepare(
+    `SELECT id FROM candidates WHERE id IN (${placeholders}) AND is_active = 1`
+  ).bind(...candidateIds).all();
+  const existingCandidates = new Set((candidates.results || []).map(candidate => candidate.id));
+  const loadable = examples.filter(example => existingCandidates.has(example.candidateId));
+  if (loadable.length === 0) return;
+
+  await db.batch(loadable.map(example =>
+    db.prepare(
+      `INSERT OR IGNORE INTO ad_flights
+       (id, race_id, candidate_id, created_by, title, media_url, media_type, ad_content_text, disclaimer_text,
+        source_type, source_url, source_label, status, approved_at, activated_at, rebuttal_window_expires, max_rebuttals)
+       VALUES (?, ?, ?, 'system', ?, ?, 'video', ?, ?, 'external', ?, ?, 'active', datetime('now'), datetime('now'), NULL, 1)`
+    ).bind(
+      example.id,
+      example.raceId,
+      example.candidateId,
+      example.title,
+      example.mediaUrl,
+      example.description,
+      example.disclaimer,
+      example.sourceUrl,
+      example.sourceLabel,
+    )
+  ));
+
+  const existingAdIds = new Set();
+  const adResult = await db.prepare(
+    `SELECT id FROM ad_flights WHERE id IN (${loadable.map(() => '?').join(',')})`
+  ).bind(...loadable.map(example => example.id)).all();
+  for (const row of adResult.results || []) existingAdIds.add(row.id);
+
+  const recites = [
+    {
+      id: 'rec-ad-ext-roy-cooper-official-release',
+      contentId: 'ad-ext-roy-cooper-easier-2026',
+      url: 'https://roycooper.com/new-tv-ad-roy-cooper-releases-first-tv-ad-of-campaign-highlighting-how-hell-work-to-make-life-more-affordable-for-north-carolinians/',
+      title: 'Official campaign release for Roy Cooper first TV ad',
+      publisher: 'Cooper for North Carolina',
+      sourceType: 'campaign_material',
+      stance: 'context',
+      claimText: 'The linked media is presented as Roy Cooper campaign advertising in the North Carolina Senate race.',
+      quote: 'The campaign release identifies the ad as a TV, streaming, and digital buy for the Senate campaign.',
+      sourcePublishedAt: '2026-06-01',
+      archiveUrl: 'https://arena.vote/demo-archive/roy-cooper-first-tv-ad',
+    },
+    {
+      id: 'rec-ad-ext-roy-cooper-youtube',
+      contentId: 'ad-ext-roy-cooper-easier-2026',
+      url: 'https://www.youtube.com/watch?v=UBZrOCTc4v0',
+      title: 'Roy Cooper first Senate TV ad video',
+      publisher: 'Roy Cooper campaign YouTube channel',
+      sourceType: 'campaign_material',
+      stance: 'context',
+      claimText: 'The video link is the campaign-hosted media source for the ad.',
+      quote: 'The video page hosts the ad media linked into the race record.',
+      sourcePublishedAt: '2026-06-01',
+      archiveUrl: 'https://arena.vote/demo-archive/roy-cooper-youtube-ad',
+    },
+    {
+      id: 'rec-ad-ext-andy-barr-official-release',
+      contentId: 'ad-ext-andy-barr-stop-dei-2026',
+      url: 'https://barrforsenate.com/press-release/barr-stop-dei-ad-inflames-woke-leftists-kicks-off-1m-buy-throughout-the-commonwealth/',
+      title: 'Official campaign release for Andy Barr Stop DEI ad',
+      publisher: 'Andy Barr for Senate',
+      sourceType: 'campaign_material',
+      stance: 'context',
+      claimText: 'The linked media is presented as Andy Barr campaign advertising in the Kentucky Senate race.',
+      quote: 'The campaign release describes the ad rollout across broadcast, cable, and digital platforms.',
+      sourcePublishedAt: '2026-02-09',
+      archiveUrl: 'https://arena.vote/demo-archive/andy-barr-stop-dei-release',
+    },
+    {
+      id: 'rec-ad-ext-andy-barr-pbs-context',
+      contentId: 'ad-ext-andy-barr-stop-dei-2026',
+      url: 'https://www.pbs.org/video/andy-barr-releases-first-us-senate-campaign-ad-r6jgn5/',
+      title: 'Kentucky Edition segment on Andy Barr Senate campaign ad',
+      publisher: 'PBS Kentucky Edition',
+      sourceType: 'news',
+      stance: 'context',
+      claimText: 'A news segment provides independent context for the ad and public reactions.',
+      quote: 'The segment reports that Barr released his first U.S. Senate campaign ad and describes responses from Democratic candidates.',
+      sourcePublishedAt: '2026-02-09',
+      archiveUrl: 'https://arena.vote/demo-archive/pbs-andy-barr-ad-context',
+    },
+  ].filter(recite => existingAdIds.has(recite.contentId));
+
+  if (recites.length === 0) return;
+
+  await db.batch(recites.map(recite =>
+    db.prepare(
+      `INSERT OR IGNORE INTO recites
+       (id, content_type, content_id, user_id, url, title, publisher, source_type, stance, claim_text, quote,
+        source_published_at, accessed_at, archive_url, status, reviewed_by, reviewed_at, review_note)
+       VALUES (?, 'ad', ?, 'system', ?, ?, ?, ?, ?, ?, ?, ?, '2026-07-05', ?, 'verified', 'system', '2026-07-05T00:00:00.000Z', ?)`
+    ).bind(
+      recite.id,
+      recite.contentId,
+      recite.url,
+      recite.title,
+      recite.publisher,
+      recite.sourceType,
+      recite.stance,
+      recite.claimText,
+      recite.quote,
+      recite.sourcePublishedAt,
+      recite.archiveUrl,
+      'Seeded source metadata for linked outside-ad examples; context only, not a verdict on ad truth.'
+    )
+  ));
 }
 
 async function repairDemoMediaData(db) {
@@ -836,6 +1157,305 @@ async function repairDemoMediaData(db) {
   ]);
 }
 
+async function seedDemoQuestions(db) {
+  const demoRaceCount = await db.prepare(
+    `SELECT COUNT(*) as count FROM races WHERE id IN ('race-1', 'race-2')`
+  ).first();
+  if (Number(demoRaceCount?.count || 0) < 2) return;
+
+  const users = [
+    ['demo-voter-al', 'demo-voter-al@arena.internal', 'demo_voter_al', 'Verified Alabama Voter'],
+    ['demo-voter-tx', 'demo-voter-tx@arena.internal', 'demo_voter_tx', 'Verified Texas Voter'],
+    ['demo-voter-gulf', 'demo-voter-gulf@arena.internal', 'demo_voter_gulf', 'Verified Gulf Coast Voter'],
+    ['demo-voter-metro', 'demo-voter-metro@arena.internal', 'demo_voter_metro', 'Verified Metro Voter'],
+    ['demo-press-al', 'demo-press-al@arena.internal', 'demo_press_al', 'Capitol Desk Reporter'],
+    ['demo-press-tx', 'demo-press-tx@arena.internal', 'demo_press_tx', 'Statehouse Reporter'],
+    ['demo-press-national', 'demo-press-national@arena.internal', 'demo_press_national', 'National Policy Reporter'],
+  ];
+
+  await db.batch(users.map(user =>
+    db.prepare(
+      `INSERT OR IGNORE INTO users
+       (id, email, username, display_name, password_hash, role, email_verified, verification_status, is_active)
+       VALUES (?, ?, ?, ?, 'no-login', 'voter', 1, 'verified', 1)`
+    ).bind(...user)
+  ));
+
+  const pressCredentials = [
+    ['demo-presscred-al', 'demo-press-al', 'Alabama Public Record', 'digital', 'https://example.com/alabama-public-record'],
+    ['demo-presscred-tx', 'demo-press-tx', 'Texas Statehouse Wire', 'digital', 'https://example.com/texas-statehouse-wire'],
+    ['demo-presscred-national', 'demo-press-national', 'Civic Policy Desk', 'digital', 'https://example.com/civic-policy-desk'],
+  ];
+
+  await db.batch(pressCredentials.map(credential =>
+    db.prepare(
+      `INSERT OR IGNORE INTO press_credentials (id, user_id, outlet_name, outlet_type, proof_url, status)
+       VALUES (?, ?, ?, ?, ?, 'approved')`
+    ).bind(...credential)
+  ));
+
+  const questions = [
+    {
+      id: 'q-demo-r1-voter-healthcare',
+      raceId: 'race-1',
+      userId: 'demo-voter-al',
+      sourceType: 'voter',
+      text: 'What specific hospital access or insurance cost metric should voters use to judge whether your health plan is working?',
+      votes: 4,
+    },
+    {
+      id: 'q-demo-r1-press-economy',
+      raceId: 'race-1',
+      userId: 'demo-press-al',
+      sourceType: 'press',
+      text: 'Which parts of your economic plan would require federal legislation, and which could be done through agency action?',
+      votes: 3,
+    },
+    {
+      id: 'q-demo-r1-voter-infrastructure',
+      raceId: 'race-1',
+      userId: 'demo-voter-al',
+      sourceType: 'voter',
+      text: 'How would you fund infrastructure projects without shifting costs to local property taxpayers?',
+      votes: 2,
+    },
+    {
+      id: 'q-demo-r1-press-deadline',
+      raceId: 'race-1',
+      userId: 'demo-press-al',
+      sourceType: 'press',
+      text: 'What deadline would you set for publishing a detailed implementation plan after taking office?',
+      votes: 1,
+    },
+    {
+      id: 'q-demo-r2-voter-housing',
+      raceId: 'race-2',
+      userId: 'demo-voter-tx',
+      sourceType: 'voter',
+      text: 'What measurable housing-cost target would you set for the first two years of your administration?',
+      votes: 4,
+    },
+    {
+      id: 'q-demo-r2-press-grid',
+      raceId: 'race-2',
+      userId: 'demo-press-tx',
+      sourceType: 'press',
+      text: 'How would your energy plan balance grid reliability, consumer prices, and local permitting timelines?',
+      votes: 3,
+    },
+    {
+      id: 'q-demo-r2-voter-property-tax',
+      raceId: 'race-2',
+      userId: 'demo-voter-tx',
+      sourceType: 'voter',
+      text: 'If state revenue falls short, which programs would you protect before asking counties or cities to raise local taxes?',
+      votes: 2,
+    },
+    {
+      id: 'q-demo-r2-press-budget',
+      raceId: 'race-2',
+      userId: 'demo-press-tx',
+      sourceType: 'press',
+      text: 'What budget line would you use to pay for your first-year public-safety proposal, and what would be reduced if costs rise?',
+      votes: 1,
+    },
+  ];
+
+  await db.batch(questions.map(question =>
+    db.prepare(
+      `INSERT OR IGNORE INTO questions (id, race_id, user_id, source_type, question_text, vote_count)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(question.id, question.raceId, question.userId, question.sourceType, question.text, question.votes)
+  ));
+
+  const votes = [
+    ['qv-r1-healthcare-al', 'q-demo-r1-voter-healthcare', 'demo-voter-al'],
+    ['qv-r1-healthcare-tx', 'q-demo-r1-voter-healthcare', 'demo-voter-tx'],
+    ['qv-r1-healthcare-gulf', 'q-demo-r1-voter-healthcare', 'demo-voter-gulf'],
+    ['qv-r1-healthcare-metro', 'q-demo-r1-voter-healthcare', 'demo-voter-metro'],
+    ['qv-r1-economy-press-al', 'q-demo-r1-press-economy', 'demo-press-al'],
+    ['qv-r1-economy-press-tx', 'q-demo-r1-press-economy', 'demo-press-tx'],
+    ['qv-r1-economy-press-national', 'q-demo-r1-press-economy', 'demo-press-national'],
+    ['qv-r1-infra-al', 'q-demo-r1-voter-infrastructure', 'demo-voter-al'],
+    ['qv-r1-infra-tx', 'q-demo-r1-voter-infrastructure', 'demo-voter-tx'],
+    ['qv-r1-deadline-press-al', 'q-demo-r1-press-deadline', 'demo-press-al'],
+    ['qv-r2-housing-al', 'q-demo-r2-voter-housing', 'demo-voter-al'],
+    ['qv-r2-housing-tx', 'q-demo-r2-voter-housing', 'demo-voter-tx'],
+    ['qv-r2-housing-gulf', 'q-demo-r2-voter-housing', 'demo-voter-gulf'],
+    ['qv-r2-housing-metro', 'q-demo-r2-voter-housing', 'demo-voter-metro'],
+    ['qv-r2-grid-press-al', 'q-demo-r2-press-grid', 'demo-press-al'],
+    ['qv-r2-grid-press-tx', 'q-demo-r2-press-grid', 'demo-press-tx'],
+    ['qv-r2-grid-press-national', 'q-demo-r2-press-grid', 'demo-press-national'],
+    ['qv-r2-tax-al', 'q-demo-r2-voter-property-tax', 'demo-voter-al'],
+    ['qv-r2-tax-tx', 'q-demo-r2-voter-property-tax', 'demo-voter-tx'],
+    ['qv-r2-budget-press-tx', 'q-demo-r2-press-budget', 'demo-press-tx'],
+  ];
+
+  await db.batch(votes.map(vote =>
+    db.prepare(`INSERT OR IGNORE INTO question_votes (id, question_id, user_id) VALUES (?, ?, ?)`)
+      .bind(...vote)
+  ));
+}
+
+async function seedDemoRecites(db) {
+  const [demoChallenges, demoResponses] = await Promise.all([
+    db.prepare(`SELECT id FROM challenges WHERE id IN ('chal-1', 'chal-3', 'chal-4')`).all(),
+    db.prepare(`SELECT id FROM challenge_responses WHERE id IN ('resp-1', 'resp-2')`).all(),
+  ]);
+  const existingContentIds = {
+    challenge: new Set((demoChallenges.results || []).map(row => row.id)),
+    challenge_response: new Set((demoResponses.results || []).map(row => row.id)),
+  };
+  if (existingContentIds.challenge.size === 0 && existingContentIds.challenge_response.size === 0) return;
+
+  await db.prepare(
+    `INSERT OR IGNORE INTO users (id, email, username, display_name, password_hash, role, email_verified, verification_status, is_active)
+     VALUES ('system', 'system@arena.internal', 'system', 'System', 'no-login', 'super_admin', 1, 'verified', 1)`
+  ).run();
+
+  const reviewNote = 'Demo seed for source-backed receipt and race previews; not a real-world claim assessment.';
+  const recites = [
+    {
+      id: 'rec-demo-chal-1-health-costs',
+      contentType: 'challenge',
+      contentId: 'chal-1',
+      url: 'https://www.kff.org/health-costs/',
+      title: 'Health care affordability and household spending data',
+      publisher: 'KFF',
+      sourceType: 'research',
+      stance: 'context',
+      claimText: 'Health policy proposals can be evaluated against household premium, deductible, and out-of-pocket cost data.',
+      quote: 'Tracks premium, deductible, and out-of-pocket cost trends voters can use to evaluate health policy claims.',
+      sourcePublishedAt: '2026-06-01',
+      archiveUrl: 'https://arena.vote/demo-archive/health-costs',
+    },
+    {
+      id: 'rec-demo-chal-1-plan',
+      contentType: 'challenge',
+      contentId: 'chal-1',
+      url: 'https://arena.vote/demo-sources/jane-doe-healthcare-plan',
+      title: 'Jane Doe healthcare plan summary',
+      publisher: 'Jane Doe for Senate',
+      sourceType: 'campaign_material',
+      stance: 'supports',
+      claimText: 'Jane Doe has proposed a healthcare plan with household cost savings claims.',
+      quote: 'The plan claims an average annual household savings target and expanded coverage mechanisms.',
+      sourcePublishedAt: '2026-06-12',
+      archiveUrl: 'https://arena.vote/demo-archive/jane-doe-healthcare-plan',
+    },
+    {
+      id: 'rec-demo-resp-1-savings',
+      contentType: 'challenge_response',
+      contentId: 'resp-1',
+      url: 'https://arena.vote/demo-sources/jane-doe-healthcare-savings',
+      title: 'Healthcare savings estimate worksheet',
+      publisher: 'Jane Doe for Senate',
+      sourceType: 'campaign_material',
+      stance: 'supports',
+      claimText: 'The campaign claims its plan saves families an average of $2,000 per year.',
+      quote: 'The campaign worksheet estimates an average $2,000 annual savings figure under its assumptions.',
+      sourcePublishedAt: '2026-06-18',
+      archiveUrl: 'https://arena.vote/demo-archive/jane-doe-healthcare-savings',
+    },
+    {
+      id: 'rec-demo-resp-1-baseline',
+      contentType: 'challenge_response',
+      contentId: 'resp-1',
+      url: 'https://www.cbo.gov/topics/health-care',
+      title: 'Federal health insurance coverage and subsidy baseline',
+      publisher: 'Congressional Budget Office',
+      sourceType: 'official_record',
+      stance: 'context',
+      claimText: 'Federal health insurance baselines provide context for coverage and subsidy cost assumptions.',
+      quote: 'Federal baseline data offers context for coverage and subsidy cost assumptions.',
+      sourcePublishedAt: '2026-06-01',
+      archiveUrl: 'https://arena.vote/demo-archive/cbo-health-baseline',
+    },
+    {
+      id: 'rec-demo-chal-3-epa-compliance',
+      contentType: 'challenge',
+      contentId: 'chal-3',
+      url: 'https://www.epa.gov/enforcement/enforcement-and-compliance-history-online',
+      title: 'EPA environmental compliance history records',
+      publisher: 'U.S. Environmental Protection Agency',
+      sourceType: 'official_record',
+      stance: 'context',
+      claimText: 'Environmental compliance records provide context for evaluating claims about deregulation and local environmental risk.',
+      quote: 'EPA compliance records provide facility-level context for local environmental enforcement and compliance questions.',
+      sourcePublishedAt: '2026-06-05',
+      archiveUrl: 'https://arena.vote/demo-archive/epa-compliance-history',
+    },
+    {
+      id: 'rec-demo-chal-3-local-environment',
+      contentType: 'challenge',
+      contentId: 'chal-3',
+      url: 'https://arena.vote/demo-sources/local-environment-deregulation-analysis',
+      title: 'Local environmental permitting analysis',
+      publisher: 'Alabama Public Record Demo Archive',
+      sourceType: 'news',
+      stance: 'supports',
+      claimText: 'The callout asks for evidence that deregulation would not increase local environmental risk.',
+      quote: 'The analysis links proposed permitting changes to local air and water oversight questions.',
+      sourcePublishedAt: '2026-06-24',
+      archiveUrl: 'https://arena.vote/demo-archive/local-environment-deregulation-analysis',
+    },
+    {
+      id: 'rec-demo-chal-4-education-vote',
+      contentType: 'challenge',
+      contentId: 'chal-4',
+      url: 'https://arena.vote/demo-sources/education-investment-roll-call',
+      title: 'Education Investment Act roll call summary',
+      publisher: 'Alabama Public Record Demo Archive',
+      sourceType: 'public_document',
+      stance: 'supports',
+      claimText: 'The challenged candidate is alleged to have voted against the Education Investment Act.',
+      quote: 'The roll call summary records opposition to the Education Investment Act.',
+      sourcePublishedAt: '2026-05-20',
+      archiveUrl: 'https://arena.vote/demo-archive/education-investment-roll-call',
+    },
+    {
+      id: 'rec-demo-resp-2-budget',
+      contentType: 'challenge_response',
+      contentId: 'resp-2',
+      url: 'https://arena.vote/demo-sources/public-school-funding-offsets',
+      title: 'Public school funding offset memo',
+      publisher: 'John Smith for Senate',
+      sourceType: 'campaign_material',
+      stance: 'supports',
+      claimText: 'The response claims school funding can increase by redirecting other spending without raising taxes.',
+      quote: 'The response memo identifies spending offsets the campaign says would increase school funding without tax increases.',
+      sourcePublishedAt: '2026-06-22',
+      archiveUrl: 'https://arena.vote/demo-archive/public-school-funding-offsets',
+    },
+  ];
+
+  const existingRecites = recites.filter(recite => existingContentIds[recite.contentType]?.has(recite.contentId));
+  if (existingRecites.length === 0) return;
+
+  await db.batch(existingRecites.map(recite =>
+    db.prepare(
+      `INSERT OR IGNORE INTO recites
+       (id, content_type, content_id, user_id, url, title, publisher, source_type, stance, claim_text, quote,
+        source_published_at, accessed_at, archive_url, status, reviewed_by, reviewed_at, review_note)
+       VALUES (?, ?, ?, 'system', ?, ?, ?, ?, ?, ?, ?, ?, '2026-07-05', ?, 'verified', 'system', '2026-07-05T00:00:00.000Z', ?)`
+    ).bind(
+      recite.id,
+      recite.contentType,
+      recite.contentId,
+      recite.url,
+      recite.title,
+      recite.publisher,
+      recite.sourceType,
+      recite.stance,
+      recite.claimText,
+      recite.quote,
+      recite.sourcePublishedAt,
+      recite.archiveUrl,
+      reviewNote
+    )
+  ));
+}
+
 // Seed demo races and candidates from store.ts data
 export async function seedDemoData(db) {
   // Check if fully seeded (races + ads)
@@ -845,6 +1465,8 @@ export async function seedDemoData(db) {
   // If ads exist, keep existing demo rows but repair stale placeholder media.
   if (adCount.count > 0) {
     await repairDemoMediaData(db);
+    await seedDemoQuestions(db);
+    await seedDemoRecites(db);
     return;
   }
 
@@ -903,14 +1525,14 @@ export async function seedDemoData(db) {
   // Seed challenges
   const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
   await db.batch([
-    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind('chal-1', 'race-1', 'cand-2', 'cand-1', 'system', 'I challenge my opponent to debate the economic impact of their proposed healthcare policies.', 'debate_request', 'responded', threeDaysFromNow),
-    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind('chal-2', 'race-2', 'cand-3', 'cand-4', 'system', 'Will you commit to fully funding our public schools without raising property taxes?', 'policy_question', 'open', threeDaysFromNow),
-    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind('chal-3', 'race-1', 'cand-1', 'cand-2', 'system', 'I challenge my opponent to explain how their deregulation plan won\'t harm our local environment.', 'policy_question', 'open', threeDaysFromNow),
-    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind('chal-4', 'race-1', 'cand-1', 'cand-2', 'system', 'I challenge my opponent to explain their position on public school funding and why they voted against the Education Investment Act.', 'policy_question', 'responded', threeDaysFromNow),
+    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline, public_receipt_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind('chal-1', 'race-1', 'cand-2', 'cand-1', 'system', 'I challenge my opponent to debate the economic impact of their proposed healthcare policies.', 'debate_request', 'responded', threeDaysFromNow, 'chal-1'),
+    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline, public_receipt_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind('chal-2', 'race-2', 'cand-3', 'cand-4', 'system', 'Will you commit to fully funding our public schools without raising property taxes?', 'policy_question', 'open', threeDaysFromNow, 'chal-2'),
+    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline, public_receipt_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind('chal-3', 'race-1', 'cand-1', 'cand-2', 'system', 'I challenge my opponent to explain how their deregulation plan won\'t harm our local environment.', 'policy_question', 'open', threeDaysFromNow, 'chal-3'),
+    db.prepare(`INSERT OR IGNORE INTO challenges (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, response_deadline, public_receipt_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind('chal-4', 'race-1', 'cand-1', 'cand-2', 'system', 'I challenge my opponent to explain their position on public school funding and why they voted against the Education Investment Act.', 'policy_question', 'responded', threeDaysFromNow, 'chal-4'),
   ]);
 
   // Seed challenge responses with media
@@ -931,7 +1553,10 @@ export async function seedDemoData(db) {
     db.prepare(`UPDATE candidates SET credit_balance = 10 WHERE id = 'cand-6' AND credit_balance = 0`),
   ]);
 
-  console.log('Arena demo data seeded: 3 races, 6 candidates, 3 ads, 1 rebuttal, 4 challenges, 2 responses, 10 credits each');
+  await seedDemoQuestions(db);
+  await seedDemoRecites(db);
+
+  console.log('Arena demo data seeded: 3 races, 6 candidates, 3 ads, 1 rebuttal, 4 challenges, 2 responses, 8 questions, 8 recites, 10 credits each');
 }
 
 // Generate unique IDs with crypto-grade randomness

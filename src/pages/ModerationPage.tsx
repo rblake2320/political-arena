@@ -1,190 +1,115 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate } from "react-router";
-import { AlertCircle, ExternalLink, FileCheck2, ShieldCheck } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
-import * as api from "../api";
 import { useAuth } from "../stores/auth";
+import * as api from "../api";
 
-function contentLink(recite: any) {
-  if (recite.content_type === "challenge" || recite.content_type === "challenge_response") {
-    return `/challenge/${recite.content_id}`;
-  }
-  return null;
+const mono = "'IBM Plex Mono', ui-monospace, monospace";
+
+type Queue = "candidates" | "press" | "recites";
+
+const QUEUES: { key: Queue; label: string; blurb: string }[] = [
+  { key: "candidates", label: "Candidate claims", blurb: "Campaign profile registrations awaiting verification." },
+  { key: "press", label: "Press credentials", blurb: "Press applications awaiting approval." },
+  { key: "recites", label: "Recites", blurb: "Source citations awaiting verification." },
+];
+
+function Btn({ onClick, disabled, tone = "neutral", children }: { onClick: () => void; disabled?: boolean; tone?: "ok" | "no" | "neutral"; children: React.ReactNode }) {
+  const c = tone === "ok" ? "#34C384" : tone === "no" ? "#E5636A" : "#9B9BAB";
+  return (
+    <button onClick={onClick} disabled={disabled} style={{ cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1, font: `600 11px 'Hanken Grotesk',sans-serif`, color: c, background: `${c}12`, border: `1px solid ${c}44`, padding: "7px 13px", borderRadius: 8 }}>{children}</button>
+  );
 }
 
 export function ModerationPage() {
   const { user } = useAuth();
-  const [status, setStatus] = useState<"pending" | "verified" | "rejected">("pending");
-  const [recites, setRecites] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [reviewingId, setReviewingId] = useState<string | null>(null);
-  const [notes, setNotes] = useState<Record<string, string>>({});
-
   const canModerate = Boolean(user && ["moderator", "admin", "super_admin"].includes(user.role));
+  const [queue, setQueue] = useState<Queue>("candidates");
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
 
-  const refresh = () => {
+  const load = () => {
     setLoading(true);
-    setError("");
-    api.getPendingRecites({ status })
-      .then(data => setRecites(data.recites || []))
-      .catch((err: any) => {
-        setError(err.response?.data?.error || err.message || "Failed to load recites");
-        setRecites([]);
-      })
+    const fetcher = queue === "candidates" ? api.getPendingCandidates()
+      : queue === "press" ? api.getPendingPress()
+        : api.getPendingRecites({ status: "pending" });
+    fetcher
+      .then((d: any) => setItems(d?.candidates || d?.credentials || d?.press || d?.recites || (Array.isArray(d) ? d : [])))
+      .catch(() => setItems([]))
       .finally(() => setLoading(false));
   };
+  useEffect(() => { if (canModerate) load(); }, [queue, canModerate]);
 
-  useEffect(() => {
-    if (canModerate) refresh();
-  }, [status, canModerate]);
-
-  const review = async (id: string, nextStatus: "pending" | "verified" | "rejected") => {
-    setReviewingId(id);
-    setError("");
-    try {
-      await api.reviewRecite(id, nextStatus, notes[id] || undefined);
-      refresh();
-    } catch (err: any) {
-      setError(err.response?.data?.error || err.message || "Review failed");
-    } finally {
-      setReviewingId(null);
-    }
+  const act = async (id: string, fn: () => Promise<any>) => {
+    setBusy(id);
+    try { await fn(); setItems(prev => prev.filter(x => x.id !== id)); }
+    catch { load(); }
+    finally { setBusy(null); }
   };
 
-  if (!user) return <Navigate to="/login" replace />;
   if (!canModerate) {
-    return (
-      <div className="max-w-xl mx-auto px-4 py-24 text-center">
-        <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
-        <h1 className="text-2xl font-semibold text-white mb-2">Access denied</h1>
-        <p className="text-zinc-400">Only moderators and admins can review recites.</p>
-      </div>
-    );
+    return <div style={{ maxWidth: 520, margin: "0 auto", padding: "96px 16px", textAlign: "center" }}>
+      <div style={{ font: `400 26px 'Instrument Serif',serif`, color: "#F2F2F7", marginBottom: 8 }}>Moderation</div>
+      <div style={{ font: `400 13px ${mono}`, color: "#9B9BAB" }}>Only moderators and admins can clear applications.</div>
+    </div>;
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <div className="mb-8">
-        <div className="mb-3 flex items-center gap-2 text-sm text-indigo-300">
-          <ShieldCheck className="w-4 h-4" />
-          Moderation
+    <div style={{ background: "#08080C", color: "#F2F2F7", minHeight: "60vh" }}>
+      <div style={{ maxWidth: 1000, margin: "0 auto", padding: "36px 24px 56px" }}>
+        <div style={{ font: `400 34px 'Instrument Serif',serif`, color: "#F2F2F7" }}>Applications to clear</div>
+        <div style={{ font: `400 13px/1.6 'Hanken Grotesk',sans-serif`, color: "#9B9BAB", marginTop: 6, maxWidth: 640 }}>
+          Every inbound application lands here so nothing goes stale. Clear each one — approve or return it — and the decision is recorded on the audit trail.
         </div>
-        <h1 className="text-3xl font-bold tracking-tight text-white">Recite Review Queue</h1>
-        <p className="mt-2 text-zinc-400">Verify, reject, or return recites to pending status. Verified recites carry more score confidence.</p>
-      </div>
 
-      <div className="mb-6 flex flex-wrap gap-2">
-        {(["pending", "verified", "rejected"] as const).map(item => (
-          <button
-            key={item}
-            onClick={() => setStatus(item)}
-            className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
-              status === item
-                ? "border-indigo-500/30 bg-indigo-500/15 text-indigo-200"
-                : "border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-white"
-            }`}
-          >
-            {item}
-          </button>
-        ))}
-      </div>
-
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          {error}
+        <div style={{ display: "flex", gap: 4, marginTop: 22, borderBottom: "1px solid rgba(255,255,255,.08)", overflowX: "auto" }}>
+          {QUEUES.map(q => (
+            <button key={q.key} onClick={() => setQueue(q.key)} style={{ flexShrink: 0, cursor: "pointer", background: "none", border: "none", font: `${queue === q.key ? 600 : 500} 13px 'Hanken Grotesk',sans-serif`, color: queue === q.key ? "#F2F2F7" : "#9B9BAB", padding: "12px 14px 11px", borderBottom: queue === q.key ? "2px solid #6E6EF7" : "2px solid transparent", whiteSpace: "nowrap" }}>{q.label}</button>
+          ))}
         </div>
-      )}
+        <div style={{ font: `500 10px ${mono}`, letterSpacing: ".1em", color: "#5C5C6E", margin: "14px 0" }}>{QUEUES.find(q => q.key === queue)?.blurb.toUpperCase()}</div>
 
-      {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <div className="w-6 h-6 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
-        </div>
-      ) : recites.length === 0 ? (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-12 text-center text-zinc-500">
-          No {status} recites.
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {recites.map(recite => {
-            const link = contentLink(recite);
-            return (
-              <div key={recite.id} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
-                <div className="mb-3 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider">
-                  <span className="rounded-full border border-zinc-700 bg-zinc-950 px-2 py-0.5 text-zinc-300">{recite.content_type}</span>
-                  <span className="rounded-full border border-indigo-500/20 bg-indigo-500/10 px-2 py-0.5 text-indigo-300">{recite.source_type}</span>
-                  <span className="rounded-full border border-zinc-700 bg-zinc-950 px-2 py-0.5 text-zinc-300">{recite.stance}</span>
-                  <span className="text-zinc-600">
-                    {recite.created_at ? formatDistanceToNow(new Date(recite.created_at), { addSuffix: true }) : ""}
-                  </span>
-                </div>
-
-                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-1 flex items-start gap-2">
-                      <FileCheck2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-indigo-300" />
-                      <a href={recite.url} target="_blank" rel="noreferrer" className="font-semibold text-white hover:text-indigo-200 break-words">
-                        {recite.title}
-                      </a>
-                      <ExternalLink className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-zinc-500" />
-                    </div>
-                    {recite.publisher && <div className="text-sm text-zinc-500">{recite.publisher}</div>}
-                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-600">
-                      {recite.source_published_at && <span>Published {recite.source_published_at}</span>}
-                      {recite.accessed_at && <span>Accessed {recite.accessed_at.slice(0, 10)}</span>}
-                      {recite.archive_url && (
-                        <a href={recite.archive_url} target="_blank" rel="noreferrer" className="text-indigo-300 hover:text-indigo-200">
-                          Archived copy
-                        </a>
-                      )}
-                    </div>
-                    {recite.quote && <div className="mt-3 border-l-2 border-zinc-700 pl-3 text-sm text-zinc-300">"{recite.quote}"</div>}
-                    {link && (
-                      <Link to={link} className="mt-3 inline-block text-xs text-indigo-300 hover:text-indigo-200">
-                        Open public receipt
-                      </Link>
-                    )}
+        {loading ? (
+          <div style={{ padding: "60px 0", textAlign: "center" }}><span className="arena-pulse" style={{ display: "inline-block", width: 20, height: 20, border: "2px solid rgba(110,110,247,.3)", borderTopColor: "#6E6EF7", borderRadius: "50%" }} /></div>
+        ) : items.length === 0 ? (
+          <div style={{ border: "1px solid rgba(255,255,255,.09)", borderRadius: 12, background: "#0C0C13", padding: 28, textAlign: "center" }}>
+            <div style={{ font: `500 14px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>Queue clear</div>
+            <div style={{ font: `400 12px ${mono}`, color: "#5C5C6E", marginTop: 4 }}>Nothing pending — no {queue} waiting on review.</div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {items.map(it => (
+              <div key={it.id} style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 12, background: "#0C0C13", padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
+                {queue === "candidates" && <>
+                  <div><span style={{ font: `600 15px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{it.name}</span> <span style={{ font: `500 10px ${mono}`, color: it.party?.toLowerCase().startsWith("d") ? "#4D8AF0" : it.party?.toLowerCase().startsWith("r") ? "#E5636A" : "#9B9BAB", letterSpacing: ".1em" }}>{(it.party || "").toUpperCase()}</span></div>
+                  <div style={{ font: `500 10px ${mono}`, color: "#5C5C6E", letterSpacing: ".06em" }}>{[it.race_name || it.race_id, it.race_state, it.created_at && `FILED ${String(it.created_at).slice(0, 10)}`].filter(Boolean).join(" · ").toUpperCase()}</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn tone="ok" disabled={busy === it.id} onClick={() => act(it.id, () => api.verifyCandidate(it.id, "verify"))}>Verify</Btn>
+                    <Btn tone="no" disabled={busy === it.id} onClick={() => act(it.id, () => api.verifyCandidate(it.id, "reject"))}>Reject</Btn>
                   </div>
-
-                  <div className="w-full md:w-64">
-                    <textarea
-                      rows={3}
-                      maxLength={1000}
-                      placeholder="Review note"
-                      className="mb-2 w-full resize-none rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      value={notes[recite.id] || ""}
-                      onChange={e => setNotes({ ...notes, [recite.id]: e.target.value })}
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => review(recite.id, "verified")}
-                        disabled={reviewingId === recite.id || recite.status === "verified"}
-                        className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
-                      >
-                        Verify
-                      </button>
-                      <button
-                        onClick={() => review(recite.id, "rejected")}
-                        disabled={reviewingId === recite.id || recite.status === "rejected"}
-                        className="rounded-md border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-50"
-                      >
-                        Reject
-                      </button>
-                      <button
-                        onClick={() => review(recite.id, "pending")}
-                        disabled={reviewingId === recite.id || recite.status === "pending"}
-                        className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
-                      >
-                        Pending
-                      </button>
-                    </div>
+                </>}
+                {queue === "press" && <>
+                  <div><span style={{ font: `600 15px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{it.outlet_name || it.outlet}</span> <span style={{ font: `500 10px ${mono}`, color: "#9B9BAB", letterSpacing: ".1em" }}>{(it.outlet_type || "").toUpperCase()}</span></div>
+                  {it.proof_url && <a href={it.proof_url} target="_blank" rel="noreferrer" style={{ font: `500 11px ${mono}`, color: "#8F8FF9" }}>{it.proof_url} ↗</a>}
+                  <div style={{ font: `500 10px ${mono}`, color: "#5C5C6E" }}>{it.created_at && `APPLIED ${String(it.created_at).slice(0, 10)}`}</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn tone="ok" disabled={busy === it.id} onClick={() => act(it.id, () => api.reviewPress(it.id, "approved"))}>Approve</Btn>
+                    <Btn tone="no" disabled={busy === it.id} onClick={() => act(it.id, () => api.reviewPress(it.id, "rejected"))}>Reject</Btn>
                   </div>
-                </div>
+                </>}
+                {queue === "recites" && <>
+                  <a href={it.url} target="_blank" rel="noreferrer" style={{ font: `600 14px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7", textDecoration: "none" }}>{it.title} ↗</a>
+                  <div style={{ font: `500 10px ${mono}`, color: "#5C5C6E", letterSpacing: ".06em" }}>{[it.source_type, it.stance, it.publisher].filter(Boolean).join(" · ").toUpperCase()}</div>
+                  {it.quote && <div style={{ font: `italic 400 13px 'Hanken Grotesk',sans-serif`, color: "#C9C9D4", borderLeft: "2px solid rgba(255,255,255,.14)", paddingLeft: 12 }}>“{it.quote}”</div>}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn tone="ok" disabled={busy === it.id} onClick={() => act(it.id, () => api.reviewRecite(it.id, "verified"))}>Verify</Btn>
+                    <Btn tone="no" disabled={busy === it.id} onClick={() => act(it.id, () => api.reviewRecite(it.id, "rejected"))}>Reject</Btn>
+                  </div>
+                </>}
               </div>
-            );
-          })}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

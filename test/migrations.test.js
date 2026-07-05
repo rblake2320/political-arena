@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { runRuntimeMigrations } from '../src/db.js';
 
-function createFakeD1({ users, adFlights, challenges, recites, issueCategories, auditLog }) {
+function createFakeD1({ users, adFlights, challenges, recites, issueCategories, voterWriteins, auditLog, pressFeedItems = [], missingChallengeSlug = false }) {
   const userColumns = new Set(users);
   const adColumns = new Set(adFlights);
   const challengeColumns = new Set(challenges);
   const reciteColumns = new Set(recites);
   const issueCategoryColumns = new Set(issueCategories);
+  const voterWriteinColumns = new Set(voterWriteins);
   const auditColumns = new Set(auditLog);
+  const pressFeedColumns = new Set(pressFeedItems);
+  let hasMissingChallengeSlug = missingChallengeSlug;
   const auditIndexes = new Set();
   const surveyResponseIndexes = new Set();
   const executed = [];
@@ -32,8 +35,14 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
           if (sql === 'PRAGMA table_info(issue_categories)') {
             return { results: Array.from(issueCategoryColumns).map(name => ({ name })) };
           }
+          if (sql === 'PRAGMA table_info(voter_writeins)') {
+            return { results: Array.from(voterWriteinColumns).map(name => ({ name })) };
+          }
           if (sql === 'PRAGMA table_info(audit_log)') {
             return { results: Array.from(auditColumns).map(name => ({ name })) };
+          }
+          if (sql === 'PRAGMA table_info(press_feed_items)') {
+            return { results: Array.from(pressFeedColumns).map(name => ({ name })) };
           }
           if (sql === 'PRAGMA index_list(audit_log)') {
             return { results: Array.from(auditIndexes).map(name => ({ name })) };
@@ -42,6 +51,12 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
             return { results: Array.from(surveyResponseIndexes).map(name => ({ name })) };
           }
           return { results: [] };
+        },
+        first: async () => {
+          if (sql === `SELECT id FROM challenges WHERE public_receipt_slug IS NULL OR public_receipt_slug = '' LIMIT 1`) {
+            return hasMissingChallengeSlug ? { id: 'legacy-challenge' } : null;
+          }
+          return null;
         },
       };
     },
@@ -54,16 +69,24 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
         if (adMatch) adColumns.add(adMatch[1]);
         const challengeMatch = statement.sql.match(/^ALTER TABLE challenges ADD COLUMN (\w+)/);
         if (challengeMatch) challengeColumns.add(challengeMatch[1]);
+        if (statement.sql === `UPDATE challenges SET public_receipt_slug = id WHERE public_receipt_slug IS NULL OR public_receipt_slug = ''`) {
+          hasMissingChallengeSlug = false;
+        }
         const reciteMatch = statement.sql.match(/^ALTER TABLE recites ADD COLUMN (\w+)/);
         if (reciteMatch) reciteColumns.add(reciteMatch[1]);
         const issueCategoryMatch = statement.sql.match(/^ALTER TABLE issue_categories ADD COLUMN (\w+)/);
         if (issueCategoryMatch) issueCategoryColumns.add(issueCategoryMatch[1]);
+        const voterWriteinMatch = statement.sql.match(/^ALTER TABLE voter_writeins ADD COLUMN (\w+)/);
+        if (voterWriteinMatch) voterWriteinColumns.add(voterWriteinMatch[1]);
         const auditMatch = statement.sql.match(/^ALTER TABLE audit_log ADD COLUMN (\w+)/);
         if (auditMatch) auditColumns.add(auditMatch[1]);
         const auditIndexMatch = statement.sql.match(/^CREATE UNIQUE INDEX IF NOT EXISTS (idx_audit_\w+)/);
         if (auditIndexMatch) auditIndexes.add(auditIndexMatch[1]);
         const surveyResponseIndexMatch = statement.sql.match(/^CREATE UNIQUE INDEX IF NOT EXISTS (idx_vsr_\w+)/);
         if (surveyResponseIndexMatch) surveyResponseIndexes.add(surveyResponseIndexMatch[1]);
+        if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS press_feed_items')) {
+          pressFeedColumns.add('id');
+        }
       }
       return statements.map(() => ({ success: true }));
     },
@@ -72,10 +95,13 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
     challengeColumns,
     reciteColumns,
     issueCategoryColumns,
+    voterWriteinColumns,
     auditColumns,
+    pressFeedColumns,
     auditIndexes,
     surveyResponseIndexes,
     executed,
+    get hasMissingChallengeSlug() { return hasMissingChallengeSlug; },
   };
 
   return db;
@@ -141,6 +167,18 @@ describe('runtime migrations', () => {
         'display_order',
         'is_active',
       ],
+      voterWriteins: [
+        'id',
+        'user_id',
+        'race_id',
+        'writein_text',
+        'normalized_text',
+        'party_affiliation',
+        'jurisdiction_state',
+        'jurisdiction_district',
+        'created_at',
+        'updated_at',
+      ],
       auditLog: [
         'id',
         'actor_id',
@@ -169,11 +207,13 @@ describe('runtime migrations', () => {
     expect(db.reciteColumns.has('archive_url')).toBe(true);
     expect(db.reciteColumns.has('review_note')).toBe(true);
     expect(db.issueCategoryColumns.has('parent_category_id')).toBe(true);
+    expect(db.voterWriteinColumns.has('writein_rank')).toBe(true);
     expect(db.auditColumns.has('prev_hash')).toBe(true);
     expect(db.auditColumns.has('entry_hash')).toBe(true);
     expect(db.auditColumns.has('chain_seq')).toBe(true);
     expect(db.auditIndexes.has('idx_audit_entity_seq_unique')).toBe(true);
     expect(db.auditIndexes.has('idx_audit_entity_prev_hash_unique')).toBe(true);
+    expect(db.pressFeedColumns.has('id')).toBe(true);
     expect(db.executed).toEqual([
       'ALTER TABLE users ADD COLUMN password_reset_token_hash TEXT',
       'ALTER TABLE users ADD COLUMN password_reset_expires_at TEXT',
@@ -191,6 +231,7 @@ describe('runtime migrations', () => {
       'ALTER TABLE recites ADD COLUMN evidence_media_url TEXT',
       'ALTER TABLE recites ADD COLUMN review_note TEXT',
       'ALTER TABLE issue_categories ADD COLUMN parent_category_id TEXT REFERENCES issue_categories(id)',
+      'ALTER TABLE voter_writeins ADD COLUMN writein_rank INTEGER NOT NULL DEFAULT 1 CHECK(writein_rank BETWEEN 1 AND 3)',
       'ALTER TABLE audit_log ADD COLUMN prev_hash TEXT',
       'ALTER TABLE audit_log ADD COLUMN entry_hash TEXT',
       'ALTER TABLE audit_log ADD COLUMN chain_seq INTEGER',
@@ -226,11 +267,59 @@ describe('runtime migrations', () => {
          )`,
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_vsr_user_survey_question
          ON voter_survey_responses(user_id, survey_id, question_id)`,
+      `CREATE TABLE IF NOT EXISTS press_feed_items (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        source_type TEXT NOT NULL DEFAULT 'news' CHECK(source_type IN ('official_record','news','press_release')),
+        title TEXT NOT NULL,
+        url TEXT NOT NULL UNIQUE,
+        publisher TEXT NOT NULL,
+        section TEXT,
+        published_at TEXT,
+        first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        content_hash TEXT,
+        change_status TEXT NOT NULL DEFAULT 'new' CHECK(change_status IN ('new','updated','removed')),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_press_feed_active_published
+        ON press_feed_items(is_active, published_at DESC, first_seen_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_press_feed_source
+        ON press_feed_items(source, section)`,
     ]);
 
     db.executed.length = 0;
     await runRuntimeMigrations(db);
 
     expect(db.executed).toEqual([]);
+  });
+
+  it('backfills legacy challenge receipt slugs once', async () => {
+    const db = createFakeD1({
+      users: ['id'],
+      adFlights: ['id'],
+      challenges: ['id', 'public_receipt_slug'],
+      recites: ['id'],
+      issueCategories: ['id', 'parent_category_id'],
+      voterWriteins: ['id', 'writein_rank'],
+      auditLog: ['id', 'prev_hash', 'entry_hash', 'chain_seq'],
+      missingChallengeSlug: true,
+    });
+
+    await runRuntimeMigrations(db);
+
+    expect(db.executed).toContain(
+      `UPDATE challenges SET public_receipt_slug = id WHERE public_receipt_slug IS NULL OR public_receipt_slug = ''`
+    );
+    expect(db.hasMissingChallengeSlug).toBe(false);
+
+    db.executed.length = 0;
+    await runRuntimeMigrations(db);
+
+    expect(db.executed).not.toContain(
+      `UPDATE challenges SET public_receipt_slug = id WHERE public_receipt_slug IS NULL OR public_receipt_slug = ''`
+    );
   });
 });
