@@ -103,6 +103,40 @@ describe('races & demo seed (test env only)', () => {
     });
   });
 
+  it('includes challenge recite summaries on race detail', async () => {
+    const suffix = Date.now().toString(36);
+    const sourceUrl = `https://example.com/race-summary-source-${suffix}`;
+
+    await env.ARENA_DB.prepare(
+      `INSERT INTO recites
+       (id, content_type, content_id, user_id, url, title, publisher, source_type, stance, claim_text, quote, status)
+       VALUES (?, 'challenge', 'chal-3', ?, ?, 'State environmental filing', 'Environmental Agency', 'official_record', 'supports', 'The deregulation plan affects local environment rules.', 'The filing describes the environmental rule changes.', 'verified')`
+    ).bind(`rec-race-summary-${suffix}`, staffUser.id, sourceUrl).run();
+
+    const res = await get('/api/races/race-1');
+    expect(res.status).toBe(200);
+    const challenge = res.body.data.challenges.find(ch => ch.id === 'chal-3');
+    expect(challenge).toBeTruthy();
+    expect(challenge.challenge_recite_summary).toMatchObject({
+      recite_count: expect.any(Number),
+      fact_score: {
+        score: expect.any(Number),
+        label: expect.any(String),
+        confidence: expect.any(Number),
+      },
+      top_source: {
+        title: 'State environmental filing',
+        publisher: 'Environmental Agency',
+        source_type: 'official_record',
+        stance: 'supports',
+        status: 'verified',
+        url: sourceUrl,
+      },
+    });
+    expect(challenge.challenge_recite_summary.recite_count).toBeGreaterThanOrEqual(1);
+    expect(challenge.challenge_recite_summary.fact_score.score).toBeGreaterThan(50);
+  });
+
   it('serves active ads for a race with paired rebuttals', async () => {
     const res = await get('/api/ads/races/race-1');
     expect(res.status).toBe(200);
