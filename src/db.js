@@ -235,6 +235,77 @@ export async function runRuntimeMigrations(db) {
         ON email_deliveries(status, created_at)`),
     ]);
   }
+
+  const correctionRequestsResult = await db.prepare(`PRAGMA table_info(correction_requests)`).all();
+  if ((correctionRequestsResult.results || []).length === 0) {
+    await db.batch([
+      db.prepare(`CREATE TABLE IF NOT EXISTS correction_requests (
+        id TEXT PRIMARY KEY,
+        requester_id TEXT NOT NULL REFERENCES users(id),
+        content_type TEXT NOT NULL CHECK(content_type IN ('statement','recite','challenge','challenge_response','candidate','ad','rebuttal')),
+        content_id TEXT NOT NULL,
+        candidate_id TEXT REFERENCES candidates(id),
+        reason TEXT NOT NULL DEFAULT 'factual_error' CHECK(reason IN ('factual_error','missing_context','source_error','identity_error','score_dispute','other')),
+        requested_change TEXT NOT NULL,
+        evidence_url TEXT,
+        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','under_review','upheld','revised','rejected')),
+        reviewed_by TEXT REFERENCES users(id),
+        reviewed_at TEXT,
+        resolution_note TEXT,
+        public_note TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS correction_request_events (
+        id TEXT PRIMARY KEY,
+        correction_request_id TEXT NOT NULL REFERENCES correction_requests(id),
+        actor_id TEXT REFERENCES users(id),
+        event_type TEXT NOT NULL CHECK(event_type IN ('submitted','status_changed','public_note')),
+        before_status TEXT,
+        after_status TEXT,
+        note TEXT,
+        public_note TEXT,
+        metadata TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_status
+        ON correction_requests(status, created_at)`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_content
+        ON correction_requests(content_type, content_id, created_at)`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_requester
+        ON correction_requests(requester_id, created_at)`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_correction_events_request
+        ON correction_request_events(correction_request_id, created_at)`),
+    ]);
+  }
+
+  const statementReviewProposalsResult = await db.prepare(`PRAGMA table_info(statement_review_proposals)`).all();
+  if ((statementReviewProposalsResult.results || []).length === 0) {
+    await db.batch([
+      db.prepare(`CREATE TABLE IF NOT EXISTS statement_review_proposals (
+        id TEXT PRIMARY KEY,
+        statement_id TEXT NOT NULL REFERENCES public_statements(id),
+        reviewer_id TEXT NOT NULL REFERENCES users(id),
+        truth_status TEXT NOT NULL,
+        answer_status TEXT NOT NULL,
+        evasion_score INTEGER NOT NULL CHECK(evasion_score BETWEEN 0 AND 100),
+        confidence_score INTEGER NOT NULL CHECK(confidence_score BETWEEN 0 AND 100),
+        review_note TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','applied','rejected')),
+        second_reviewer_id TEXT REFERENCES users(id),
+        applied_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_statement_review_proposals_statement
+        ON statement_review_proposals(statement_id, status, created_at)`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_statement_review_proposals_reviewer
+        ON statement_review_proposals(reviewer_id, status, created_at)`),
+      db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_statement_review_one_pending_reviewer
+        ON statement_review_proposals(statement_id, reviewer_id)
+        WHERE status = 'pending'`),
+    ]);
+  }
 }
 
 export async function initDatabase(db) {
@@ -670,6 +741,53 @@ export async function initDatabase(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
 
+    db.prepare(`CREATE TABLE IF NOT EXISTS correction_requests (
+      id TEXT PRIMARY KEY,
+      requester_id TEXT NOT NULL REFERENCES users(id),
+      content_type TEXT NOT NULL CHECK(content_type IN ('statement','recite','challenge','challenge_response','candidate','ad','rebuttal')),
+      content_id TEXT NOT NULL,
+      candidate_id TEXT REFERENCES candidates(id),
+      reason TEXT NOT NULL DEFAULT 'factual_error' CHECK(reason IN ('factual_error','missing_context','source_error','identity_error','score_dispute','other')),
+      requested_change TEXT NOT NULL,
+      evidence_url TEXT,
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','under_review','upheld','revised','rejected')),
+      reviewed_by TEXT REFERENCES users(id),
+      reviewed_at TEXT,
+      resolution_note TEXT,
+      public_note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS correction_request_events (
+      id TEXT PRIMARY KEY,
+      correction_request_id TEXT NOT NULL REFERENCES correction_requests(id),
+      actor_id TEXT REFERENCES users(id),
+      event_type TEXT NOT NULL CHECK(event_type IN ('submitted','status_changed','public_note')),
+      before_status TEXT,
+      after_status TEXT,
+      note TEXT,
+      public_note TEXT,
+      metadata TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS statement_review_proposals (
+      id TEXT PRIMARY KEY,
+      statement_id TEXT NOT NULL REFERENCES public_statements(id),
+      reviewer_id TEXT NOT NULL REFERENCES users(id),
+      truth_status TEXT NOT NULL,
+      answer_status TEXT NOT NULL,
+      evasion_score INTEGER NOT NULL CHECK(evasion_score BETWEEN 0 AND 100),
+      confidence_score INTEGER NOT NULL CHECK(confidence_score BETWEEN 0 AND 100),
+      review_note TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','applied','rejected')),
+      second_reviewer_id TEXT REFERENCES users(id),
+      applied_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
     // ========== AUDIT & FAIRNESS TABLES ==========
     db.prepare(`CREATE TABLE IF NOT EXISTS audit_log (
       id TEXT PRIMARY KEY,
@@ -849,6 +967,15 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_analytics_events_race ON analytics_events(race_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_analytics_agg_period ON analytics_aggregates(period_type, period_start, metric_name)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_mod_queue_status ON moderation_queue(status, priority)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_status ON correction_requests(status, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_content ON correction_requests(content_type, content_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_requester ON correction_requests(requester_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_correction_events_request ON correction_request_events(correction_request_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_statement_review_proposals_statement ON statement_review_proposals(statement_id, status, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_statement_review_proposals_reviewer ON statement_review_proposals(reviewer_id, status, created_at)`),
+    db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_statement_review_one_pending_reviewer
+      ON statement_review_proposals(statement_id, reviewer_id)
+      WHERE status = 'pending'`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, created_at)`),

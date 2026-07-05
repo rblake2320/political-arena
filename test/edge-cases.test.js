@@ -493,6 +493,7 @@ describe('edge-case regressions', () => {
   it('logs timestamped statements and reflects review data on public candidate profiles', async () => {
     const staff = await registerUser('statementstaff');
     const admin = await makeAdmin('statementadmin');
+    const secondAdmin = await makeAdmin('statementadmin2');
     const suffix = Date.now().toString(36);
     const raceId = `edge-stmt-race-${suffix}`;
     const candidateId = `edge-stmt-cand-${suffix}`;
@@ -538,16 +539,123 @@ describe('edge-case regressions', () => {
       review_note: 'Answer partially addressed the question.',
     }, admin.token);
     expect(reviewed.status).toBe(200);
+    expect(reviewed.body.data.review_status).toBe('pending_second_review');
+    expect(reviewed.body.data.requires_second_reviewer).toBe(true);
 
     const profile = await get(`/api/candidates/${candidateId}/public-profile`);
     expect(profile.status).toBe(200);
     expect(profile.body.data.stats.statements).toBe(1);
-    expect(profile.body.data.trust.avg_evasion_score).toBe(45);
-    expect(profile.body.data.recent_statements[0].truth_status).toBe('disputed');
+    expect(profile.body.data.trust.avg_evasion_score).toBe(0);
+    expect(profile.body.data.recent_statements[0].truth_status).toBe('unreviewed');
+
+    const pendingReviews = await get('/api/statements/review-pending', secondAdmin.token);
+    expect(pendingReviews.status).toBe(200);
+    expect(pendingReviews.body.data.proposals.some(item => item.id === reviewed.body.data.proposal_id)).toBe(true);
+
+    const rubric = await get('/api/statements/review-rubric');
+    expect(rubric.status).toBe(200);
+    expect(rubric.body.data.rubric.safeguards.high_stakes_reviews_require_second_reviewer).toBe(true);
+    expect(rubric.body.data.rubric.safeguards.correction_path).toBe('/api/corrections');
+
+    const sameReviewer = await put(`/api/statements/${created.body.data.id}/review`, {
+      truth_status: 'disputed',
+      answer_status: 'partial',
+      evasion_score: 45,
+      confidence_score: 80,
+      review_note: 'Same reviewer should not apply.',
+    }, admin.token);
+    expect(sameReviewer.status).toBe(409);
+
+    const applied = await put(`/api/statements/${created.body.data.id}/review`, {
+      truth_status: 'disputed',
+      answer_status: 'partial',
+      evasion_score: 45,
+      confidence_score: 80,
+      review_note: 'Second reviewer confirmed the call.',
+    }, secondAdmin.token);
+    expect(applied.status).toBe(200);
+    expect(applied.body.data.review_status).toBe('applied');
+    expect(applied.body.data.first_reviewer_id).toBe(admin.id);
+    expect(applied.body.data.second_reviewer_id).toBe(secondAdmin.id);
+
+    const reviewedProfile = await get(`/api/candidates/${candidateId}/public-profile`);
+    expect(reviewedProfile.status).toBe(200);
+    expect(reviewedProfile.body.data.stats.statements).toBe(1);
+    expect(reviewedProfile.body.data.trust.avg_evasion_score).toBe(45);
+    expect(reviewedProfile.body.data.recent_statements[0].truth_status).toBe('disputed');
+
+    const row = await env.ARENA_DB.prepare(
+      `SELECT status, second_reviewer_id FROM statement_review_proposals WHERE id = ?`
+    ).bind(reviewed.body.data.proposal_id).first();
+    expect(row.status).toBe('applied');
+    expect(row.second_reviewer_id).toBe(secondAdmin.id);
 
     const search = await get('/api/statements/search?q=property%20taxes');
     expect(search.status).toBe(200);
     expect(search.body.data.statements.some(item => item.id === created.body.data.id)).toBe(true);
+  });
+
+  it('records correction requests and publishes moderator resolution notes', async () => {
+    const voter = await makeVerifiedVoter('correctionvoter');
+    const admin = await makeAdmin('correctionadmin');
+    const suffix = Date.now().toString(36);
+    const statementId = `edge-correction-stmt-${suffix}`;
+
+    await env.ARENA_DB.prepare(
+      `INSERT INTO public_statements
+       (id, candidate_id, race_id, created_by, statement_text, source_type, source_url, truth_status, answer_status, evasion_score)
+       VALUES (?, 'cand-1', 'race-1', 'system', 'Correction target statement.', 'article', ?, 'supported', 'answered', 0)`
+    ).bind(statementId, `https://example.com/correction-target-${suffix}`).run();
+
+    const missing = await post('/api/corrections', {
+      content_type: 'statement',
+      content_id: `missing-${suffix}`,
+      reason: 'factual_error',
+      requested_change: 'This request should fail because the target does not exist.',
+    }, voter.token);
+    expect(missing.status).toBe(404);
+
+    const created = await post('/api/corrections', {
+      content_type: 'statement',
+      content_id: statementId,
+      candidate_id: 'cand-1',
+      reason: 'score_dispute',
+      requested_change: 'The statement needs a public note explaining the source context.',
+      evidence_url: `https://example.com/evidence-${suffix}`,
+    }, voter.token);
+    expect(created.status).toBe(200);
+    expect(created.body.data.status).toBe('open');
+
+    const mine = await get('/api/corrections/mine', voter.token);
+    expect(mine.status).toBe(200);
+    expect(mine.body.data.corrections.some(item => item.id === created.body.data.id)).toBe(true);
+
+    const publicBefore = await get(`/api/corrections/public?content_type=statement&content_id=${statementId}`);
+    expect(publicBefore.status).toBe(200);
+    expect(publicBefore.body.data.corrections).toHaveLength(1);
+    expect(publicBefore.body.data.events.some(event => event.event_type === 'submitted')).toBe(true);
+
+    const queue = await get('/api/corrections/pending?status=open', admin.token);
+    expect(queue.status).toBe(200);
+    expect(queue.body.data.corrections.some(item => item.id === created.body.data.id)).toBe(true);
+
+    const reviewedCorrection = await put(`/api/corrections/${created.body.data.id}/review`, {
+      status: 'revised',
+      resolution_note: 'Source context reviewed and public note added.',
+      public_note: 'Corrected July 5, 2026: source context was added after review.',
+    }, admin.token);
+    expect(reviewedCorrection.status).toBe(200);
+    expect(reviewedCorrection.body.data.status).toBe('revised');
+
+    const publicAfter = await get(`/api/corrections/public?content_type=statement&content_id=${statementId}`);
+    expect(publicAfter.status).toBe(200);
+    expect(publicAfter.body.data.corrections[0].public_note).toContain('Corrected July 5, 2026');
+    expect(publicAfter.body.data.events.some(event => event.event_type === 'public_note')).toBe(true);
+
+    const audit = await env.ARENA_DB.prepare(
+      `SELECT action FROM audit_log WHERE entity_type = 'correction_request' AND entity_id = ? ORDER BY chain_seq ASC`
+    ).bind(created.body.data.id).all();
+    expect((audit.results || []).map(row => row.action)).toEqual(['correction.submit', 'correction.review']);
   });
 
   it('rejects direct uploads when the key owner and candidate metadata differ', async () => {

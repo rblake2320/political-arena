@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { runRuntimeMigrations } from '../src/db.js';
 
-function createFakeD1({ users, adFlights, challenges, recites, issueCategories, voterWriteins, auditLog, pressFeedItems = [], emailDeliveries = [], missingChallengeSlug = false }) {
+function createFakeD1({
+  users,
+  adFlights,
+  challenges,
+  recites,
+  issueCategories,
+  voterWriteins,
+  auditLog,
+  pressFeedItems = [],
+  emailDeliveries = [],
+  correctionRequests = [],
+  correctionRequestEvents = [],
+  statementReviewProposals = [],
+  missingChallengeSlug = false,
+}) {
   const userColumns = new Set(users);
   const adColumns = new Set(adFlights);
   const challengeColumns = new Set(challenges);
@@ -11,6 +25,9 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
   const auditColumns = new Set(auditLog);
   const pressFeedColumns = new Set(pressFeedItems);
   const emailDeliveryColumns = new Set(emailDeliveries);
+  const correctionRequestColumns = new Set(correctionRequests);
+  const correctionEventColumns = new Set(correctionRequestEvents);
+  const statementReviewProposalColumns = new Set(statementReviewProposals);
   let hasMissingChallengeSlug = missingChallengeSlug;
   const auditIndexes = new Set();
   const surveyResponseIndexes = new Set();
@@ -47,6 +64,12 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
           }
           if (sql === 'PRAGMA table_info(email_deliveries)') {
             return { results: Array.from(emailDeliveryColumns).map(name => ({ name })) };
+          }
+          if (sql === 'PRAGMA table_info(correction_requests)') {
+            return { results: Array.from(correctionRequestColumns).map(name => ({ name })) };
+          }
+          if (sql === 'PRAGMA table_info(statement_review_proposals)') {
+            return { results: Array.from(statementReviewProposalColumns).map(name => ({ name })) };
           }
           if (sql === 'PRAGMA index_list(audit_log)') {
             return { results: Array.from(auditIndexes).map(name => ({ name })) };
@@ -94,6 +117,15 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
         if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS email_deliveries')) {
           emailDeliveryColumns.add('id');
         }
+        if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS correction_requests')) {
+          correctionRequestColumns.add('id');
+        }
+        if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS correction_request_events')) {
+          correctionEventColumns.add('id');
+        }
+        if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS statement_review_proposals')) {
+          statementReviewProposalColumns.add('id');
+        }
       }
       return statements.map(() => ({ success: true }));
     },
@@ -106,6 +138,9 @@ function createFakeD1({ users, adFlights, challenges, recites, issueCategories, 
     auditColumns,
     pressFeedColumns,
     emailDeliveryColumns,
+    correctionRequestColumns,
+    correctionEventColumns,
+    statementReviewProposalColumns,
     auditIndexes,
     surveyResponseIndexes,
     executed,
@@ -223,6 +258,9 @@ describe('runtime migrations', () => {
     expect(db.auditIndexes.has('idx_audit_entity_prev_hash_unique')).toBe(true);
     expect(db.pressFeedColumns.has('id')).toBe(true);
     expect(db.emailDeliveryColumns.has('id')).toBe(true);
+    expect(db.correctionRequestColumns.has('id')).toBe(true);
+    expect(db.correctionEventColumns.has('id')).toBe(true);
+    expect(db.statementReviewProposalColumns.has('id')).toBe(true);
     expect(db.executed).toEqual([
       'ALTER TABLE users ADD COLUMN password_reset_token_hash TEXT',
       'ALTER TABLE users ADD COLUMN password_reset_expires_at TEXT',
@@ -319,6 +357,65 @@ describe('runtime migrations', () => {
         ON email_deliveries(related_entity_type, related_entity_id, created_at)`,
       `CREATE INDEX IF NOT EXISTS idx_email_deliveries_status
         ON email_deliveries(status, created_at)`,
+      `CREATE TABLE IF NOT EXISTS correction_requests (
+        id TEXT PRIMARY KEY,
+        requester_id TEXT NOT NULL REFERENCES users(id),
+        content_type TEXT NOT NULL CHECK(content_type IN ('statement','recite','challenge','challenge_response','candidate','ad','rebuttal')),
+        content_id TEXT NOT NULL,
+        candidate_id TEXT REFERENCES candidates(id),
+        reason TEXT NOT NULL DEFAULT 'factual_error' CHECK(reason IN ('factual_error','missing_context','source_error','identity_error','score_dispute','other')),
+        requested_change TEXT NOT NULL,
+        evidence_url TEXT,
+        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','under_review','upheld','revised','rejected')),
+        reviewed_by TEXT REFERENCES users(id),
+        reviewed_at TEXT,
+        resolution_note TEXT,
+        public_note TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS correction_request_events (
+        id TEXT PRIMARY KEY,
+        correction_request_id TEXT NOT NULL REFERENCES correction_requests(id),
+        actor_id TEXT REFERENCES users(id),
+        event_type TEXT NOT NULL CHECK(event_type IN ('submitted','status_changed','public_note')),
+        before_status TEXT,
+        after_status TEXT,
+        note TEXT,
+        public_note TEXT,
+        metadata TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_corrections_status
+        ON correction_requests(status, created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_corrections_content
+        ON correction_requests(content_type, content_id, created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_corrections_requester
+        ON correction_requests(requester_id, created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_correction_events_request
+        ON correction_request_events(correction_request_id, created_at)`,
+      `CREATE TABLE IF NOT EXISTS statement_review_proposals (
+        id TEXT PRIMARY KEY,
+        statement_id TEXT NOT NULL REFERENCES public_statements(id),
+        reviewer_id TEXT NOT NULL REFERENCES users(id),
+        truth_status TEXT NOT NULL,
+        answer_status TEXT NOT NULL,
+        evasion_score INTEGER NOT NULL CHECK(evasion_score BETWEEN 0 AND 100),
+        confidence_score INTEGER NOT NULL CHECK(confidence_score BETWEEN 0 AND 100),
+        review_note TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','applied','rejected')),
+        second_reviewer_id TEXT REFERENCES users(id),
+        applied_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_statement_review_proposals_statement
+        ON statement_review_proposals(statement_id, status, created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_statement_review_proposals_reviewer
+        ON statement_review_proposals(reviewer_id, status, created_at)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_statement_review_one_pending_reviewer
+        ON statement_review_proposals(statement_id, reviewer_id)
+        WHERE status = 'pending'`,
     ]);
 
     db.executed.length = 0;

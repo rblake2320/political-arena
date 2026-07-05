@@ -30,6 +30,7 @@ import questionsRoutes from './routes/questions.routes.js';
 import pressRoutes from './routes/press.routes.js';
 import creditsRoutes from './routes/credits.routes.js';
 import statsRoutes from './routes/stats.routes.js';
+import correctionsRoutes from './routes/corrections.routes.js';
 
 // Main API router
 const api = Router({ base: '/api' });
@@ -54,6 +55,7 @@ api.all('/press/*', pressRoutes.fetch);
 api.all('/credits/*', creditsRoutes.fetch);
 api.all('/stats/*', statsRoutes.fetch);
 api.all('/feed/*', statsRoutes.fetch);
+api.all('/corrections/*', correctionsRoutes.fetch);
 
 // Health check fallback; fetch() handles /api/health directly so bootstrap
 // failures can return degraded health before route dispatch.
