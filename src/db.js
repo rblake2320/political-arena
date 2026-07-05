@@ -996,7 +996,7 @@ async function seedDemoQuestions(db) {
 
 async function seedDemoRecites(db) {
   const [demoChallenges, demoResponses] = await Promise.all([
-    db.prepare(`SELECT id FROM challenges WHERE id IN ('chal-1', 'chal-4')`).all(),
+    db.prepare(`SELECT id FROM challenges WHERE id IN ('chal-1', 'chal-3', 'chal-4')`).all(),
     db.prepare(`SELECT id FROM challenge_responses WHERE id IN ('resp-1', 'resp-2')`).all(),
   ]);
   const existingContentIds = {
@@ -1067,6 +1067,34 @@ async function seedDemoRecites(db) {
       quote: 'Federal baseline data offers context for coverage and subsidy cost assumptions.',
       sourcePublishedAt: '2026-06-01',
       archiveUrl: 'https://arena.vote/demo-archive/cbo-health-baseline',
+    },
+    {
+      id: 'rec-demo-chal-3-epa-compliance',
+      contentType: 'challenge',
+      contentId: 'chal-3',
+      url: 'https://www.epa.gov/enforcement/enforcement-and-compliance-history-online',
+      title: 'EPA environmental compliance history records',
+      publisher: 'U.S. Environmental Protection Agency',
+      sourceType: 'official_record',
+      stance: 'context',
+      claimText: 'Environmental compliance records provide context for evaluating claims about deregulation and local environmental risk.',
+      quote: 'EPA compliance records provide facility-level context for local environmental enforcement and compliance questions.',
+      sourcePublishedAt: '2026-06-05',
+      archiveUrl: 'https://arena.vote/demo-archive/epa-compliance-history',
+    },
+    {
+      id: 'rec-demo-chal-3-local-environment',
+      contentType: 'challenge',
+      contentId: 'chal-3',
+      url: 'https://arena.vote/demo-sources/local-environment-deregulation-analysis',
+      title: 'Local environmental permitting analysis',
+      publisher: 'Alabama Public Record Demo Archive',
+      sourceType: 'news',
+      stance: 'supports',
+      claimText: 'The callout asks for evidence that deregulation would not increase local environmental risk.',
+      quote: 'The analysis links proposed permitting changes to local air and water oversight questions.',
+      sourcePublishedAt: '2026-06-24',
+      archiveUrl: 'https://arena.vote/demo-archive/local-environment-deregulation-analysis',
     },
     {
       id: 'rec-demo-chal-4-education-vote',
@@ -1225,7 +1253,7 @@ export async function seedDemoData(db) {
   await seedDemoQuestions(db);
   await seedDemoRecites(db);
 
-  console.log('Arena demo data seeded: 3 races, 6 candidates, 3 ads, 1 rebuttal, 4 challenges, 2 responses, 8 questions, 6 recites, 10 credits each');
+  console.log('Arena demo data seeded: 3 races, 6 candidates, 3 ads, 1 rebuttal, 4 challenges, 2 responses, 8 questions, 8 recites, 10 credits each');
 }
 
 // Generate unique IDs with crypto-grade randomness

@@ -122,9 +122,9 @@ describe('production workflow smoke', () => {
     expect(race.status).toBe(200);
 
     const challenges = race.body.data.challenges || [];
-    const responded = challenges.filter(challenge => ['chal-1', 'chal-4'].includes(challenge.id));
-    expect(responded).toHaveLength(2);
-    for (const challenge of responded) {
+    const sourceBackedDemoCallouts = challenges.filter(challenge => ['chal-1', 'chal-3', 'chal-4'].includes(challenge.id));
+    expect(sourceBackedDemoCallouts).toHaveLength(3);
+    for (const challenge of sourceBackedDemoCallouts) {
       expect(challenge.challenge_recite_summary.recite_count).toBeGreaterThan(0);
       expect(challenge.challenge_recite_summary.fact_score.verified_count).toBeGreaterThan(0);
       expect(challenge.challenge_recite_summary.top_source).toMatchObject({
