@@ -248,7 +248,7 @@ describe('races & demo seed (test env only)', () => {
       source_type: 'external',
       media_type: 'video',
       max_rebuttals: 1,
-      source_label: 'Official campaign TV ad link',
+      source_label: 'SAMPLE official campaign TV ad link',
       ad_recite_summary: {
         recite_count: expect.any(Number),
         fact_score: {
