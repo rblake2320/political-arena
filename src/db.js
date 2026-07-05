@@ -854,6 +854,146 @@ async function repairDemoMediaData(db) {
   ]);
 }
 
+async function seedDemoQuestions(db) {
+  const demoRaceCount = await db.prepare(
+    `SELECT COUNT(*) as count FROM races WHERE id IN ('race-1', 'race-2')`
+  ).first();
+  if (Number(demoRaceCount?.count || 0) < 2) return;
+
+  const users = [
+    ['demo-voter-al', 'demo-voter-al@arena.internal', 'demo_voter_al', 'Verified Alabama Voter'],
+    ['demo-voter-tx', 'demo-voter-tx@arena.internal', 'demo_voter_tx', 'Verified Texas Voter'],
+    ['demo-voter-gulf', 'demo-voter-gulf@arena.internal', 'demo_voter_gulf', 'Verified Gulf Coast Voter'],
+    ['demo-voter-metro', 'demo-voter-metro@arena.internal', 'demo_voter_metro', 'Verified Metro Voter'],
+    ['demo-press-al', 'demo-press-al@arena.internal', 'demo_press_al', 'Capitol Desk Reporter'],
+    ['demo-press-tx', 'demo-press-tx@arena.internal', 'demo_press_tx', 'Statehouse Reporter'],
+    ['demo-press-national', 'demo-press-national@arena.internal', 'demo_press_national', 'National Policy Reporter'],
+  ];
+
+  await db.batch(users.map(user =>
+    db.prepare(
+      `INSERT OR IGNORE INTO users
+       (id, email, username, display_name, password_hash, role, email_verified, verification_status, is_active)
+       VALUES (?, ?, ?, ?, 'no-login', 'voter', 1, 'verified', 1)`
+    ).bind(...user)
+  ));
+
+  const pressCredentials = [
+    ['demo-presscred-al', 'demo-press-al', 'Alabama Public Record', 'digital', 'https://example.com/alabama-public-record'],
+    ['demo-presscred-tx', 'demo-press-tx', 'Texas Statehouse Wire', 'digital', 'https://example.com/texas-statehouse-wire'],
+    ['demo-presscred-national', 'demo-press-national', 'Civic Policy Desk', 'digital', 'https://example.com/civic-policy-desk'],
+  ];
+
+  await db.batch(pressCredentials.map(credential =>
+    db.prepare(
+      `INSERT OR IGNORE INTO press_credentials (id, user_id, outlet_name, outlet_type, proof_url, status)
+       VALUES (?, ?, ?, ?, ?, 'approved')`
+    ).bind(...credential)
+  ));
+
+  const questions = [
+    {
+      id: 'q-demo-r1-voter-healthcare',
+      raceId: 'race-1',
+      userId: 'demo-voter-al',
+      sourceType: 'voter',
+      text: 'What specific hospital access or insurance cost metric should voters use to judge whether your health plan is working?',
+      votes: 4,
+    },
+    {
+      id: 'q-demo-r1-press-economy',
+      raceId: 'race-1',
+      userId: 'demo-press-al',
+      sourceType: 'press',
+      text: 'Which parts of your economic plan would require federal legislation, and which could be done through agency action?',
+      votes: 3,
+    },
+    {
+      id: 'q-demo-r1-voter-infrastructure',
+      raceId: 'race-1',
+      userId: 'demo-voter-al',
+      sourceType: 'voter',
+      text: 'How would you fund infrastructure projects without shifting costs to local property taxpayers?',
+      votes: 2,
+    },
+    {
+      id: 'q-demo-r1-press-deadline',
+      raceId: 'race-1',
+      userId: 'demo-press-al',
+      sourceType: 'press',
+      text: 'What deadline would you set for publishing a detailed implementation plan after taking office?',
+      votes: 1,
+    },
+    {
+      id: 'q-demo-r2-voter-housing',
+      raceId: 'race-2',
+      userId: 'demo-voter-tx',
+      sourceType: 'voter',
+      text: 'What measurable housing-cost target would you set for the first two years of your administration?',
+      votes: 4,
+    },
+    {
+      id: 'q-demo-r2-press-grid',
+      raceId: 'race-2',
+      userId: 'demo-press-tx',
+      sourceType: 'press',
+      text: 'How would your energy plan balance grid reliability, consumer prices, and local permitting timelines?',
+      votes: 3,
+    },
+    {
+      id: 'q-demo-r2-voter-property-tax',
+      raceId: 'race-2',
+      userId: 'demo-voter-tx',
+      sourceType: 'voter',
+      text: 'If state revenue falls short, which programs would you protect before asking counties or cities to raise local taxes?',
+      votes: 2,
+    },
+    {
+      id: 'q-demo-r2-press-budget',
+      raceId: 'race-2',
+      userId: 'demo-press-tx',
+      sourceType: 'press',
+      text: 'What budget line would you use to pay for your first-year public-safety proposal, and what would be reduced if costs rise?',
+      votes: 1,
+    },
+  ];
+
+  await db.batch(questions.map(question =>
+    db.prepare(
+      `INSERT OR IGNORE INTO questions (id, race_id, user_id, source_type, question_text, vote_count)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(question.id, question.raceId, question.userId, question.sourceType, question.text, question.votes)
+  ));
+
+  const votes = [
+    ['qv-r1-healthcare-al', 'q-demo-r1-voter-healthcare', 'demo-voter-al'],
+    ['qv-r1-healthcare-tx', 'q-demo-r1-voter-healthcare', 'demo-voter-tx'],
+    ['qv-r1-healthcare-gulf', 'q-demo-r1-voter-healthcare', 'demo-voter-gulf'],
+    ['qv-r1-healthcare-metro', 'q-demo-r1-voter-healthcare', 'demo-voter-metro'],
+    ['qv-r1-economy-press-al', 'q-demo-r1-press-economy', 'demo-press-al'],
+    ['qv-r1-economy-press-tx', 'q-demo-r1-press-economy', 'demo-press-tx'],
+    ['qv-r1-economy-press-national', 'q-demo-r1-press-economy', 'demo-press-national'],
+    ['qv-r1-infra-al', 'q-demo-r1-voter-infrastructure', 'demo-voter-al'],
+    ['qv-r1-infra-tx', 'q-demo-r1-voter-infrastructure', 'demo-voter-tx'],
+    ['qv-r1-deadline-press-al', 'q-demo-r1-press-deadline', 'demo-press-al'],
+    ['qv-r2-housing-al', 'q-demo-r2-voter-housing', 'demo-voter-al'],
+    ['qv-r2-housing-tx', 'q-demo-r2-voter-housing', 'demo-voter-tx'],
+    ['qv-r2-housing-gulf', 'q-demo-r2-voter-housing', 'demo-voter-gulf'],
+    ['qv-r2-housing-metro', 'q-demo-r2-voter-housing', 'demo-voter-metro'],
+    ['qv-r2-grid-press-al', 'q-demo-r2-press-grid', 'demo-press-al'],
+    ['qv-r2-grid-press-tx', 'q-demo-r2-press-grid', 'demo-press-tx'],
+    ['qv-r2-grid-press-national', 'q-demo-r2-press-grid', 'demo-press-national'],
+    ['qv-r2-tax-al', 'q-demo-r2-voter-property-tax', 'demo-voter-al'],
+    ['qv-r2-tax-tx', 'q-demo-r2-voter-property-tax', 'demo-voter-tx'],
+    ['qv-r2-budget-press-tx', 'q-demo-r2-press-budget', 'demo-press-tx'],
+  ];
+
+  await db.batch(votes.map(vote =>
+    db.prepare(`INSERT OR IGNORE INTO question_votes (id, question_id, user_id) VALUES (?, ?, ?)`)
+      .bind(...vote)
+  ));
+}
+
 // Seed demo races and candidates from store.ts data
 export async function seedDemoData(db) {
   // Check if fully seeded (races + ads)
@@ -863,6 +1003,7 @@ export async function seedDemoData(db) {
   // If ads exist, keep existing demo rows but repair stale placeholder media.
   if (adCount.count > 0) {
     await repairDemoMediaData(db);
+    await seedDemoQuestions(db);
     return;
   }
 
@@ -949,7 +1090,9 @@ export async function seedDemoData(db) {
     db.prepare(`UPDATE candidates SET credit_balance = 10 WHERE id = 'cand-6' AND credit_balance = 0`),
   ]);
 
-  console.log('Arena demo data seeded: 3 races, 6 candidates, 3 ads, 1 rebuttal, 4 challenges, 2 responses, 10 credits each');
+  await seedDemoQuestions(db);
+
+  console.log('Arena demo data seeded: 3 races, 6 candidates, 3 ads, 1 rebuttal, 4 challenges, 2 responses, 8 questions, 10 credits each');
 }
 
 // Generate unique IDs with crypto-grade randomness

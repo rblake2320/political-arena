@@ -138,6 +138,45 @@ describe('races & demo seed (test env only)', () => {
     expect(challenge.challenge_recite_summary.fact_score.score).toBeGreaterThan(50);
   });
 
+  it('serves seeded voter and press questions for demo races', async () => {
+    const raceOne = await get('/api/questions/race-1');
+    expect(raceOne.status).toBe(200);
+    expect(raceOne.body.data.questions.length).toBeGreaterThanOrEqual(4);
+
+    const raceOneQuestions = raceOne.body.data.questions;
+    const raceOneIds = new Set(raceOneQuestions.map(q => q.id));
+    const raceOneSourceTypes = new Set(raceOneQuestions.map(q => q.source_type));
+    expect(raceOneIds.has('q-demo-r1-voter-healthcare')).toBe(true);
+    expect(raceOneIds.has('q-demo-r1-press-economy')).toBe(true);
+    expect(raceOneSourceTypes.has('voter')).toBe(true);
+    expect(raceOneSourceTypes.has('press')).toBe(true);
+    expect(raceOneQuestions[0].vote_count).toBeGreaterThanOrEqual(raceOneQuestions[1].vote_count);
+    expect(raceOneQuestions[0]).toMatchObject({
+      author_name: expect.any(String),
+      is_top: true,
+    });
+
+    const raceTwo = await get('/api/questions/race-2');
+    expect(raceTwo.status).toBe(200);
+    expect(raceTwo.body.data.questions.length).toBeGreaterThanOrEqual(4);
+    const raceTwoIds = new Set(raceTwo.body.data.questions.map(q => q.id));
+    expect(raceTwoIds.has('q-demo-r2-voter-housing')).toBe(true);
+    expect(raceTwoIds.has('q-demo-r2-press-grid')).toBe(true);
+
+    const top = await get('/api/questions/race-1/top');
+    expect(top.status).toBe(200);
+    expect(top.body.data.voter_questions.length).toBeGreaterThanOrEqual(1);
+    expect(top.body.data.press_questions.length).toBeGreaterThanOrEqual(1);
+    expect(top.body.data.voter_questions[0]).toMatchObject({
+      source_type: 'voter',
+      is_top: true,
+    });
+    expect(top.body.data.press_questions[0]).toMatchObject({
+      source_type: 'press',
+      is_top: true,
+    });
+  });
+
   it('serves active ads for a race with paired rebuttals', async () => {
     const res = await get('/api/ads/races/race-1');
     expect(res.status).toBe(200);
