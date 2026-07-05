@@ -10,6 +10,7 @@ import { Router } from 'itty-router';
 import { initDatabase, seedIssueCategories, seedPressNewsSources, seedDemoData } from './db.js';
 import { corsHeaders, json } from './middleware.js';
 import { r2MediaResponse } from './media.js';
+import { notifySubscribers } from './notifications.js';
 
 // Route modules
 import authRoutes from './routes/auth.routes.js';
@@ -203,19 +204,52 @@ export default {
       await initDatabase(env.ARENA_DB);
 
       // 1. Expire open challenges past deadline
+      const expiringChallenges = await env.ARENA_DB.prepare(
+        `SELECT id, race_id, challenger_candidate_id, target_candidate_id, claim_text, challenge_text, public_receipt_slug
+         FROM challenges
+         WHERE status = 'open' AND response_deadline < datetime('now')
+         LIMIT 500`
+      ).all();
       const expired = await env.ARENA_DB.prepare(
         `UPDATE challenges SET status = 'expired', expired_at = datetime('now'), updated_at = datetime('now')
          WHERE status = 'open' AND response_deadline < datetime('now')`
       ).run();
       if (expired.meta?.changes > 0) {
         console.log(`Expired ${expired.meta.changes} challenges`);
+        for (const challenge of expiringChallenges.results || []) {
+          await notifySubscribers(env.ARENA_DB, {
+            raceId: challenge.race_id,
+            candidateIds: [challenge.challenger_candidate_id, challenge.target_candidate_id],
+            challengeId: challenge.id,
+            notificationType: 'challenge_expired',
+            title: 'Callout deadline expired',
+            body: challenge.claim_text || challenge.challenge_text,
+            linkUrl: `/challenge/${challenge.public_receipt_slug || challenge.id}`,
+          });
+        }
       }
 
       // 2. Activate approved ads whose start_date has arrived
+      const activatingAds = await env.ARENA_DB.prepare(
+        `SELECT id, race_id, candidate_id, title, ad_content_text
+         FROM ad_flights
+         WHERE status = 'approved' AND start_date IS NOT NULL AND start_date <= datetime('now')
+         LIMIT 500`
+      ).all();
       await env.ARENA_DB.prepare(
         `UPDATE ad_flights SET status = 'active', activated_at = datetime('now'), updated_at = datetime('now')
          WHERE status = 'approved' AND start_date IS NOT NULL AND start_date <= datetime('now')`
       ).run();
+      for (const ad of activatingAds.results || []) {
+        await notifySubscribers(env.ARENA_DB, {
+          raceId: ad.race_id,
+          candidateIds: [ad.candidate_id],
+          notificationType: 'ad_activated',
+          title: 'Campaign ad went live',
+          body: ad.title || ad.ad_content_text || 'A campaign ad is now active in a watched race.',
+          linkUrl: `/race/${ad.race_id}`,
+        });
+      }
 
       // 3. Complete active ads whose end_date has passed
       await env.ARENA_DB.prepare(

@@ -9,6 +9,7 @@ import { auditLog } from '../audit.js';
 import { requireAuth, requireRole, errorResponse, successResponse, parseBody, parsePagination, getClientIP } from '../middleware.js';
 import { authenticate } from '../auth.js';
 import { validate, createAdSchema, updateAdSchema, reviewAdSchema, createRebuttalSchema, createExternalAdResponseSchema } from '../validation.js';
+import { notifySubscribers } from '../notifications.js';
 
 const router = Router({ base: '/api/ads' });
 
@@ -216,6 +217,17 @@ router.post('/:id/review', async (request, env, ctx) => {
     ipAddress: getClientIP(request),
   });
 
+  if (data.action === 'approve') {
+    await notifySubscribers(env.ARENA_DB, {
+      raceId: ad.race_id,
+      candidateIds: [ad.candidate_id],
+      notificationType: 'ad_approved',
+      title: 'Campaign ad approved',
+      body: ad.title || ad.ad_content_text || 'A campaign ad is now visible in a watched race.',
+      linkUrl: `/race/${ad.race_id}`,
+    });
+  }
+
   return successResponse({ id, status: data.action === 'approve' ? 'approved' : 'rejected' });
 });
 
@@ -244,6 +256,15 @@ router.post('/:id/activate', async (request, env, ctx) => {
     entityType: 'ad_flight',
     entityId: id,
     ipAddress: getClientIP(request),
+  });
+
+  await notifySubscribers(env.ARENA_DB, {
+    raceId: ad.race_id,
+    candidateIds: [ad.candidate_id],
+    notificationType: 'ad_activated',
+    title: 'Campaign ad went live',
+    body: ad.title || ad.ad_content_text || 'A campaign ad is now active in a watched race.',
+    linkUrl: `/race/${ad.race_id}`,
   });
 
   return successResponse({ id, status: 'active' });
@@ -383,6 +404,15 @@ router.post('/rebuttals', async (request, env, ctx) => {
     ipAddress: getClientIP(request),
   });
 
+  await notifySubscribers(env.ARENA_DB, {
+    raceId: ad.race_id,
+    candidateIds: [ad.candidate_id, data.candidate_id],
+    notificationType: 'rebuttal_created',
+    title: 'Rebuttal slot claimed',
+    body: data.response_text,
+    linkUrl: `/race/${ad.race_id}`,
+  });
+
   return successResponse({ id: rebuttalId, status: rebuttalStatus });
 });
 
@@ -474,6 +504,15 @@ router.post('/external-response', async (request, env, ctx) => {
       rebuttal_id: rebuttalId,
     },
     ipAddress: getClientIP(request),
+  });
+
+  await notifySubscribers(env.ARENA_DB, {
+    raceId: data.race_id,
+    candidateIds: [data.source_candidate_id, data.responder_candidate_id],
+    notificationType: 'external_ad_response_created',
+    title: 'Outside ad response posted',
+    body: data.source_title,
+    linkUrl: `/race/${data.race_id}`,
   });
 
   return successResponse({ ad_id: adId, rebuttal_id: rebuttalId, status: 'active' });

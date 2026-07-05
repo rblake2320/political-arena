@@ -5,6 +5,7 @@ import { Race } from "./pages/Race";
 import { CandidateDashboard } from "./pages/CandidateDashboard";
 import { WhatMattersPage } from "./pages/WhatMattersPage";
 import { MyPrioritiesPage } from "./pages/MyPrioritiesPage";
+import { MyArenaPage } from "./pages/MyArenaPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { PressRegistrationPage } from "./pages/PressRegistrationPage";
 import { Help } from "./pages/Help";
@@ -18,7 +19,7 @@ import { ResetPassword } from "./pages/ResetPassword";
 import { useAuth } from "./stores/auth";
 import { useArenaStore } from "./store";
 import * as api from "./api";
-import { Menu, X, LogOut, User, Bell, BarChart3, Newspaper, HelpCircle, ShieldCheck } from "lucide-react";
+import { Menu, X, LogOut, User, Bell, BarChart3, Newspaper, HelpCircle, ShieldCheck, Star } from "lucide-react";
 
 interface CandidateContextType {
   candidates: ReturnType<typeof useArenaStore.getState>["allCandidates"];
@@ -64,6 +65,7 @@ function pageTelemetry(pathname: string): PageTelemetry {
   const knownStaticRoutes = new Set([
     '/',
     '/what-matters',
+    '/my-arena',
     '/my-priorities',
     '/notifications',
     '/moderation',
@@ -133,6 +135,12 @@ function Navigation() {
             <BarChart3 className="w-3.5 h-3.5" />
             What Matters
           </Link>
+          {user && (
+            <Link to="/my-arena" className="text-zinc-400 hover:text-white transition-colors flex items-center gap-1">
+              <Star className="w-3.5 h-3.5" />
+              My Arena
+            </Link>
+          )}
           {user && (
             <Link to="/press/register" className="text-zinc-400 hover:text-white transition-colors flex items-center gap-1">
               <Newspaper className="w-3.5 h-3.5" />
@@ -231,6 +239,11 @@ function Navigation() {
           <Link to="/what-matters" className="block text-indigo-400 hover:text-indigo-300 py-2 text-lg font-medium transition-colors">
             What Matters
           </Link>
+          {user && (
+            <Link to="/my-arena" className="block text-zinc-300 hover:text-white py-2 text-lg font-medium transition-colors">
+              My Arena
+            </Link>
+          )}
           {user && (
             <Link to="/press/register" className="block text-zinc-300 hover:text-white py-2 text-lg font-medium transition-colors">
               Press Credentials
@@ -406,6 +419,7 @@ function AppContent() {
             <Route path="/candidate/:id" element={user ? <CandidateDashboard /> : <Navigate to="/login" replace />} />
             <Route path="/candidate" element={<Navigate to="/" replace />} />
             <Route path="/what-matters" element={<WhatMattersPage />} />
+            <Route path="/my-arena" element={user ? <MyArenaPage /> : <Navigate to="/login" replace />} />
             <Route path="/my-priorities" element={user ? <MyPrioritiesPage /> : <Navigate to="/login" replace />} />
             <Route path="/notifications" element={user ? <NotificationsPage /> : <Navigate to="/login" replace />} />
             <Route path="/moderation" element={user ? <ModerationPage /> : <Navigate to="/login" replace />} />

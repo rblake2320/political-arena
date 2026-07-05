@@ -7,6 +7,7 @@ import { useArenaStore, type RaceDetail } from "../store";
 import * as api from "../api";
 import { useAuth } from "../stores/auth";
 import { ContentMedia, MediaUploadField } from "../components/Media";
+import { WatchButton } from "../components/WatchButton";
 
 export function Race() {
   const { id } = useParams();
@@ -52,25 +53,33 @@ export function Race() {
             <Shield className="w-3.5 h-3.5" /> Verified Voters Only
           </span>
         </div>
-        <h1 className="text-3xl md:text-4xl font-bold tracking-tight mb-6">{raceData.name}</h1>
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight">{raceData.name}</h1>
+          <WatchButton targetType="race" targetId={raceData.id} />
+        </div>
 
         {/* Candidates Overview */}
         <div className="flex gap-4 overflow-x-auto pb-4 -mx-4 px-4">
           {raceData.candidates.map(c => (
-            <Link key={c.id} to={`/profile/candidate/${c.id}`} className="flex-shrink-0 w-64 p-4 rounded-xl border border-zinc-800 bg-zinc-900/30 hover:border-zinc-700 transition-colors">
-              <div className="flex items-center gap-3 mb-3">
+            <div key={c.id} className="flex-shrink-0 w-64 p-4 rounded-xl border border-zinc-800 bg-zinc-900/30 hover:border-zinc-700 transition-colors">
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <Link to={`/profile/candidate/${c.id}`} className="flex min-w-0 items-center gap-3">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white ${
                   c.party === "Democrat" ? "bg-blue-600" : c.party === "Republican" ? "bg-red-600" : "bg-zinc-700"
                 }`}>
                   {c.name.charAt(0)}
                 </div>
-                <div>
-                  <div className="font-medium text-white">{c.name}</div>
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-white">{c.name}</div>
                   <div className="text-xs text-zinc-400">{c.party}</div>
                 </div>
+                </Link>
+                <WatchButton compact targetType="candidate" targetId={c.id} />
               </div>
-              <div className="text-xs text-zinc-500 line-clamp-2">{c.biography}</div>
-            </Link>
+              <Link to={`/profile/candidate/${c.id}`} className="block text-xs text-zinc-500 line-clamp-2 hover:text-zinc-400">
+                {c.biography}
+              </Link>
+            </div>
           ))}
         </div>
       </div>

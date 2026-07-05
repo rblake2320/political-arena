@@ -10,6 +10,16 @@ import { validate, subscribeSchema } from '../validation.js';
 
 const router = Router({ base: '/api/notifications' });
 
+function parseNotifyOn(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 async function subscriptionTargetExists(env, subscriptionType, targetId) {
   if (subscriptionType === 'race') {
     return !!(await env.ARENA_DB.prepare(`SELECT id FROM races WHERE id = ?`).bind(targetId).first());
@@ -73,10 +83,55 @@ router.get('/my-subscriptions', async (request, env) => {
   if (authError) return authError;
 
   const result = await env.ARENA_DB.prepare(
-    `SELECT * FROM notification_subscriptions WHERE user_id = ? AND is_active = 1 ORDER BY created_at DESC`
+    `SELECT
+       ns.*,
+       CASE
+         WHEN ns.subscription_type = 'race' THEN r.name
+         WHEN ns.subscription_type = 'candidate' THEN c.name
+         WHEN ns.subscription_type = 'challenge' THEN COALESCE(ch.claim_text, ch.challenge_text)
+       END as target_label,
+       CASE
+         WHEN ns.subscription_type = 'race' THEN '/race/' || r.id
+         WHEN ns.subscription_type = 'candidate' THEN '/profile/candidate/' || c.id
+         WHEN ns.subscription_type = 'challenge' THEN '/challenge/' || COALESCE(ch.public_receipt_slug, ch.id)
+       END as target_href,
+       CASE
+         WHEN ns.subscription_type = 'race' THEN r.state
+         WHEN ns.subscription_type = 'candidate' THEN cr.state
+         WHEN ns.subscription_type = 'challenge' THEN chr.state
+       END as race_state,
+       CASE
+         WHEN ns.subscription_type = 'race' THEN r.office
+         WHEN ns.subscription_type = 'candidate' THEN cr.office
+         WHEN ns.subscription_type = 'challenge' THEN chr.office
+       END as race_office,
+       CASE
+         WHEN ns.subscription_type = 'race' THEN r.district
+         WHEN ns.subscription_type = 'candidate' THEN cr.district
+         WHEN ns.subscription_type = 'challenge' THEN chr.district
+       END as race_district,
+       c.party as candidate_party,
+       challenger.name as challenger_name,
+       target.name as target_name,
+       ch.status as challenge_status
+     FROM notification_subscriptions ns
+     LEFT JOIN races r ON ns.subscription_type = 'race' AND r.id = ns.target_id
+     LEFT JOIN candidates c ON ns.subscription_type = 'candidate' AND c.id = ns.target_id
+     LEFT JOIN races cr ON cr.id = c.race_id
+     LEFT JOIN challenges ch ON ns.subscription_type = 'challenge' AND ch.id = ns.target_id
+     LEFT JOIN races chr ON chr.id = ch.race_id
+     LEFT JOIN candidates challenger ON challenger.id = ch.challenger_candidate_id
+     LEFT JOIN candidates target ON target.id = ch.target_candidate_id
+     WHERE ns.user_id = ? AND ns.is_active = 1
+     ORDER BY ns.created_at DESC`
   ).bind(request.user.id).all();
 
-  return successResponse({ subscriptions: result.results || [] });
+  return successResponse({
+    subscriptions: (result.results || []).map(subscription => ({
+      ...subscription,
+      notify_on: parseNotifyOn(subscription.notify_on),
+    })),
+  });
 });
 
 // GET /api/notifications — List user's notifications

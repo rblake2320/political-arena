@@ -266,7 +266,18 @@ export const reviewReciteSchema = z.object({
 export const subscribeSchema = z.object({
   subscription_type: z.enum(['race', 'candidate', 'challenge']),
   target_id: z.string().min(1),
-  notify_on: z.array(z.string()).optional().default(['challenge_issued', 'challenge_responded', 'challenge_expired']),
+  notify_on: z.array(z.string()).optional().default([
+    'challenge_issued',
+    'challenge_responded',
+    'challenge_refused',
+    'challenge_expired',
+    'challenge_withdrawn',
+    'ad_approved',
+    'ad_activated',
+    'rebuttal_created',
+    'external_ad_response_created',
+    'question_submitted',
+  ]),
   channel: z.enum(['in_app', 'email', 'both']).optional().default('in_app'),
 });
 

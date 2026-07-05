@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { ChevronRight, MapPin, Users, Flame, MessageSquare, Swords, Megaphone, TrendingUp, Clock, ArrowUpDown } from "lucide-react";
 import { useArenaStore } from "../store";
+import { WatchButton } from "../components/WatchButton";
+import { useAuth } from "../stores/auth";
+import * as api from "../api";
 
 type SortMode = 'trending' | 'newest' | 'name';
 
@@ -24,12 +27,31 @@ function ActivityBar({ score, max }: { score: number; max: number }) {
 
 export function Home() {
   const { races, fetchRaces } = useArenaStore();
+  const { user } = useAuth();
   const [loaded, setLoaded] = useState(races.length > 0);
   const [sort, setSort] = useState<SortMode>('trending');
+  const [subscriptions, setSubscriptions] = useState<any[]>([]);
 
   useEffect(() => {
     fetchRaces(sort).finally(() => setLoaded(true));
   }, [sort]);
+
+  useEffect(() => {
+    if (!user) {
+      setSubscriptions([]);
+      return;
+    }
+    api.getMySubscriptions()
+      .then(data => setSubscriptions(data.subscriptions || []))
+      .catch(() => setSubscriptions([]));
+  }, [user?.id]);
+
+  const updateSubscription = (raceId: string, next: any | null) => {
+    setSubscriptions(prev => {
+      const filtered = prev.filter(sub => !(sub.subscription_type === 'race' && sub.target_id === raceId));
+      return next ? [...filtered, next] : filtered;
+    });
+  };
 
   const maxActivity = Math.max(...races.map(r => r.activity_score || 0), 1);
 
@@ -95,10 +117,9 @@ export function Home() {
             const isHot = score >= 10;
 
             return (
-              <Link
+              <div
                 key={race.id}
-                to={`/race/${race.id}`}
-                className={`group block p-6 rounded-2xl border transition-all duration-200 ${
+                className={`group p-6 rounded-2xl border transition-all duration-200 ${
                   isTrending
                     ? 'bg-gradient-to-br from-zinc-900/80 to-indigo-950/30 border-indigo-500/30 hover:border-indigo-400/50 shadow-lg shadow-indigo-500/5'
                     : 'bg-zinc-900/50 border-zinc-800 hover:bg-zinc-800/50 hover:border-zinc-700'
@@ -122,11 +143,24 @@ export function Home() {
                         </span>
                       )}
                     </div>
-                    <h2 className="text-xl font-semibold text-white mb-1 group-hover:text-indigo-300 transition-colors truncate">
+                    <Link to={`/race/${race.id}`} className="block">
+                    <h2 className="text-xl font-semibold text-white mb-1 hover:text-indigo-300 transition-colors truncate">
                       {race.name}
                     </h2>
+                    </Link>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-zinc-600 group-hover:text-white group-hover:translate-x-0.5 transition-all flex-shrink-0 mt-1" />
+                  <div className="ml-3 flex shrink-0 items-center gap-2">
+                    <WatchButton
+                      compact
+                      targetType="race"
+                      targetId={race.id}
+                      subscription={subscriptions.find(sub => sub.subscription_type === 'race' && sub.target_id === race.id) || null}
+                      onChange={next => updateSubscription(race.id, next)}
+                    />
+                    <Link to={`/race/${race.id}`} aria-label={`Open ${race.name}`}>
+                      <ChevronRight className="w-5 h-5 text-zinc-600 hover:text-white transition-all mt-1" />
+                    </Link>
+                  </div>
                 </div>
 
                 {/* Location + candidates */}
@@ -174,7 +208,7 @@ export function Home() {
                     <span className="text-zinc-600 italic">No activity yet</span>
                   )}
                 </div>
-              </Link>
+              </div>
             );
           })}
         </div>

@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 import { AlertCircle, ExternalLink, FileText, ShieldCheck, Swords, Video } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import * as api from "../api";
+import { WatchButton } from "../components/WatchButton";
 
 function scoreClass(score: number) {
   if (score >= 75) return "text-emerald-300 border-emerald-500/30 bg-emerald-500/10";
@@ -68,6 +69,9 @@ export function CandidateProfilePage() {
           <h1 className="mt-2 text-4xl font-bold tracking-tight text-white">{candidate.name}</h1>
           <div className="mt-2 text-zinc-400">{candidate.party} - {candidate.race_state} {candidate.race_office}</div>
           {candidate.biography && <p className="mt-4 max-w-3xl text-sm leading-relaxed text-zinc-300">{candidate.biography}</p>}
+          <div className="mt-4">
+            <WatchButton targetType="candidate" targetId={candidate.id} />
+          </div>
         </div>
         <div className={`w-full rounded-xl border p-5 md:w-64 ${scoreClass(trust.score)}`}>
           <div className="text-xs font-semibold uppercase tracking-wider opacity-80">Trust Ledger Score</div>

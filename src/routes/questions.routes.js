@@ -11,6 +11,7 @@ import {
 } from '../middleware.js';
 import { validate, submitQuestionSchema } from '../validation.js';
 import { checkRateLimit } from '../ratelimit.js';
+import { notifySubscribers } from '../notifications.js';
 
 const router = Router({ base: '/api/questions' });
 const VOTE_MAX_PER_USER = 20;
@@ -155,6 +156,14 @@ router.post('/:raceId', async (request, env) => {
   await env.ARENA_DB.prepare(
     `INSERT INTO questions (id, race_id, user_id, source_type, question_text, media_url) VALUES (?, ?, ?, ?, ?, ?)`
   ).bind(id, raceId, request.user.id, data.source_type, data.question_text, data.media_url || null).run();
+
+  await notifySubscribers(env.ARENA_DB, {
+    raceId,
+    notificationType: 'question_submitted',
+    title: `${data.source_type === 'press' ? 'Press' : 'Voter'} question submitted`,
+    body: data.question_text,
+    linkUrl: `/race/${raceId}`,
+  });
 
   return successResponse({ id, source_type: data.source_type, question_text: data.question_text });
 });

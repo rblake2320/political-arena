@@ -408,6 +408,14 @@ export async function subscribe(data: { subscription_type: 'race' | 'candidate' 
   return unwrap<any>(await api.post('/notifications/subscribe', data));
 }
 
+export async function unsubscribe(subscriptionId: string) {
+  return unwrap<any>(await api.delete(`/notifications/subscribe/${subscriptionId}`));
+}
+
+export async function getMySubscriptions() {
+  return unwrap<{ subscriptions: any[] }>(await api.get('/notifications/my-subscriptions'));
+}
+
 export async function getNotifications(page?: number) {
   const params = page ? { page } : {};
   return unwrap<any>(await api.get('/notifications', { params }));

@@ -4,6 +4,7 @@ import { AlertCircle, CheckCircle2, Clock, ExternalLink, FileCheck2, ShieldAlert
 import { formatDistanceToNow } from "date-fns";
 import * as api from "../api";
 import { ContentMedia } from "../components/Media";
+import { WatchButton } from "../components/WatchButton";
 
 function statusClass(status: string) {
   if (status === "responded") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
@@ -117,11 +118,14 @@ export function ChallengeReceiptPage() {
         </span>
       </div>
 
-      <div className="mb-8">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
         <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white">Public Callout Receipt</h1>
         <p className="mt-3 max-w-3xl text-zinc-400">
           {challenge.challenger_name} called out {challenge.target_name}. This receipt records the claim, recites, deadline, and response status.
         </p>
+        </div>
+        <WatchButton targetType="challenge" targetId={challenge.id} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
