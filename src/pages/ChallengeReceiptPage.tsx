@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import * as api from "../api";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 const mono = "'IBM Plex Mono', ui-monospace, monospace";
 const display = "'Space Grotesk', system-ui, sans-serif";
@@ -70,6 +71,7 @@ function ReciteCard({ r }: { r: any }) {
 
 export function ChallengeReceiptPage() {
   const { id } = useParams();
+  const isMobile = useIsMobile();
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -107,8 +109,8 @@ export function ChallengeReceiptPage() {
 
   return (
     <div style={{ background: "#08080C", color: "#F2F2F7", fontFamily: "'Hanken Grotesk', system-ui, sans-serif" }}>
-      <div style={{ padding: 40, background: "radial-gradient(900px 400px at 50% -20%, rgba(110,110,247,.1), transparent 65%)" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 340px", gap: 26, maxWidth: 1240, margin: "0 auto", alignItems: "start" }}>
+      <div style={{ padding: isMobile ? 16 : 40, background: "radial-gradient(900px 400px at 50% -20%, rgba(110,110,247,.1), transparent 65%)" }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) 340px", gap: isMobile ? 16 : 26, maxWidth: 1240, margin: "0 auto", alignItems: "start" }}>
 
           {/* RECEIPT DOCUMENT */}
           <div style={{ border: "1px solid rgba(255,255,255,.13)", borderRadius: 18, background: "linear-gradient(180deg,#101018,#0C0C13)", boxShadow: "0 30px 80px rgba(0,0,0,.5)", overflow: "hidden" }}>
@@ -116,7 +118,7 @@ export function ChallengeReceiptPage() {
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "28px 34px 24px", borderBottom: "1px dashed rgba(255,255,255,.14)" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <span style={{ font: `600 10px ${mono}`, letterSpacing: ".22em", color: "#9B9BAB" }}>PUBLIC CALLOUT RECEIPT</span>
-                <span style={{ font: `400 34px/1.1 ${serif}`, color: "#F2F2F7" }}>{challenge.challenger_name} <em style={{ color: "#8F8FF9" }}>calls out</em> {challenge.target_name}</span>
+                <span style={{ font: `400 ${isMobile ? 24 : 34}px/1.1 ${serif}`, color: "#F2F2F7" }}>{challenge.challenger_name} <em style={{ color: "#8F8FF9" }}>calls out</em> {challenge.target_name}</span>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, font: `500 10px ${mono}`, letterSpacing: ".1em", color: "#5C5C6E", flexWrap: "wrap" }}>
                   <span>NO. {String(slug).toUpperCase()}</span>
                   <span style={{ color: "#8F8FF9" }}>{(challenge.race_name || "").toUpperCase()}</span>
@@ -145,7 +147,7 @@ export function ChallengeReceiptPage() {
             {(recites || []).length > 0 && (
               <div style={{ padding: "24px 34px", display: "flex", flexDirection: "column", gap: 12, borderBottom: "1px solid rgba(255,255,255,.07)" }}>
                 <span style={{ font: `600 9.5px ${mono}`, letterSpacing: ".18em", color: "#5C5C6E" }}>RECITES ON FILE · EVIDENCE REQUIRED BEFORE PUBLICATION</span>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
                   {(recites || []).map((r: any) => <ReciteCard key={r.id} r={r} />)}
                 </div>
               </div>
@@ -163,7 +165,7 @@ export function ChallengeReceiptPage() {
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}><span style={{ font: `600 15px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{challenge.target_name}</span><span style={{ font: `500 9.5px ${mono}`, letterSpacing: ".1em", color: tc.text }}>{(challenge.target_party || "").toUpperCase()}</span></div>
                     <div style={{ font: `400 15.5px/1.7 'Hanken Grotesk',sans-serif`, color: "#D6D6DE", maxWidth: 760 }}>{response.response_text}</div>
-                    {(response_recites || []).length > 0 && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{(response_recites || []).map((r: any) => <ReciteCard key={r.id} r={r} />)}</div>}
+                    {(response_recites || []).length > 0 && <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>{(response_recites || []).map((r: any) => <ReciteCard key={r.id} r={r} />)}</div>}
                   </div>
                 </div>
               </div>

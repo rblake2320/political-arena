@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { Search, TrendingUp, ChevronRight, Flame, Clock } from "lucide-react";
 import { useArenaStore } from "../store";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 type SortMode = 'trending' | 'newest' | 'name';
 
@@ -147,6 +148,7 @@ function LedgerRow({ label, value, color, last }: { label: string; value: React.
 
 export function Home() {
   const { races, fetchRaces } = useArenaStore();
+  const isMobile = useIsMobile();
   const [loaded, setLoaded] = useState(races.length > 0);
   const [sort, setSort] = useState<SortMode>('trending');
   const [stats, setStats] = useState<CycleStats | null>(null);
@@ -169,13 +171,13 @@ export function Home() {
   return (
     <div style={{ background: '#08080C', color: '#F2F2F7', fontFamily: "'Hanken Grotesk', system-ui, sans-serif" }}>
       {/* hero + cycle ledger */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 340px', gap: 60, alignItems: 'end', padding: '64px 40px 48px', maxWidth: 1440, margin: '0 auto', background: 'radial-gradient(1000px 420px at 18% -10%, rgba(110,110,247,.13), transparent 65%)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) 340px', gap: isMobile ? 28 : 60, alignItems: 'end', padding: isMobile ? '36px 20px 28px' : '64px 40px 48px', maxWidth: 1440, margin: '0 auto', background: 'radial-gradient(1000px 420px at 18% -10%, rgba(110,110,247,.13), transparent 65%)' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="arena-pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: '#34C384', boxShadow: '0 0 10px rgba(52,195,132,.8)' }} />
             <span style={{ font: `600 10.5px ${mono}`, letterSpacing: '.2em', color: '#34C384' }}>{racesLive} ARENA{racesLive === 1 ? '' : 'S'} IN SESSION</span>
           </div>
-          <div style={{ font: `400 84px/1.02 ${serif}`, letterSpacing: '-.01em', color: '#F2F2F7' }}>
+          <div style={{ font: `400 ${isMobile ? 46 : 84}px/1.02 ${serif}`, letterSpacing: '-.01em', color: '#F2F2F7' }}>
             Every claim goes <em style={{ color: '#8F8FF9' }}>on the record.</em>
           </div>
           <div style={{ font: `400 17px/1.6 'Hanken Grotesk',sans-serif`, color: '#9B9BAB', maxWidth: 560 }}>
@@ -192,7 +194,7 @@ export function Home() {
       </div>
 
       {/* section head + sort + search */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 40px 22px', maxWidth: 1440, margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, padding: isMobile ? '6px 20px 18px' : '6px 40px 22px', maxWidth: 1440, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <span style={{ font: `600 20px ${display}`, color: '#F2F2F7' }}>Active arenas</span>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -219,7 +221,7 @@ export function Home() {
       </div>
 
       {/* race grid */}
-      <div style={{ maxWidth: 1440, margin: '0 auto', padding: '0 40px 56px' }}>
+      <div style={{ maxWidth: 1440, margin: '0 auto', padding: isMobile ? '0 20px 40px' : '0 40px 56px' }}>
         {!loaded ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}>
             <div style={{ width: 24, height: 24, border: '2px solid rgba(110,110,247,.3)', borderTopColor: '#6E6EF7', borderRadius: '50%', animation: 'arena-marquee 0s' }} className="arena-pulse" />
@@ -230,7 +232,7 @@ export function Home() {
             <div style={{ font: `400 12px ${mono}`, color: '#5C5C6E' }}>Check back soon.</div>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 18 }}>
             {races.map(race => <RaceCard key={race.id} race={race} days={days} />)}
           </div>
         )}

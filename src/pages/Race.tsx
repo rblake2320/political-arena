@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useArenaStore } from "../store";
-import * as api from "../api";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 const mono = "'IBM Plex Mono', ui-monospace, monospace";
 const display = "'Space Grotesk', system-ui, sans-serif";
@@ -99,6 +99,7 @@ function CalloutCard({ ch, cands, responses }: { ch: any; cands: any[]; response
 
 export function Race() {
   const { id } = useParams();
+  const isMobile = useIsMobile();
   const { raceDetails, fetchRace } = useArenaStore();
   const [questions, setQuestions] = useState<any[]>([]);
   const [tab, setTab] = useState<"wire" | "callouts" | "ads" | "questions">("wire");
@@ -165,11 +166,11 @@ export function Race() {
           <span style={{ font: `600 10px ${mono}`, letterSpacing: ".16em", color: "#8F8FF9" }}>{race.state} · {level} · {(race.office || "").toUpperCase()}</span>
         </div>
         <div style={{ textAlign: "center", marginBottom: 34 }}>
-          <div style={{ font: `400 54px/1.05 ${serif}`, color: "#F2F2F7" }}>{race.name}</div>
+          <div style={{ font: `400 ${isMobile ? 32 : 54}px/1.05 ${serif}`, color: "#F2F2F7" }}>{race.name}</div>
           {(race as any).description && <div style={{ marginTop: 12, font: `400 14px/1.6 'Hanken Grotesk',sans-serif`, color: "#9B9BAB", maxWidth: 640, margin: "12px auto 0" }}>{(race as any).description}</div>}
         </div>
         {dem && rep && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 1fr", alignItems: "stretch", maxWidth: 1080, margin: "0 auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 120px 1fr", gap: isMobile ? 12 : 0, alignItems: "stretch", maxWidth: 1080, margin: "0 auto" }}>
             <CandCol c={dem} s={dS} side="l" />
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
               <span style={{ font: `italic 400 34px ${serif}`, color: "#5C5C6E" }}>vs</span>
@@ -190,7 +191,7 @@ export function Race() {
       </div>
 
       {/* body */}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 332px", gap: 26, padding: "30px 40px 44px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) 332px", gap: isMobile ? 18 : 26, padding: isMobile ? "24px 16px 40px" : "30px 40px 44px" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
           {(tab === "wire" || tab === "callouts") && challenges.map((ch: any) => <CalloutCard key={ch.id} ch={ch} cands={cands} responses={responses} />)}
           {(tab === "wire" || tab === "ads") && ads.map((ad: any) => {
@@ -202,7 +203,7 @@ export function Race() {
                   <span style={{ font: `600 10px ${mono}`, letterSpacing: ".14em", color: "#9B9BAB" }}>AD FLIGHT · {String(ad.id).toUpperCase()}</span>
                   <span style={{ font: `600 10px ${mono}`, letterSpacing: ".1em", color: "#5C5C6E" }}>SERVED AS A PAIRED UNIT — CLAIM + ANSWER</span>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
                   <div style={{ padding: 22, borderRight: "1px solid rgba(255,255,255,.07)", display: "flex", flexDirection: "column", gap: 14 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <div style={{ width: 30, height: 30, borderRadius: "50%", background: pc.grad, border: `1.5px solid ${pc.ring}`, display: "flex", alignItems: "center", justifyContent: "center", font: `600 10.5px ${display}`, color: pc.soft }}>{initials(cand?.name)}</div>
