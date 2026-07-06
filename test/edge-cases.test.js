@@ -30,6 +30,10 @@ async function put(path, body, token) {
   return request('PUT', path, body, token);
 }
 
+async function del(path, token) {
+  return request('DELETE', path, undefined, token);
+}
+
 async function get(path, token) {
   return request('GET', path, undefined, token);
 }
@@ -530,6 +534,77 @@ describe('edge-case regressions', () => {
       target_id: 'race-1',
     }, user.token);
     expect(duplicate.status).toBe(409);
+  });
+
+  it('returns enriched watchlists and manages favorites separately from notifications', async () => {
+    const user = await registerUser('watchfavorite');
+
+    const watchRace = await post('/api/notifications/subscribe', {
+      subscription_type: 'race',
+      target_id: 'race-1',
+      notify_on: ['challenge_issued'],
+      channel: 'in_app',
+    }, user.token);
+    expect(watchRace.status).toBe(200);
+
+    const watchCandidate = await post('/api/notifications/subscribe', {
+      subscription_type: 'candidate',
+      target_id: 'cand-1',
+    }, user.token);
+    expect(watchCandidate.status).toBe(200);
+
+    const watchlist = await get('/api/notifications/watchlist', user.token);
+    expect(watchlist.status).toBe(200);
+    expect(watchlist.body.data.grouped.races).toHaveLength(1);
+    expect(watchlist.body.data.grouped.races[0].notify_on).toEqual(['challenge_issued']);
+    expect(watchlist.body.data.grouped.races[0].target).toMatchObject({
+      id: 'race-1',
+      candidate_count: expect.any(Number),
+    });
+    expect(watchlist.body.data.grouped.candidates[0].target).toMatchObject({
+      id: 'cand-1',
+      race_id: 'race-1',
+    });
+
+    const missingFavorite = await post('/api/favorites', {
+      favorite_type: 'candidate',
+      target_id: 'cand-missing',
+    }, user.token);
+    expect(missingFavorite.status).toBe(404);
+
+    const favoriteRace = await post('/api/favorites', {
+      favorite_type: 'race',
+      target_id: 'race-1',
+    }, user.token);
+    expect(favoriteRace.status).toBe(200);
+
+    const favoriteChallenge = await post('/api/favorites', {
+      favorite_type: 'challenge',
+      target_id: 'chal-1',
+    }, user.token);
+    expect(favoriteChallenge.status).toBe(200);
+
+    const duplicateFavorite = await post('/api/favorites', {
+      favorite_type: 'race',
+      target_id: 'race-1',
+    }, user.token);
+    expect(duplicateFavorite.status).toBe(409);
+
+    const favorites = await get('/api/favorites', user.token);
+    expect(favorites.status).toBe(200);
+    expect(favorites.body.data.grouped.races[0].target.name).toBeTruthy();
+    expect(favorites.body.data.grouped.challenges[0].target).toMatchObject({
+      id: 'chal-1',
+      public_receipt_slug: expect.any(String),
+    });
+
+    const removed = await del(`/api/favorites/${favoriteRace.body.data.id}`, user.token);
+    expect(removed.status).toBe(200);
+    expect(removed.body.data.removed).toBe(true);
+
+    const afterRemove = await get('/api/favorites', user.token);
+    expect(afterRemove.body.data.grouped.races).toHaveLength(0);
+    expect(afterRemove.body.data.grouped.challenges).toHaveLength(1);
   });
 
   it('rejects reactions to missing content and accepts visible content', async () => {
