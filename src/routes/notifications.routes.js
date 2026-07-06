@@ -7,24 +7,12 @@ import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { requireAuth, errorResponse, successResponse, parseBody, parsePagination } from '../middleware.js';
 import { validate, subscribeSchema } from '../validation.js';
+import { enrichSavedItems, savedTargetExists } from './saved-items.helpers.js';
 
 const router = Router({ base: '/api/notifications' });
 
 async function subscriptionTargetExists(env, subscriptionType, targetId) {
-  if (subscriptionType === 'race') {
-    return !!(await env.ARENA_DB.prepare(`SELECT id FROM races WHERE id = ?`).bind(targetId).first());
-  }
-  if (subscriptionType === 'candidate') {
-    return !!(await env.ARENA_DB.prepare(
-      `SELECT id FROM candidates WHERE id = ? AND is_active = 1`
-    ).bind(targetId).first());
-  }
-  if (subscriptionType === 'challenge') {
-    return !!(await env.ARENA_DB.prepare(
-      `SELECT id FROM challenges WHERE id = ? AND is_visible = 1`
-    ).bind(targetId).first());
-  }
-  return false;
+  return savedTargetExists(env, subscriptionType, targetId);
 }
 
 // POST /api/notifications/subscribe — Subscribe to events
@@ -77,6 +65,22 @@ router.get('/my-subscriptions', async (request, env) => {
   ).bind(request.user.id).all();
 
   return successResponse({ subscriptions: result.results || [] });
+});
+
+// GET /api/notifications/watchlist — Enriched watched races/candidates/challenges
+router.get('/watchlist', async (request, env) => {
+  const authError = await requireAuth(request, env);
+  if (authError) return authError;
+
+  const result = await env.ARENA_DB.prepare(
+    `SELECT id, subscription_type, target_id, notify_on, channel, created_at
+     FROM notification_subscriptions
+     WHERE user_id = ? AND is_active = 1
+     ORDER BY created_at DESC`
+  ).bind(request.user.id).all();
+
+  const { items, grouped } = await enrichSavedItems(env, result.results || [], 'subscription_type');
+  return successResponse({ subscriptions: items, grouped });
 });
 
 // GET /api/notifications — List user's notifications

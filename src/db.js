@@ -140,6 +140,25 @@ export async function runRuntimeMigrations(db) {
     ]);
   }
 
+  const userFavoriteColumnsResult = await db.prepare(`PRAGMA table_info(user_favorites)`).all();
+  const userFavoriteColumns = new Set((userFavoriteColumnsResult.results || []).map(c => c.name));
+  if (!userFavoriteColumns.has('id')) {
+    await db.batch([
+      db.prepare(`CREATE TABLE IF NOT EXISTS user_favorites (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        favorite_type TEXT NOT NULL CHECK(favorite_type IN ('race','candidate','challenge')),
+        target_id TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(user_id, favorite_type, target_id)
+      )`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_favorites_user
+        ON user_favorites(user_id, created_at)`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_favorites_target
+        ON user_favorites(favorite_type, target_id)`),
+    ]);
+  }
+
   const auditColumnsResult = await db.prepare(`PRAGMA table_info(audit_log)`).all();
   const auditColumns = new Set((auditColumnsResult.results || []).map(c => c.name));
   const auditColumnMigrations = [];
@@ -725,6 +744,15 @@ export async function initDatabase(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
 
+    db.prepare(`CREATE TABLE IF NOT EXISTS user_favorites (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      favorite_type TEXT NOT NULL CHECK(favorite_type IN ('race','candidate','challenge')),
+      target_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, favorite_type, target_id)
+    )`),
+
     db.prepare(`CREATE TABLE IF NOT EXISTS email_deliveries (
       id TEXT PRIMARY KEY,
       provider TEXT,
@@ -1100,6 +1128,8 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_notif_subs_user ON notification_subscriptions(user_id, is_active)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_notif_subs_target ON notification_subscriptions(subscription_type, target_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_favorites_user ON user_favorites(user_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_favorites_target ON user_favorites(favorite_type, target_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_email_deliveries_recipient ON email_deliveries(recipient_user_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_email_deliveries_related ON email_deliveries(related_entity_type, related_entity_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_email_deliveries_status ON email_deliveries(status, created_at)`),

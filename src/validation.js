@@ -297,6 +297,11 @@ export const subscribeSchema = z.object({
   channel: z.enum(['in_app', 'email', 'both']).optional().default('in_app'),
 });
 
+export const favoriteSchema = z.object({
+  favorite_type: z.enum(['race', 'candidate', 'challenge']),
+  target_id: z.string().min(1),
+});
+
 // ===== Survey Schemas =====
 
 export const submitPrioritiesSchema = z.object({

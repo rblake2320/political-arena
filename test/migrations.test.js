@@ -9,6 +9,7 @@ function createFakeD1({
   recites,
   issueCategories,
   voterWriteins,
+  userFavorites = [],
   auditLog,
   pressFeedItems = [],
   emailDeliveries = [],
@@ -24,6 +25,7 @@ function createFakeD1({
   const reciteColumns = new Set(recites);
   const issueCategoryColumns = new Set(issueCategories);
   const voterWriteinColumns = new Set(voterWriteins);
+  const userFavoriteColumns = new Set(userFavorites);
   const auditColumns = new Set(auditLog);
   const pressFeedColumns = new Set(pressFeedItems);
   const emailDeliveryColumns = new Set(emailDeliveries);
@@ -60,6 +62,9 @@ function createFakeD1({
           }
           if (sql === 'PRAGMA table_info(voter_writeins)') {
             return { results: Array.from(voterWriteinColumns).map(name => ({ name })) };
+          }
+          if (sql === 'PRAGMA table_info(user_favorites)') {
+            return { results: Array.from(userFavoriteColumns).map(name => ({ name })) };
           }
           if (sql === 'PRAGMA table_info(audit_log)') {
             return { results: Array.from(auditColumns).map(name => ({ name })) };
@@ -115,6 +120,9 @@ function createFakeD1({
         if (issueCategoryMatch) issueCategoryColumns.add(issueCategoryMatch[1]);
         const voterWriteinMatch = statement.sql.match(/^ALTER TABLE voter_writeins ADD COLUMN (\w+)/);
         if (voterWriteinMatch) voterWriteinColumns.add(voterWriteinMatch[1]);
+        if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS user_favorites')) {
+          ['id', 'user_id', 'favorite_type', 'target_id', 'created_at'].forEach(column => userFavoriteColumns.add(column));
+        }
         const auditMatch = statement.sql.match(/^ALTER TABLE audit_log ADD COLUMN (\w+)/);
         if (auditMatch) auditColumns.add(auditMatch[1]);
         const auditIndexMatch = statement.sql.match(/^CREATE UNIQUE INDEX IF NOT EXISTS (idx_audit_\w+)/);
@@ -187,6 +195,7 @@ function createFakeD1({
     reciteColumns,
     issueCategoryColumns,
     voterWriteinColumns,
+    userFavoriteColumns,
     auditColumns,
     pressFeedColumns,
     emailDeliveryColumns,
@@ -286,6 +295,7 @@ describe('runtime migrations', () => {
         'created_at',
         'updated_at',
       ],
+      userFavorites: [],
       auditLog: [
         'id',
         'actor_id',
@@ -319,6 +329,7 @@ describe('runtime migrations', () => {
     expect(db.reciteColumns.has('review_note')).toBe(true);
     expect(db.issueCategoryColumns.has('parent_category_id')).toBe(true);
     expect(db.voterWriteinColumns.has('writein_rank')).toBe(true);
+    expect(db.userFavoriteColumns.has('id')).toBe(true);
     expect(db.auditColumns.has('prev_hash')).toBe(true);
     expect(db.auditColumns.has('entry_hash')).toBe(true);
     expect(db.auditColumns.has('chain_seq')).toBe(true);
@@ -359,6 +370,18 @@ describe('runtime migrations', () => {
       'ALTER TABLE recites ADD COLUMN review_note TEXT',
       'ALTER TABLE issue_categories ADD COLUMN parent_category_id TEXT REFERENCES issue_categories(id)',
       'ALTER TABLE voter_writeins ADD COLUMN writein_rank INTEGER NOT NULL DEFAULT 1 CHECK(writein_rank BETWEEN 1 AND 3)',
+      `CREATE TABLE IF NOT EXISTS user_favorites (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        favorite_type TEXT NOT NULL CHECK(favorite_type IN ('race','candidate','challenge')),
+        target_id TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(user_id, favorite_type, target_id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_user_favorites_user
+        ON user_favorites(user_id, created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_user_favorites_target
+        ON user_favorites(favorite_type, target_id)`,
       'ALTER TABLE audit_log ADD COLUMN prev_hash TEXT',
       'ALTER TABLE audit_log ADD COLUMN entry_hash TEXT',
       'ALTER TABLE audit_log ADD COLUMN chain_seq INTEGER',
@@ -513,6 +536,7 @@ describe('runtime migrations', () => {
       recites: ['id'],
       issueCategories: ['id', 'parent_category_id'],
       voterWriteins: ['id', 'writein_rank'],
+      userFavorites: ['id'],
       auditLog: ['id', 'prev_hash', 'entry_hash', 'chain_seq'],
       missingChallengeSlug: true,
     });
@@ -541,6 +565,7 @@ describe('runtime migrations', () => {
       recites: ['id', 'source_published_at', 'accessed_at', 'archive_url', 'evidence_media_url', 'review_note'],
       issueCategories: ['id', 'parent_category_id'],
       voterWriteins: ['id', 'writein_rank'],
+      userFavorites: ['id'],
       auditLog: ['id', 'prev_hash', 'entry_hash', 'chain_seq'],
       pressFeedItems: ['id'],
       emailDeliveries: ['id'],
