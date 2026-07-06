@@ -2,7 +2,7 @@
   "source_name": "FEC bulk candidate master (cn26)",
   "source_url": "https://www.fec.gov/files/bulk-downloads/2026/cn26.zip",
   "source_file_sha256": "ced3faa7f9bb4f9b18350809d7c74327fe556e590d5642a643ae042222671b38",
-  "source_text_sha256": "79eb29e79c5163eb393fc5d11ae6cbaf87d71d5d941738f0431c65d90a243247",
+  "source_text_sha256": "a079363205860a4bf249c9e5e6d912d4d005e717d066bbb2dd5649126733b20d",
   "validated_loader_counts": {
     "source_rows": 8037,
     "eligible_federal_rows": 2301,

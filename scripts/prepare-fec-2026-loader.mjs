@@ -194,6 +194,10 @@ function parseFederalFecRows(text, { cycle = '2026', statuses = DEFAULT_STATUSES
       race_id: raceId,
       name: row.cand_name,
       party: normalizeParty(row.party),
+      source_status: 'fec_registered',
+      source_url: 'https://www.fec.gov/campaign-finance-data/candidate-master-file-description/',
+      source_label: 'FEC-registered; not state ballot-certified',
+      source_updated_at: null,
       verification_status: 'pending',
       is_active: 1,
     });
@@ -233,11 +237,15 @@ function buildSql({ races, candidates }, { includeCandidates = false, raceStatus
     lines.push('', '-- Candidate directory rows are unclaimed FEC registrations, not platform participants.');
     for (const candidate of candidates) {
       lines.push(
-        `INSERT OR IGNORE INTO candidates (id, race_id, name, party, verification_status, is_active) VALUES (${[
+        `INSERT OR IGNORE INTO candidates (id, race_id, name, party, source_status, source_url, source_label, source_updated_at, verification_status, is_active) VALUES (${[
           candidate.id,
           candidate.race_id,
           candidate.name,
           candidate.party,
+          candidate.source_status,
+          candidate.source_url,
+          candidate.source_label,
+          candidate.source_updated_at,
           candidate.verification_status,
           candidate.is_active,
         ].map(sqlString).join(', ')});`

@@ -3,6 +3,7 @@ import { runRuntimeMigrations } from '../src/db.js';
 
 function createFakeD1({
   users,
+  candidates = [],
   adFlights,
   challenges,
   recites,
@@ -17,6 +18,7 @@ function createFakeD1({
   missingChallengeSlug = false,
 }) {
   const userColumns = new Set(users);
+  const candidateColumns = new Set(candidates);
   const adColumns = new Set(adFlights);
   const challengeColumns = new Set(challenges);
   const reciteColumns = new Set(recites);
@@ -40,6 +42,9 @@ function createFakeD1({
         all: async () => {
           if (sql === 'PRAGMA table_info(users)') {
             return { results: Array.from(userColumns).map(name => ({ name })) };
+          }
+          if (sql === 'PRAGMA table_info(candidates)') {
+            return { results: Array.from(candidateColumns).map(name => ({ name })) };
           }
           if (sql === 'PRAGMA table_info(ad_flights)') {
             return { results: Array.from(adColumns).map(name => ({ name })) };
@@ -95,6 +100,8 @@ function createFakeD1({
         executed.push(statement.sql);
         const userMatch = statement.sql.match(/^ALTER TABLE users ADD COLUMN (\w+)/);
         if (userMatch) userColumns.add(userMatch[1]);
+        const candidateMatch = statement.sql.match(/^ALTER TABLE candidates ADD COLUMN (\w+)/);
+        if (candidateMatch) candidateColumns.add(candidateMatch[1]);
         const adMatch = statement.sql.match(/^ALTER TABLE ad_flights ADD COLUMN (\w+)/);
         if (adMatch) adColumns.add(adMatch[1]);
         const challengeMatch = statement.sql.match(/^ALTER TABLE challenges ADD COLUMN (\w+)/);
@@ -174,6 +181,7 @@ function createFakeD1({
       return statements.map(() => ({ success: true }));
     },
     userColumns,
+    candidateColumns,
     adColumns,
     challengeColumns,
     reciteColumns,
@@ -217,6 +225,18 @@ describe('runtime migrations', () => {
         'media_type',
         'ad_content_text',
         'disclaimer_text',
+      ],
+      candidates: [
+        'id',
+        'race_id',
+        'user_id',
+        'name',
+        'party',
+        'biography',
+        'issue_positions',
+        'photo_url',
+        'website_url',
+        'verification_status',
       ],
       challenges: [
         'id',
@@ -285,6 +305,10 @@ describe('runtime migrations', () => {
 
     expect(db.userColumns.has('password_reset_token_hash')).toBe(true);
     expect(db.userColumns.has('password_reset_expires_at')).toBe(true);
+    expect(db.candidateColumns.has('source_status')).toBe(true);
+    expect(db.candidateColumns.has('source_url')).toBe(true);
+    expect(db.candidateColumns.has('source_label')).toBe(true);
+    expect(db.candidateColumns.has('source_updated_at')).toBe(true);
     expect(db.adColumns.has('source_type')).toBe(true);
     expect(db.adColumns.has('source_url')).toBe(true);
     expect(db.adColumns.has('source_label')).toBe(true);
@@ -308,6 +332,18 @@ describe('runtime migrations', () => {
     expect(db.executed).toEqual([
       'ALTER TABLE users ADD COLUMN password_reset_token_hash TEXT',
       'ALTER TABLE users ADD COLUMN password_reset_expires_at TEXT',
+      "ALTER TABLE candidates ADD COLUMN source_status TEXT NOT NULL DEFAULT 'platform_claim'",
+      'ALTER TABLE candidates ADD COLUMN source_url TEXT',
+      'ALTER TABLE candidates ADD COLUMN source_label TEXT',
+      'ALTER TABLE candidates ADD COLUMN source_updated_at TEXT',
+      `UPDATE candidates
+         SET source_status = 'fec_registered',
+             source_label = 'FEC-registered; not state ballot-certified',
+             source_url = COALESCE(source_url, 'https://www.fec.gov/campaign-finance-data/candidate-master-file-description/'),
+             source_updated_at = COALESCE(source_updated_at, datetime('now'))
+         WHERE id LIKE 'cand-fec-%'
+           AND user_id IS NULL
+           AND (source_status IS NULL OR source_status = 'platform_claim')`,
       "ALTER TABLE ad_flights ADD COLUMN source_type TEXT NOT NULL DEFAULT 'platform'",
       'ALTER TABLE ad_flights ADD COLUMN source_url TEXT',
       'ALTER TABLE ad_flights ADD COLUMN source_label TEXT',
@@ -471,6 +507,7 @@ describe('runtime migrations', () => {
   it('backfills legacy challenge receipt slugs once', async () => {
     const db = createFakeD1({
       users: ['id'],
+      candidates: ['id', 'source_status', 'source_url', 'source_label', 'source_updated_at'],
       adFlights: ['id'],
       challenges: ['id', 'public_receipt_slug'],
       recites: ['id'],
@@ -498,6 +535,7 @@ describe('runtime migrations', () => {
   it('rebuilds legacy correction tables to the current correction schema', async () => {
     const db = createFakeD1({
       users: ['id', 'password_reset_token_hash', 'password_reset_expires_at'],
+      candidates: ['id', 'source_status', 'source_url', 'source_label', 'source_updated_at'],
       adFlights: ['id', 'source_type', 'source_url', 'source_label', 'posted_for_rebuttal_by'],
       challenges: ['id', 'claim_text', 'dispute_summary', 'requested_response', 'public_receipt_slug'],
       recites: ['id', 'source_published_at', 'accessed_at', 'archive_url', 'evidence_media_url', 'review_note'],

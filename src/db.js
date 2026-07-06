@@ -30,6 +30,37 @@ export async function runRuntimeMigrations(db) {
   }
   if (userColumnMigrations.length > 0) await db.batch(userColumnMigrations);
 
+  const candidateColumnsResult = await db.prepare(`PRAGMA table_info(candidates)`).all();
+  const candidateColumns = new Set((candidateColumnsResult.results || []).map(c => c.name));
+  const candidateColumnMigrations = [];
+  if (!candidateColumns.has('source_status')) {
+    candidateColumnMigrations.push(db.prepare(`ALTER TABLE candidates ADD COLUMN source_status TEXT NOT NULL DEFAULT 'platform_claim'`));
+  }
+  if (!candidateColumns.has('source_url')) {
+    candidateColumnMigrations.push(db.prepare(`ALTER TABLE candidates ADD COLUMN source_url TEXT`));
+  }
+  if (!candidateColumns.has('source_label')) {
+    candidateColumnMigrations.push(db.prepare(`ALTER TABLE candidates ADD COLUMN source_label TEXT`));
+  }
+  if (!candidateColumns.has('source_updated_at')) {
+    candidateColumnMigrations.push(db.prepare(`ALTER TABLE candidates ADD COLUMN source_updated_at TEXT`));
+  }
+  if (candidateColumnMigrations.length > 0) {
+    await db.batch([
+      ...candidateColumnMigrations,
+      db.prepare(
+        `UPDATE candidates
+         SET source_status = 'fec_registered',
+             source_label = 'FEC-registered; not state ballot-certified',
+             source_url = COALESCE(source_url, 'https://www.fec.gov/campaign-finance-data/candidate-master-file-description/'),
+             source_updated_at = COALESCE(source_updated_at, datetime('now'))
+         WHERE id LIKE 'cand-fec-%'
+           AND user_id IS NULL
+           AND (source_status IS NULL OR source_status = 'platform_claim')`
+      ),
+    ]);
+  }
+
   const adColumnsResult = await db.prepare(`PRAGMA table_info(ad_flights)`).all();
   const adColumns = new Set((adColumnsResult.results || []).map(c => c.name));
   const adColumnMigrations = [];
@@ -482,6 +513,10 @@ export async function initDatabase(db) {
       issue_positions TEXT,
       photo_url TEXT,
       website_url TEXT,
+      source_status TEXT NOT NULL DEFAULT 'platform_claim' CHECK(source_status IN ('platform_claim','fec_registered','state_ballot_certified','ballotpedia_listed','wikipedia_listed','exploratory_unverified','withdrawn','inactive','prior_cycle','unknown')),
+      source_url TEXT,
+      source_label TEXT,
+      source_updated_at TEXT,
       verification_status TEXT NOT NULL DEFAULT 'pending' CHECK(verification_status IN ('pending','verified','rejected','suspended')),
       verified_by TEXT REFERENCES users(id),
       verified_at TEXT,
@@ -1040,6 +1075,7 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_candidates_race ON candidates(race_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_candidates_user ON candidates(user_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_candidates_verification ON candidates(verification_status)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_candidates_source_status ON candidates(source_status)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_staff_links_user ON candidate_staff_links(user_id, is_active)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_staff_links_candidate ON candidate_staff_links(candidate_id, is_active)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_ads_race ON ad_flights(race_id, status)`),
