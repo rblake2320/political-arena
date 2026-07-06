@@ -215,6 +215,8 @@ describe('edge-case regressions', () => {
     }, staff.token);
     expect(sourced.status).toBe(200);
     expect(sourced.body.data.initial_recites).toBe(1);
+    expect(sourced.body.data.notice_status).toBe('in_app');
+    expect(sourced.body.data.notice_channels).toEqual(['in_app']);
 
     const recites = await get(`/api/recites?content_type=challenge&content_id=${sourced.body.data.id}`);
     expect(recites.status).toBe(200);
@@ -281,6 +283,59 @@ describe('edge-case regressions', () => {
     expect(tamperedReceipt.status).toBe(200);
     expect(tamperedReceipt.body.data.audit_chain.status).toBe('failed');
     expect(tamperedReceipt.body.data.audit_chain.failures[0].reason).toMatch(/hash mismatch/);
+  });
+
+  it('does not convert unserved callouts into public non-response penalties', async () => {
+    const staff = await makeVerifiedVoter('unservedstaff');
+    const suffix = `${Date.now().toString(36)}${seq}`;
+    const raceId = `edge-unserved-race-${suffix}`;
+    const challengerId = `edge-unserved-challenger-${suffix}`;
+    const targetId = `edge-unserved-target-${suffix}`;
+
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(
+        `INSERT INTO races (id, name, office, state, district, status)
+         VALUES (?, ?, 'House', 'TX', '01', 'active')`
+      ).bind(raceId, `Unserved Race ${suffix}`),
+      env.ARENA_DB.prepare(
+        `INSERT INTO candidates (id, race_id, user_id, name, party, verification_status, credit_balance, is_active)
+         VALUES (?, ?, ?, 'Served Challenger', 'Democrat', 'verified', 5, 1)`
+      ).bind(challengerId, raceId, staff.id),
+      env.ARENA_DB.prepare(
+        `INSERT INTO candidates (id, race_id, user_id, name, party, verification_status, credit_balance, is_active)
+         VALUES (?, ?, NULL, 'Unclaimed Target', 'Republican', 'pending', 5, 1)`
+      ).bind(targetId, raceId),
+      env.ARENA_DB.prepare(
+        `INSERT INTO candidate_staff_links (id, user_id, candidate_id, role, is_active)
+         VALUES (?, ?, ?, 'primary', 1)`
+      ).bind(`edge-unserved-link-${suffix}`, staff.id, challengerId),
+    ]);
+
+    const issued = await post('/api/challenges', {
+      race_id: raceId,
+      challenger_candidate_id: challengerId,
+      target_candidate_id: targetId,
+      challenge_type: 'policy_question',
+      challenge_text: 'Please explain how your housing plan would be funded.',
+    }, staff.token);
+    expect(issued.status).toBe(200);
+    expect(issued.body.data.notice_status).toBe('unserved');
+
+    await env.ARENA_DB.prepare(
+      `UPDATE challenges SET response_deadline = datetime('now', '-1 day') WHERE id = ?`
+    ).bind(issued.body.data.id).run();
+
+    const receipt = await get(`/api/challenges/${issued.body.data.public_receipt_slug}/receipt`);
+    expect(receipt.status).toBe(200);
+    expect(receipt.body.data.challenge.status).toBe('open');
+    expect(receipt.body.data.challenge.notice_status).toBe('unserved');
+
+    const profile = await get(`/api/candidates/${targetId}/public-profile`);
+    expect(profile.status).toBe(200);
+    expect(profile.body.data.stats.challenges_targeted).toBe(1);
+    expect(profile.body.data.stats.challenges_accountable).toBe(0);
+    expect(profile.body.data.stats.challenges_expired).toBe(0);
+    expect(profile.body.data.trust.response_rate).toBe(100);
   });
 
   it('rejects duplicate priority ranks and unknown issue categories', async () => {
@@ -463,18 +518,18 @@ describe('edge-case regressions', () => {
       ).bind(candidateC, raceId, staff.id),
       env.ARENA_DB.prepare(
         `INSERT INTO challenges
-         (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, claim_text, challenge_type, status, deadline_business_days, response_deadline, is_visible)
-         VALUES (?, ?, ?, ?, ?, 'Please source this tax claim.', 'The plan raises taxes.', 'fact_check', 'responded', 3, ?, 1)`
+         (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, claim_text, challenge_type, status, deadline_business_days, response_deadline, notice_status, notice_served_at, is_visible)
+         VALUES (?, ?, ?, ?, ?, 'Please source this tax claim.', 'The plan raises taxes.', 'fact_check', 'responded', 3, ?, 'in_app', datetime('now'), 1)`
       ).bind(challenge1, raceId, candidateB, candidateA, staff.id, new Date(Date.now() + 86400000).toISOString()),
       env.ARENA_DB.prepare(
         `INSERT INTO challenges
-         (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, deadline_business_days, response_deadline, is_visible)
-         VALUES (?, ?, ?, ?, ?, 'Will you debate housing policy?', 'debate_request', 'open', 3, ?, 1)`
+         (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, deadline_business_days, response_deadline, notice_status, notice_served_at, is_visible)
+         VALUES (?, ?, ?, ?, ?, 'Will you debate housing policy?', 'debate_request', 'open', 3, ?, 'in_app', datetime('now'), 1)`
       ).bind(challenge2, raceId, candidateB, candidateA, staff.id, new Date(Date.now() + 86400000).toISOString()),
       env.ARENA_DB.prepare(
         `INSERT INTO challenges
-         (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, deadline_business_days, response_deadline, is_visible)
-         VALUES (?, ?, ?, ?, ?, 'Explain the public-safety vote.', 'policy_question', 'refused', 3, ?, 1)`
+         (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, deadline_business_days, response_deadline, notice_status, notice_served_at, is_visible)
+         VALUES (?, ?, ?, ?, ?, 'Explain the public-safety vote.', 'policy_question', 'refused', 3, ?, 'in_app', datetime('now'), 1)`
       ).bind(challenge3, raceId, candidateA, candidateB, staff.id, new Date(Date.now() - 86400000).toISOString()),
       env.ARENA_DB.prepare(
         `INSERT INTO ad_flights (id, race_id, candidate_id, created_by, title, disclaimer_text, status)

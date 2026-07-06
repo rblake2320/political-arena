@@ -98,8 +98,9 @@ router.get('/:id/public-profile', async (request, env) => {
     env.ARENA_DB.prepare(
       `SELECT
          COUNT(*) as total,
+         SUM(CASE WHEN notice_status != 'unserved' THEN 1 ELSE 0 END) as accountable_total,
          SUM(CASE WHEN status = 'responded' THEN 1 ELSE 0 END) as responded,
-         SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) as expired,
+         SUM(CASE WHEN status = 'expired' AND notice_status != 'unserved' THEN 1 ELSE 0 END) as expired,
          SUM(CASE WHEN status = 'refused' THEN 1 ELSE 0 END) as refused,
          SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open
        FROM challenges WHERE target_candidate_id = ? AND is_visible = 1`
@@ -165,9 +166,10 @@ router.get('/:id/public-profile', async (request, env) => {
   ]);
 
   const targetedTotal = targeted.total || 0;
-  const responseRate = targetedTotal > 0 ? (targeted.responded || 0) / targetedTotal : 1;
-  const expiredRate = targetedTotal > 0 ? (targeted.expired || 0) / targetedTotal : 0;
-  const refusedRate = targetedTotal > 0 ? (targeted.refused || 0) / targetedTotal : 0;
+  const accountableTotal = targeted.accountable_total || 0;
+  const responseRate = accountableTotal > 0 ? (targeted.responded || 0) / accountableTotal : 1;
+  const expiredRate = accountableTotal > 0 ? (targeted.expired || 0) / accountableTotal : 0;
+  const refusedRate = accountableTotal > 0 ? (targeted.refused || 0) / accountableTotal : 0;
   const avgEvasion = Number.isFinite(statements.avg_evasion_score) ? Number(statements.avg_evasion_score) : 0;
   const trustScore = clampScore(
     55
@@ -217,6 +219,7 @@ router.get('/:id/public-profile', async (request, env) => {
     },
     stats: {
       challenges_targeted: targetedTotal,
+      challenges_accountable: accountableTotal,
       challenges_responded: targeted.responded || 0,
       challenges_expired: targeted.expired || 0,
       challenges_refused: targeted.refused || 0,

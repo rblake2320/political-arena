@@ -50,6 +50,18 @@ function receiptUrlFor(request, slug) {
   return `${origin}/challenge/${encodeURIComponent(slug)}`;
 }
 
+function hasServedNotice(challenge) {
+  return challenge.notice_status && challenge.notice_status !== 'unserved';
+}
+
+function noticeStatusForChannels(channels) {
+  const unique = new Set(channels);
+  if (unique.has('in_app') && unique.has('email')) return 'both';
+  if (unique.has('email')) return 'email';
+  if (unique.has('in_app')) return 'in_app';
+  return 'unserved';
+}
+
 function buildChallengeNoticeEmail({ challenge, race, challenger, target, receiptUrl, noticeType }) {
   const claim = challenge.claim_text || challenge.challenge_text;
   const subject = noticeType === 'challenge_tagged'
@@ -180,7 +192,7 @@ router.get('/races/:raceId', async (request, env) => {
   // Lazy expiration check
   const now = new Date().toISOString();
   const challenges = (result.results || []).map(c => {
-    if (c.status === 'open' && c.response_deadline < now) {
+    if (c.status === 'open' && hasServedNotice(c) && c.response_deadline < now) {
       c.status = 'expired';
       c.expired_at = now;
       // Fire async update
@@ -229,7 +241,7 @@ router.get('/:id/receipt', async (request, env) => {
 
   if (!challenge) return errorResponse('Challenge receipt not found', 404);
 
-  if (challenge.status === 'open' && challenge.response_deadline < new Date().toISOString()) {
+  if (challenge.status === 'open' && hasServedNotice(challenge) && challenge.response_deadline < new Date().toISOString()) {
     const expiredAt = new Date().toISOString();
     const result = await env.ARENA_DB.prepare(
       `UPDATE challenges SET status = 'expired', expired_at = ?, updated_at = ? WHERE id = ? AND status = 'open'`
@@ -300,7 +312,7 @@ router.get('/:id', async (request, env) => {
   if (!challenge) return errorResponse('Challenge not found', 404);
 
   // Lazy expiration
-  if (challenge.status === 'open' && challenge.response_deadline < new Date().toISOString()) {
+  if (challenge.status === 'open' && hasServedNotice(challenge) && challenge.response_deadline < new Date().toISOString()) {
     const expiredAt = new Date().toISOString();
     const result = await env.ARENA_DB.prepare(
       `UPDATE challenges SET status = 'expired', expired_at = ?, updated_at = ? WHERE id = ? AND status = 'open'`
@@ -505,6 +517,9 @@ router.post('/', async (request, env, ctx) => {
 
   const targetStaffRows = targetStaff.results || [];
   const targetStaffIds = targetStaffRows.map(row => row.user_id).filter(Boolean);
+  let noticeStatus = 'unserved';
+  let noticeServedAt = null;
+  let noticeChannels = [];
   if (targetStaffIds.length > 0) {
     const notifBody = data.claim_text || data.challenge_text;
     const directNotifications = targetStaffRows.map(row => env.ARENA_DB.prepare(
@@ -517,7 +532,17 @@ router.post('/', async (request, env, ctx) => {
       notifBody.length > 180 ? `${notifBody.slice(0, 180)}...` : notifBody,
       `/challenge/${receiptSlug}`,
     ));
-    await env.ARENA_DB.batch(directNotifications);
+    noticeChannels = ['in_app'];
+    noticeStatus = noticeStatusForChannels(noticeChannels);
+    noticeServedAt = new Date().toISOString();
+    await env.ARENA_DB.batch([
+      ...directNotifications,
+      env.ARENA_DB.prepare(
+        `UPDATE challenges
+         SET notice_status = ?, notice_served_at = ?, notice_channels = ?, updated_at = datetime('now')
+         WHERE id = ?`
+      ).bind(noticeStatus, noticeServedAt, JSON.stringify(noticeChannels), challengeId),
+    ]);
   }
 
   // Create notifications for subscribers
@@ -587,6 +612,9 @@ router.post('/', async (request, env, ctx) => {
       deadline,
       public_receipt_slug: receiptSlug,
       initial_recites: initialRecites.length,
+      notice_status: noticeStatus,
+      notice_served_at: noticeServedAt,
+      notice_channels: noticeChannels,
     },
     ipAddress: getClientIP(request),
   });
@@ -597,6 +625,9 @@ router.post('/', async (request, env, ctx) => {
     public_receipt_slug: receiptSlug,
     response_deadline: deadline,
     deadline_business_days: bizDays,
+    notice_status: noticeStatus,
+    notice_served_at: noticeServedAt,
+    notice_channels: noticeChannels,
     media_url: data.media_url || null,
     initial_recites: initialRecites.length,
     credits_remaining: updatedCandidate?.credit_balance ?? 0,
@@ -622,7 +653,7 @@ router.post('/:id/respond', async (request, env, ctx) => {
   if (challenge.status !== 'open') return errorResponse('Challenge is not open for response');
 
   // Check deadline
-  if (new Date(challenge.response_deadline) <= new Date()) {
+  if (hasServedNotice(challenge) && new Date(challenge.response_deadline) <= new Date()) {
     const expiredAt = new Date().toISOString();
     const result = await env.ARENA_DB.prepare(
       `UPDATE challenges SET status = 'expired', expired_at = ?, updated_at = ? WHERE id = ? AND status = 'open'`

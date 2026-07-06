@@ -93,6 +93,15 @@ export async function runRuntimeMigrations(db) {
   if (!challengeColumns.has('public_receipt_slug')) {
     challengeColumnMigrations.push(db.prepare(`ALTER TABLE challenges ADD COLUMN public_receipt_slug TEXT`));
   }
+  if (!challengeColumns.has('notice_status')) {
+    challengeColumnMigrations.push(db.prepare(`ALTER TABLE challenges ADD COLUMN notice_status TEXT NOT NULL DEFAULT 'unserved' CHECK(notice_status IN ('unserved','in_app','email','both'))`));
+  }
+  if (!challengeColumns.has('notice_served_at')) {
+    challengeColumnMigrations.push(db.prepare(`ALTER TABLE challenges ADD COLUMN notice_served_at TEXT`));
+  }
+  if (!challengeColumns.has('notice_channels')) {
+    challengeColumnMigrations.push(db.prepare(`ALTER TABLE challenges ADD COLUMN notice_channels TEXT`));
+  }
   if (challengeColumnMigrations.length > 0) await db.batch(challengeColumnMigrations);
 
   const missingReceiptSlug = await db.prepare(
@@ -666,6 +675,9 @@ export async function initDatabase(db) {
       refused_at TEXT,
       refusal_reason TEXT,
       public_receipt_slug TEXT UNIQUE,
+      notice_status TEXT NOT NULL DEFAULT 'unserved' CHECK(notice_status IN ('unserved','in_app','email','both')),
+      notice_served_at TEXT,
+      notice_channels TEXT,
       is_visible INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))

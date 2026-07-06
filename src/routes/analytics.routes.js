@@ -84,7 +84,7 @@ router.get('/dashboard', async (request, env) => {
     env.ARENA_DB.prepare(`SELECT COUNT(*) as total, SUM(CASE WHEN verification_status = 'verified' THEN 1 ELSE 0 END) as verified FROM users`).first(),
     env.ARENA_DB.prepare(`SELECT COUNT(*) as total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active FROM races`).first(),
     env.ARENA_DB.prepare(`SELECT COUNT(*) as total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active FROM ad_flights`).first(),
-    env.ARENA_DB.prepare(`SELECT COUNT(*) as total, SUM(CASE WHEN status = 'responded' THEN 1 ELSE 0 END) as responded, SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) as expired FROM challenges`).first(),
+    env.ARENA_DB.prepare(`SELECT COUNT(*) as total, SUM(CASE WHEN status = 'responded' THEN 1 ELSE 0 END) as responded, SUM(CASE WHEN status = 'expired' AND notice_status != 'unserved' THEN 1 ELSE 0 END) as expired FROM challenges`).first(),
     env.ARENA_DB.prepare(`SELECT COUNT(*) as total FROM reactions`).first(),
     env.ARENA_DB.prepare(`SELECT COUNT(*) as total FROM analytics_events WHERE created_at > datetime('now', '-24 hours')`).first(),
   ]);
@@ -165,7 +165,7 @@ router.get('/candidate/:id/performance', async (request, env) => {
       `SELECT
         SUM(CASE WHEN challenger_candidate_id = ? THEN 1 ELSE 0 END) as issued,
         SUM(CASE WHEN target_candidate_id = ? AND status = 'responded' THEN 1 ELSE 0 END) as responded_to,
-        SUM(CASE WHEN target_candidate_id = ? AND status = 'expired' THEN 1 ELSE 0 END) as let_expire
+        SUM(CASE WHEN target_candidate_id = ? AND status = 'expired' AND notice_status != 'unserved' THEN 1 ELSE 0 END) as let_expire
        FROM challenges WHERE challenger_candidate_id = ? OR target_candidate_id = ?`
     ).bind(id, id, id, id, id).first(),
     env.ARENA_DB.prepare(
