@@ -14,17 +14,17 @@
 - [ ] Final QA of the new modals against the **live** API (creates/refuse/withdraw round-trips), not just smoke.
 
 ## Data / backend
-- [ ] Production race dedup: 6 legacy/demo duplicates (AL Senate, FL Senate, TX Governor) vs canonical — 512 canonical (476 federal + 36 gov) vs 518 total. Remove the 3 demo races **at launch** (they carry the demo challenges/recites/questions the live demo runs on — keep until then).
+- [x] Production race dedup: canonical production baseline is clean at 512 active races (441 House + 35 Senate + 36 Governor), with 0 active races missing candidates.
 - [ ] Demo receipt audit chains show `NO CHAIN ENTRIES` (seed fixtures not written through `auditLogNow`). Real challenge flow produces a verified chain. Optionally seed a chain-backed demo receipt for the demo.
 - [ ] Candidate data labels: `election-data-2026` is FEC-registered/listed, **not** state ballot-certified. Add a state ballot-certification source (per-state SOS / VIP) before treating candidates as certified.
 
 ## Product / integrity (from architecture review)
-- [ ] Audit chain is tamper-**evident**, not tamper-**proof**. Add an external anchor the operator can't rewrite: R2 Bucket Locks (R2 has Object Lock since Mar 2025) and/or OpenTimestamps, publishing a Merkle/global root so truncation + operator-rewrite are detectable. Keep UI copy "tamper-evident" until then.
+- [x] Audit-chain external anchor: global roots publish to R2 under `audit-anchors/`, R2 Bucket Lock is configured with indefinite retention, and readiness verifies `AUDIT_ANCHOR_WORM_CONFIRMED=true`. Keep UI copy "tamper-evident" unless/until legal approves stronger language.
 - [ ] Neutrality invariant: keep the CI test enforcing no billing/subscription input in public accountability files as commercial features land.
-- [ ] Notice-gate: only count non-response against candidates verifiably **served** through a channel they control (claimed profile or verified official contact) — never mere directory existence.
+- [x] Notice-gate: non-response is gated on a served-notice record through a candidate-controlled channel. Unserved callouts cannot expire into public non-response.
 
 ## External / operational (real-world gaps for the notice-gate to be real)
-- [ ] Production email/SMS + a **real served-notice channel** to a candidate's verified contact. Until this exists, "verified served-notice record" has no delivery mechanism — non-response can only be counted for candidates who claimed a profile, not merely served in-app. (Codex flagged.)
+- [ ] Production email/SMS + a **real served-notice channel** to a candidate's verified contact. Resend API key is configured, but launch readiness still requires `EMAIL_FROM` from a verified sender/domain.
 
 ## Next epic — candidate profiles + video + cold-start outreach (post-redesign)
 Mostly wiring on existing infra (R2 uploads / media_uploads / ContentMedia, computeFactScore, loaded FEC cn26 incl. committee contact, issue_positions stub, notice-gate in docs/neutrality-architecture.md). Build order:
@@ -42,13 +42,13 @@ Mostly wiring on existing infra (R2 uploads / media_uploads / ContentMedia, comp
 - Schema: response_to_id/type, answer_status, evasion_score on the response-video table; reply_throttle_log.
 
 ## Gaps beyond the deep-research list (Claude review — highest-leverage first)
-- [ ] **Correction/appeal workflow.** The neutrality disclaimer now *promises* corrections; there is no mechanism to receive a dispute (Layer 1 data, a fact-check, an evasion score), act on it, and version the fix into the audit chain. Build the process behind the promise.
-- [ ] **Moderator accountability.** The whole moat rests on moderator calls (evasion, recite/candidate verify, disclaimer approval). Add: every mod action logged with *who*; contested/high-stakes calls need 2+ reviewers or an appeal path; a *published* moderation rubric. Must exist BEFORE the first published evasion score.
+- [x] **Correction/appeal workflow.** Public submission, moderation queue, public correction history, and readiness gate are implemented.
+- [x] **Moderator accountability.** Published rubric and second-review queue are implemented; readiness verifies the public rubric path and review queue.
 - [ ] **Layer 1 identity/accuracy.** Disambiguation/identity-confidence before publishing a public-sourced profile (avoid wrong-person/stale/misattributed data) + prominent "report an error" → correction workflow.
 - [ ] **Inbound abuse + jurisdiction.** Velocity/dedup limits on callouts/questions so a brigade can't manufacture an "unanswered" wall; jurisdiction eligibility (or out-of-jurisdiction labeling) on voter accountability actions.
 - [ ] **ToS + content agreement + retention/deletion policy** before candidates upload video (ownership, post-election lifecycle, deletion vs append-only chain).
 - [ ] **Accessibility (WCAG contrast on the near-black/gray design) + Spanish** for real FL/TX/CA civic reach (ADA exposure).
-- [ ] **Password reset email** (parked separately below) and **served-notice email provider** are the two launch-blocking email gaps.
+- [ ] **Password reset email** and **served-notice email provider** are wired to the transactional email adapter, but production launch remains blocked until `EMAIL_FROM` is set to a verified sender.
 - [ ] Also surfaced: sub-issue drill-down UI (parent_category_id planted), cross-candidate statement comparison UI, write-in aggregate surfacing (data collected, nowhere shown), press-citation source weight in fact scores, top-voted-question → challenge escalation, FEC disclaimer language enforcement on ad approval, DMCA/takedown workflow, state ballot-certification source.
 
 ## Infra (only when usage proves it)
