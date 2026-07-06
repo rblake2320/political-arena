@@ -49,6 +49,21 @@ async function sha256Hex(input) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
+async function merkleRoot(hashes) {
+  if (hashes.length === 0) return null;
+  let layer = [...hashes];
+  while (layer.length > 1) {
+    const next = [];
+    for (let i = 0; i < layer.length; i += 2) {
+      const left = layer[i];
+      const right = layer[i + 1] || left;
+      next.push(await sha256Hex(canonicalJson({ left, right })));
+    }
+    layer = next;
+  }
+  return layer[0];
+}
+
 async function computeAuditEntryHash(prevHash, row) {
   return sha256Hex(canonicalJson({
     prev_hash: prevHash ?? null,
@@ -253,4 +268,161 @@ export async function verifyAuditChain(db, { entityType, entityId }) {
     latest_hash: expectedPrevHash,
     failures,
   };
+}
+
+function anchorStorageKey(anchorId, anchoredAt) {
+  const day = anchoredAt.slice(0, 10).replace(/-/g, '/');
+  return `audit-anchors/${day}/${anchorId}.json`;
+}
+
+async function selectAnchorEntries(db, { scopeType = 'global', entityType = null, entityId = null } = {}) {
+  let sql = `SELECT id, action, entity_type, entity_id, chain_seq, entry_hash, created_at
+             FROM audit_log
+             WHERE entry_hash IS NOT NULL AND chain_seq IS NOT NULL`;
+  const binds = [];
+
+  if (scopeType === 'entity') {
+    sql += ` AND entity_type = ? AND entity_id = ?`;
+    binds.push(entityType, entityId);
+  }
+
+  sql += ` ORDER BY created_at ASC, id ASC`;
+  const result = await db.prepare(sql).bind(...binds).all();
+  return result.results || [];
+}
+
+/**
+ * Publish a DB audit root to external object storage.
+ * This does not make old entries tamper-proof by itself; the R2 bucket must
+ * have Bucket Lock / WORM retention enabled for the returned object key.
+ */
+export async function publishAuditAnchor(db, bucket, {
+  actorId = null,
+  scopeType = 'global',
+  entityType = null,
+  entityId = null,
+} = {}) {
+  if (!bucket) throw new Error('Audit anchor storage is not configured');
+  if (!['global', 'entity'].includes(scopeType)) throw new Error('Invalid audit anchor scope');
+  if (scopeType === 'entity' && (!entityType || !entityId)) {
+    throw new Error('entity_type and entity_id are required for entity anchors');
+  }
+
+  const entries = await selectAnchorEntries(db, { scopeType, entityType, entityId });
+  if (entries.length === 0) throw new Error('No hash-chain entries available to anchor');
+
+  const anchoredAt = new Date().toISOString();
+  const anchorId = generateId('anch');
+  const root = await merkleRoot(entries.map(row => row.entry_hash));
+  const manifest = {
+    schema_version: 1,
+    anchor_id: anchorId,
+    anchor_type: 'r2_object',
+    scope: {
+      scope_type: scopeType,
+      entity_type: scopeType === 'entity' ? entityType : null,
+      entity_id: scopeType === 'entity' ? entityId : null,
+    },
+    anchored_at: anchoredAt,
+    entry_count: entries.length,
+    from_created_at: entries[0].created_at,
+    through_created_at: entries[entries.length - 1].created_at,
+    merkle_root: root,
+    entries: entries.map(row => ({
+      audit_log_id: row.id,
+      action: row.action,
+      entity_type: row.entity_type,
+      entity_id: row.entity_id,
+      chain_seq: row.chain_seq,
+      entry_hash: row.entry_hash,
+      created_at: row.created_at,
+    })),
+  };
+  const manifestJson = canonicalJson(manifest);
+  const manifestHash = await sha256Hex(manifestJson);
+  const storageKey = anchorStorageKey(anchorId, anchoredAt);
+
+  await bucket.put(storageKey, manifestJson, {
+    httpMetadata: { contentType: 'application/json' },
+    customMetadata: {
+      anchor_id: anchorId,
+      merkle_root: root,
+      manifest_hash: manifestHash,
+      scope_type: scopeType,
+    },
+  });
+
+  const statements = [
+    db.prepare(
+      `INSERT INTO audit_anchors
+       (id, anchor_type, scope_type, entity_type, entity_id, entry_count,
+        from_created_at, through_created_at, merkle_root, manifest_hash,
+        storage_provider, storage_key, created_by, anchored_at)
+       VALUES (?, 'r2_object', ?, ?, ?, ?, ?, ?, ?, ?, 'r2', ?, ?, ?)`
+    ).bind(
+      anchorId,
+      scopeType,
+      scopeType === 'entity' ? entityType : null,
+      scopeType === 'entity' ? entityId : null,
+      entries.length,
+      entries[0].created_at,
+      entries[entries.length - 1].created_at,
+      root,
+      manifestHash,
+      storageKey,
+      actorId,
+      anchoredAt,
+    ),
+    ...entries.map(row => db.prepare(
+      `INSERT INTO audit_anchor_entries
+       (anchor_id, audit_log_id, entity_type, entity_id, chain_seq, entry_hash, audit_created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(anchorId, row.id, row.entity_type, row.entity_id, row.chain_seq, row.entry_hash, row.created_at)),
+  ];
+
+  await db.batch(statements);
+
+  return {
+    id: anchorId,
+    anchor_type: 'r2_object',
+    scope_type: scopeType,
+    entity_type: scopeType === 'entity' ? entityType : null,
+    entity_id: scopeType === 'entity' ? entityId : null,
+    entry_count: entries.length,
+    from_created_at: entries[0].created_at,
+    through_created_at: entries[entries.length - 1].created_at,
+    merkle_root: root,
+    manifest_hash: manifestHash,
+    storage_provider: 'r2',
+    storage_key: storageKey,
+    anchored_at: anchoredAt,
+    proof_note: 'External proof requires R2 Bucket Lock or another retention policy on this object key.',
+  };
+}
+
+export async function listAuditAnchors(db, {
+  entityType = null,
+  entityId = null,
+  limit = 20,
+  offset = 0,
+} = {}) {
+  if (entityType && entityId) {
+    const result = await db.prepare(
+      `SELECT DISTINCT aa.*
+       FROM audit_anchors aa
+       JOIN audit_anchor_entries aae ON aae.anchor_id = aa.id
+       WHERE aae.entity_type = ? AND aae.entity_id = ?
+       ORDER BY aa.anchored_at DESC
+       LIMIT ? OFFSET ?`
+    ).bind(entityType, entityId, limit, offset).all();
+    return result.results || [];
+  }
+
+  const result = await db.prepare(
+    `SELECT *
+     FROM audit_anchors
+     ORDER BY anchored_at DESC
+     LIMIT ? OFFSET ?`
+  ).bind(limit, offset).all();
+  return result.results || [];
 }

@@ -11,6 +11,8 @@ function createFakeD1({
   voterWriteins,
   userFavorites = [],
   auditLog,
+  auditAnchors = [],
+  auditAnchorEntries = [],
   pressFeedItems = [],
   emailDeliveries = [],
   correctionRequests = [],
@@ -27,6 +29,8 @@ function createFakeD1({
   const voterWriteinColumns = new Set(voterWriteins);
   const userFavoriteColumns = new Set(userFavorites);
   const auditColumns = new Set(auditLog);
+  const auditAnchorColumns = new Set(auditAnchors);
+  const auditAnchorEntryColumns = new Set(auditAnchorEntries);
   const pressFeedColumns = new Set(pressFeedItems);
   const emailDeliveryColumns = new Set(emailDeliveries);
   const correctionRequestColumns = new Set(correctionRequests);
@@ -68,6 +72,9 @@ function createFakeD1({
           }
           if (sql === 'PRAGMA table_info(audit_log)') {
             return { results: Array.from(auditColumns).map(name => ({ name })) };
+          }
+          if (sql === 'PRAGMA table_info(audit_anchors)') {
+            return { results: Array.from(auditAnchorColumns).map(name => ({ name })) };
           }
           if (sql === 'PRAGMA table_info(press_feed_items)') {
             return { results: Array.from(pressFeedColumns).map(name => ({ name })) };
@@ -127,6 +134,36 @@ function createFakeD1({
         if (auditMatch) auditColumns.add(auditMatch[1]);
         const auditIndexMatch = statement.sql.match(/^CREATE UNIQUE INDEX IF NOT EXISTS (idx_audit_\w+)/);
         if (auditIndexMatch) auditIndexes.add(auditIndexMatch[1]);
+        if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS audit_anchors')) {
+          [
+            'id',
+            'anchor_type',
+            'scope_type',
+            'entity_type',
+            'entity_id',
+            'entry_count',
+            'from_created_at',
+            'through_created_at',
+            'merkle_root',
+            'manifest_hash',
+            'storage_provider',
+            'storage_key',
+            'created_by',
+            'anchored_at',
+            'created_at',
+          ].forEach(column => auditAnchorColumns.add(column));
+        }
+        if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS audit_anchor_entries')) {
+          [
+            'anchor_id',
+            'audit_log_id',
+            'entity_type',
+            'entity_id',
+            'chain_seq',
+            'entry_hash',
+            'audit_created_at',
+          ].forEach(column => auditAnchorEntryColumns.add(column));
+        }
         const surveyResponseIndexMatch = statement.sql.match(/^CREATE UNIQUE INDEX IF NOT EXISTS (idx_vsr_\w+)/);
         if (surveyResponseIndexMatch) surveyResponseIndexes.add(surveyResponseIndexMatch[1]);
         if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS press_feed_items')) {
@@ -197,6 +234,8 @@ function createFakeD1({
     voterWriteinColumns,
     userFavoriteColumns,
     auditColumns,
+    auditAnchorColumns,
+    auditAnchorEntryColumns,
     pressFeedColumns,
     emailDeliveryColumns,
     correctionRequestColumns,
@@ -335,6 +374,8 @@ describe('runtime migrations', () => {
     expect(db.auditColumns.has('chain_seq')).toBe(true);
     expect(db.auditIndexes.has('idx_audit_entity_seq_unique')).toBe(true);
     expect(db.auditIndexes.has('idx_audit_entity_prev_hash_unique')).toBe(true);
+    expect(db.auditAnchorColumns.has('id')).toBe(true);
+    expect(db.auditAnchorEntryColumns.has('anchor_id')).toBe(true);
     expect(db.pressFeedColumns.has('id')).toBe(true);
     expect(db.emailDeliveryColumns.has('id')).toBe(true);
     expect(db.correctionRequestColumns.has('id')).toBe(true);
@@ -409,6 +450,37 @@ describe('runtime migrations', () => {
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_entity_prev_hash_unique
        ON audit_log(entity_type, entity_id, prev_hash)
        WHERE chain_seq IS NOT NULL AND entry_hash IS NOT NULL AND prev_hash IS NOT NULL`,
+      `CREATE TABLE IF NOT EXISTS audit_anchors (
+        id TEXT PRIMARY KEY,
+        anchor_type TEXT NOT NULL DEFAULT 'r2_object' CHECK(anchor_type IN ('r2_object')),
+        scope_type TEXT NOT NULL DEFAULT 'global' CHECK(scope_type IN ('global','entity')),
+        entity_type TEXT,
+        entity_id TEXT,
+        entry_count INTEGER NOT NULL,
+        from_created_at TEXT,
+        through_created_at TEXT,
+        merkle_root TEXT NOT NULL,
+        manifest_hash TEXT NOT NULL,
+        storage_provider TEXT NOT NULL DEFAULT 'r2',
+        storage_key TEXT NOT NULL UNIQUE,
+        created_by TEXT REFERENCES users(id),
+        anchored_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS audit_anchor_entries (
+        anchor_id TEXT NOT NULL REFERENCES audit_anchors(id),
+        audit_log_id TEXT NOT NULL REFERENCES audit_log(id),
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        chain_seq INTEGER,
+        entry_hash TEXT NOT NULL,
+        audit_created_at TEXT NOT NULL,
+        PRIMARY KEY(anchor_id, audit_log_id)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_anchors_scope
+        ON audit_anchors(scope_type, entity_type, entity_id, anchored_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_anchor_entries_entity
+        ON audit_anchor_entries(entity_type, entity_id, audit_created_at)`,
       `DELETE FROM voter_survey_responses
          WHERE rowid NOT IN (
            SELECT MIN(rowid)

@@ -6,7 +6,7 @@
 
 import { Router } from 'itty-router';
 import { generateId } from '../db.js';
-import { auditLogNow, verifyAuditChain } from '../audit.js';
+import { auditLogNow, listAuditAnchors, verifyAuditChain } from '../audit.js';
 import { requireAuth, errorResponse, successResponse, parseBody, parsePagination, getClientIP } from '../middleware.js';
 import { validate, createChallengeSchema, respondToChallengeSchema, refuseChallengeSchema } from '../validation.js';
 import { computeFactScore, getRecitesForContent } from './recites.routes.js';
@@ -250,7 +250,7 @@ router.get('/:id/receipt', async (request, env) => {
     }
   }
 
-  const [response, challengeRecites, timelineResult, auditChain] = await Promise.all([
+  const [response, challengeRecites, timelineResult, auditChain, auditAnchors] = await Promise.all([
     env.ARENA_DB.prepare(
       `SELECT cr.*, c.name as candidate_name, c.party as candidate_party
        FROM challenge_responses cr
@@ -265,6 +265,7 @@ router.get('/:id/receipt', async (request, env) => {
        ORDER BY chain_seq ASC, created_at ASC, id ASC`
     ).bind(challenge.id).all(),
     verifyAuditChain(env.ARENA_DB, { entityType: 'challenge', entityId: challenge.id }),
+    listAuditAnchors(env.ARENA_DB, { entityType: 'challenge', entityId: challenge.id, limit: 5 }),
   ]);
 
   const responseRecites = response
@@ -280,6 +281,7 @@ router.get('/:id/receipt', async (request, env) => {
     response_fact_score: computeFactScore(responseRecites),
     timeline: timelineResult.results || [],
     audit_chain: auditChain,
+    audit_anchors: auditAnchors,
   });
 });
 

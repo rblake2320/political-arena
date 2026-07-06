@@ -212,6 +212,43 @@ export async function runRuntimeMigrations(db) {
   }
   if (auditIndexMigrations.length > 0) await db.batch(auditIndexMigrations);
 
+  const auditAnchorsResult = await db.prepare(`PRAGMA table_info(audit_anchors)`).all();
+  if ((auditAnchorsResult.results || []).length === 0) {
+    await db.batch([
+      db.prepare(`CREATE TABLE IF NOT EXISTS audit_anchors (
+        id TEXT PRIMARY KEY,
+        anchor_type TEXT NOT NULL DEFAULT 'r2_object' CHECK(anchor_type IN ('r2_object')),
+        scope_type TEXT NOT NULL DEFAULT 'global' CHECK(scope_type IN ('global','entity')),
+        entity_type TEXT,
+        entity_id TEXT,
+        entry_count INTEGER NOT NULL,
+        from_created_at TEXT,
+        through_created_at TEXT,
+        merkle_root TEXT NOT NULL,
+        manifest_hash TEXT NOT NULL,
+        storage_provider TEXT NOT NULL DEFAULT 'r2',
+        storage_key TEXT NOT NULL UNIQUE,
+        created_by TEXT REFERENCES users(id),
+        anchored_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS audit_anchor_entries (
+        anchor_id TEXT NOT NULL REFERENCES audit_anchors(id),
+        audit_log_id TEXT NOT NULL REFERENCES audit_log(id),
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        chain_seq INTEGER,
+        entry_hash TEXT NOT NULL,
+        audit_created_at TEXT NOT NULL,
+        PRIMARY KEY(anchor_id, audit_log_id)
+      )`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_anchors_scope
+        ON audit_anchors(scope_type, entity_type, entity_id, anchored_at)`),
+      db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_anchor_entries_entity
+        ON audit_anchor_entries(entity_type, entity_id, audit_created_at)`),
+    ]);
+  }
+
   const surveyResponseIndexesResult = await db.prepare(`PRAGMA index_list(voter_survey_responses)`).all();
   const surveyResponseIndexes = new Set((surveyResponseIndexesResult.results || []).map(i => i.name));
   if (!surveyResponseIndexes.has('idx_vsr_user_survey_question')) {
@@ -980,6 +1017,35 @@ export async function initDatabase(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
 
+    db.prepare(`CREATE TABLE IF NOT EXISTS audit_anchors (
+      id TEXT PRIMARY KEY,
+      anchor_type TEXT NOT NULL DEFAULT 'r2_object' CHECK(anchor_type IN ('r2_object')),
+      scope_type TEXT NOT NULL DEFAULT 'global' CHECK(scope_type IN ('global','entity')),
+      entity_type TEXT,
+      entity_id TEXT,
+      entry_count INTEGER NOT NULL,
+      from_created_at TEXT,
+      through_created_at TEXT,
+      merkle_root TEXT NOT NULL,
+      manifest_hash TEXT NOT NULL,
+      storage_provider TEXT NOT NULL DEFAULT 'r2',
+      storage_key TEXT NOT NULL UNIQUE,
+      created_by TEXT REFERENCES users(id),
+      anchored_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS audit_anchor_entries (
+      anchor_id TEXT NOT NULL REFERENCES audit_anchors(id),
+      audit_log_id TEXT NOT NULL REFERENCES audit_log(id),
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      chain_seq INTEGER,
+      entry_hash TEXT NOT NULL,
+      audit_created_at TEXT NOT NULL,
+      PRIMARY KEY(anchor_id, audit_log_id)
+    )`),
+
     db.prepare(`CREATE TABLE IF NOT EXISTS impression_budgets (
       id TEXT PRIMARY KEY,
       candidate_id TEXT NOT NULL REFERENCES candidates(id),
@@ -1162,6 +1228,10 @@ export async function initDatabase(db) {
     db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_entity_prev_hash_unique
       ON audit_log(entity_type, entity_id, prev_hash)
       WHERE chain_seq IS NOT NULL AND entry_hash IS NOT NULL AND prev_hash IS NOT NULL`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_anchors_scope
+      ON audit_anchors(scope_type, entity_type, entity_id, anchored_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_anchor_entries_entity
+      ON audit_anchor_entries(entity_type, entity_id, audit_created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_impression_logs_ad ON impression_logs(ad_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_impression_logs_date ON impression_logs(created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_impression_budgets_candidate ON impression_budgets(candidate_id, race_id)`),
