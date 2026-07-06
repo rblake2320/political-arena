@@ -36,6 +36,26 @@ export function isTransactionalEmailConfigured(env) {
   return false;
 }
 
+export function transactionalEmailStatus(env) {
+  const provider = normalizeProvider(env);
+  const missing = [];
+  if (!provider) {
+    missing.push('EMAIL_PROVIDER plus provider secret');
+    return { configured: false, provider: null, missing };
+  }
+
+  if (provider === 'webhook') {
+    if (!env.PASSWORD_RESET_WEBHOOK_URL) missing.push('PASSWORD_RESET_WEBHOOK_URL');
+    return { configured: missing.length === 0, provider, missing };
+  }
+
+  if (!getEmailFrom(env)) missing.push('EMAIL_FROM');
+  if (provider === 'resend' && !env.RESEND_API_KEY) missing.push('RESEND_API_KEY');
+  if (provider === 'postmark' && !env.POSTMARK_SERVER_TOKEN) missing.push('POSTMARK_SERVER_TOKEN');
+  if (!['resend', 'postmark'].includes(provider)) missing.push(`unsupported provider: ${provider}`);
+  return { configured: missing.length === 0, provider, missing };
+}
+
 function assertProviderConfig(env) {
   const provider = normalizeProvider(env);
   if (!provider) return null;
