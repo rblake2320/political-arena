@@ -9,10 +9,10 @@ import { EncryptJWT, jwtDecrypt } from 'jose';
 // ===== Password Hashing (PBKDF2) =====
 
 export const PASSWORD_HASH_ALGORITHM = 'pbkdf2_sha256';
-// Cloudflare Workers must complete auth inside a tight CPU window. 600k
-// PBKDF2-SHA256 is too expensive on the deployed Worker path; hashes remain
-// versioned so this can move back up behind a dedicated hashing service.
-export const PBKDF2_ITERATIONS = 250000;
+// Cloudflare Workers must complete auth inside a tight CPU window. Higher
+// PBKDF2-SHA256 targets failed on the deployed Worker registration path; hashes
+// remain versioned so this can move back up behind a dedicated hashing service.
+export const PBKDF2_ITERATIONS = 100000;
 const LEGACY_PBKDF2_ITERATIONS = 100000;
 
 function bytesToHex(bytes) {
