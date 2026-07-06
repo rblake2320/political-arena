@@ -4,7 +4,8 @@
  */
 
 import { Router } from 'itty-router';
-import { errorResponse, successResponse } from '../middleware.js';
+import { transactionalEmailStatus } from '../email.js';
+import { errorResponse, requireRole, successResponse } from '../middleware.js';
 
 const router = Router({ base: '/api' });
 const CYCLE_ELECTION_DATE = '2026-11-03';
@@ -21,6 +22,142 @@ function raceLabel(row) {
   const district = row.race_district ? ` District ${row.race_district}` : '';
   return `${row.race_state} ${row.race_office}${district}`.trim();
 }
+
+function gate(ok, details, blocker) {
+  return { ok, ...details, ...(ok || !blocker ? {} : { blocker }) };
+}
+
+function sourceBreakdown(rows) {
+  return Object.fromEntries((rows || []).map(row => [row.source_status || 'unknown', Number(row.count || 0)]));
+}
+
+// GET /api/stats/readiness - admin launch-readiness checklist
+router.get('/stats/readiness', async (request, env) => {
+  const authError = await requireRole('admin', 'super_admin')(request, env);
+  if (authError) return authError;
+
+  const [
+    raceStats,
+    candidateStats,
+    candidateSources,
+    challengeStats,
+    correctionStats,
+    anchorStats,
+  ] = await Promise.all([
+    env.ARENA_DB.prepare(
+      `SELECT
+         COUNT(*) as active_races,
+         SUM(CASE WHEN NOT EXISTS (
+           SELECT 1 FROM candidates c WHERE c.race_id = r.id AND c.is_active = 1
+         ) THEN 1 ELSE 0 END) as active_races_without_candidates
+       FROM races r
+       WHERE r.status = 'active'`
+    ).first(),
+    env.ARENA_DB.prepare(
+      `SELECT
+         COUNT(*) as active_candidates,
+         SUM(CASE WHEN source_status IS NULL OR source_label IS NULL THEN 1 ELSE 0 END) as missing_provenance
+       FROM candidates
+       WHERE is_active = 1`
+    ).first(),
+    env.ARENA_DB.prepare(
+      `SELECT COALESCE(source_status, 'unknown') as source_status, COUNT(*) as count
+       FROM candidates
+       WHERE is_active = 1
+       GROUP BY COALESCE(source_status, 'unknown')
+       ORDER BY source_status`
+    ).all(),
+    env.ARENA_DB.prepare(
+      `SELECT
+         COUNT(*) as total_callouts,
+         SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_callouts,
+         SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) as expired_callouts,
+         SUM(CASE WHEN status = 'expired' AND notice_status = 'unserved' THEN 1 ELSE 0 END) as unserved_expired_callouts,
+         SUM(CASE WHEN notice_status != 'unserved' THEN 1 ELSE 0 END) as served_callouts
+       FROM challenges
+       WHERE is_visible = 1`
+    ).first(),
+    env.ARENA_DB.prepare(
+      `SELECT
+         COUNT(*) as total_corrections,
+         SUM(CASE WHEN status IN ('open','under_review') THEN 1 ELSE 0 END) as open_corrections
+       FROM correction_requests`
+    ).first(),
+    env.ARENA_DB.prepare(
+      `SELECT COUNT(*) as anchor_count, MAX(anchored_at) as latest_anchor_at
+       FROM audit_anchors`
+    ).first(),
+  ]);
+
+  const email = transactionalEmailStatus(env);
+  const r2Configured = !!env.ARENA_MEDIA;
+  const wormConfirmed = String(env.AUDIT_ANCHOR_WORM_CONFIRMED || '').toLowerCase() === 'true';
+  const activeRaces = Number(raceStats?.active_races || 0);
+  const activeRacesWithoutCandidates = Number(raceStats?.active_races_without_candidates || 0);
+  const activeCandidates = Number(candidateStats?.active_candidates || 0);
+  const missingProvenance = Number(candidateStats?.missing_provenance || 0);
+  const unservedExpired = Number(challengeStats?.unserved_expired_callouts || 0);
+  const anchorCount = Number(anchorStats?.anchor_count || 0);
+
+  const gates = {
+    production_environment: gate(env.ENVIRONMENT === 'production', {
+      environment: env.ENVIRONMENT || null,
+    }, 'ENVIRONMENT must be production.'),
+    race_data: gate(activeRaces >= 512 && activeRacesWithoutCandidates === 0, {
+      active_races: activeRaces,
+      active_races_without_candidates: activeRacesWithoutCandidates,
+      expected_minimum_active_races: 512,
+    }, 'Production should have the 2026 race universe loaded and no active race without candidates.'),
+    candidate_provenance: gate(activeCandidates > 0 && missingProvenance === 0, {
+      active_candidates: activeCandidates,
+      missing_provenance: missingProvenance,
+      by_source_status: sourceBreakdown(candidateSources.results || []),
+    }, 'Every active candidate should carry a source/provenance label.'),
+    correction_appeal: gate(true, {
+      public_history_path: '/api/corrections/public',
+      submit_path: '/api/corrections',
+      moderation_queue_path: '/api/corrections/pending',
+      open_corrections: Number(correctionStats?.open_corrections || 0),
+      total_corrections: Number(correctionStats?.total_corrections || 0),
+    }),
+    moderator_rubric: gate(true, {
+      public_path: '/api/statements/review-rubric',
+      second_review_queue_path: '/api/statements/review-pending',
+    }),
+    served_notice_gate: gate(unservedExpired === 0, {
+      total_callouts: Number(challengeStats?.total_callouts || 0),
+      open_callouts: Number(challengeStats?.open_callouts || 0),
+      served_callouts: Number(challengeStats?.served_callouts || 0),
+      expired_callouts: Number(challengeStats?.expired_callouts || 0),
+      unserved_expired_callouts: unservedExpired,
+    }, 'Unserved callouts must not be expired into public non-response.'),
+    transactional_email: gate(email.configured, {
+      configured: email.configured,
+      provider: email.provider,
+      missing: email.missing,
+    }, 'Configure Resend or Postmark secrets before served external notices and password reset can be launch-ready.'),
+    r2_media_storage: gate(r2Configured, {
+      configured: r2Configured,
+    }, 'R2 media binding is required for uploads and audit anchor manifests.'),
+    audit_anchor: gate(anchorCount > 0 && wormConfirmed, {
+      anchor_count: anchorCount,
+      latest_anchor_at: anchorStats?.latest_anchor_at || null,
+      worm_confirmed: wormConfirmed,
+      confirmation_env: 'AUDIT_ANCHOR_WORM_CONFIRMED=true',
+    }, 'Publish at least one audit anchor and confirm R2 Bucket Lock / WORM retention on the anchor prefix.'),
+  };
+
+  const blockers = Object.entries(gates)
+    .filter(([, value]) => !value.ok)
+    .map(([name, value]) => ({ gate: name, reason: value.blocker || 'Not ready' }));
+
+  return successResponse({
+    checked_at: new Date().toISOString(),
+    launch_ready: blockers.length === 0,
+    blockers,
+    gates,
+  });
+});
 
 // GET /api/stats/cycle - public launch counters
 router.get('/stats/cycle', async (request, env) => {

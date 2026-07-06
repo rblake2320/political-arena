@@ -338,6 +338,28 @@ describe('edge-case regressions', () => {
     expect(profile.body.data.trust.response_rate).toBe(100);
   });
 
+  it('reports launch readiness gates for admins without exposing them publicly', async () => {
+    const voter = await makeVerifiedVoter('readinessvoter');
+    const admin = await makeAdmin('readinessadmin');
+
+    const anonymous = await get('/api/stats/readiness');
+    expect(anonymous.status).toBe(401);
+
+    const regularUser = await get('/api/stats/readiness', voter.token);
+    expect(regularUser.status).toBe(403);
+
+    const readiness = await get('/api/stats/readiness', admin.token);
+    expect(readiness.status).toBe(200);
+    expect(readiness.body.data.launch_ready).toBe(false);
+    expect(readiness.body.data.gates.correction_appeal.public_history_path).toBe('/api/corrections/public');
+    expect(readiness.body.data.gates.moderator_rubric.public_path).toBe('/api/statements/review-rubric');
+    expect(readiness.body.data.gates.served_notice_gate.unserved_expired_callouts).toBe(0);
+    expect(readiness.body.data.gates.transactional_email.ok).toBe(false);
+    expect(readiness.body.data.gates.transactional_email.missing.length).toBeGreaterThan(0);
+    expect(readiness.body.data.gates.audit_anchor.confirmation_env).toBe('AUDIT_ANCHOR_WORM_CONFIRMED=true');
+    expect(readiness.body.data.blockers.map(item => item.gate)).toContain('transactional_email');
+  });
+
   it('rejects duplicate priority ranks and unknown issue categories', async () => {
     const voter = await makeVerifiedVoter('priorityvoter');
 
