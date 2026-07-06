@@ -4,8 +4,9 @@
  */
 
 import { Router } from 'itty-router';
-import { transactionalEmailStatus } from '../email.js';
-import { errorResponse, requireRole, successResponse } from '../middleware.js';
+import { sendAndRecordTransactionalEmail, transactionalEmailStatus } from '../email.js';
+import { errorResponse, parseBody, requireRole, successResponse } from '../middleware.js';
+import { validate, launchEmailTestSchema } from '../validation.js';
 
 const router = Router({ base: '/api' });
 const CYCLE_ELECTION_DATE = '2026-11-03';
@@ -157,6 +158,60 @@ router.get('/stats/readiness', async (request, env) => {
     blockers,
     gates,
   });
+});
+
+// POST /api/stats/readiness/email-test - admin transactional email smoke
+router.post('/stats/readiness/email-test', async (request, env) => {
+  const authError = await requireRole('admin', 'super_admin')(request, env);
+  if (authError) return authError;
+
+  const body = await parseBody(request).catch(() => ({}));
+  const { valid, errors, data } = validate(launchEmailTestSchema, body || {});
+  if (!valid) return errorResponse(errors.join('; '));
+
+  const email = transactionalEmailStatus(env);
+  if (!email.configured) {
+    return errorResponse(`Transactional email is not configured: ${email.missing.join(', ')}`, 503);
+  }
+
+  const recipient = data.to_email || request.user.email;
+  try {
+    const result = await sendAndRecordTransactionalEmail(env.ARENA_DB, env, {
+      to: recipient,
+      subject: 'Arena launch readiness email test',
+      text: [
+        'Arena transactional email is configured.',
+        '',
+        `Requested by: ${request.user.email}`,
+        `Checked at: ${new Date().toISOString()}`,
+      ].join('\n'),
+      html: `
+        <p><strong>Arena transactional email is configured.</strong></p>
+        <p>Requested by: ${request.user.email}</p>
+        <p>Checked at: ${new Date().toISOString()}</p>
+      `,
+      tag: 'launch_readiness_email_test',
+      metadata: {
+        requested_by: request.user.id,
+        readiness_check: 'transactional_email',
+      },
+      idempotencyKey: `launch-email-test-${request.user.id}-${Date.now()}`,
+    }, {
+      recipient_user_id: data.to_email ? null : request.user.id,
+      related_entity_type: 'system',
+      related_entity_id: 'launch-readiness',
+      template_key: 'launch_readiness_email_test',
+    });
+
+    return successResponse({
+      delivered: !!result.delivered,
+      provider: result.provider || email.provider,
+      provider_message_id: result.provider_message_id || null,
+      recipient,
+    });
+  } catch (error) {
+    return errorResponse(`Transactional email test failed: ${String(error?.message || error)}`, 502);
+  }
 });
 
 // GET /api/stats/cycle - public launch counters
