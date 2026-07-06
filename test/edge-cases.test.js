@@ -367,6 +367,148 @@ describe('edge-case regressions', () => {
     expect(empty.body.data.writeins).toEqual([]);
   });
 
+  it('returns neutral voter-resource links without collecting voter data', async () => {
+    const tx = await get('/api/elections/voter-resources?state=TX');
+    expect(tx.status).toBe(200);
+    expect(tx.body.data.state).toEqual({ code: 'TX', name: 'Texas' });
+    expect(tx.body.data.source_note).toContain('does not collect voter registration data');
+
+    const resourceTypes = tx.body.data.resources.map(resource => resource.type);
+    expect(resourceTypes).toEqual([
+      'register_or_update',
+      'registration_status',
+      'polling_place',
+      'voter_id',
+      'absentee_early_voting',
+    ]);
+    expect(tx.body.data.resources[0]).toMatchObject({
+      provider: 'Vote.gov',
+      official: true,
+      url: 'https://vote.gov/register',
+    });
+    expect(tx.body.data.resources.every(resource => resource.url.startsWith('https://'))).toBe(true);
+
+    const fullName = await get('/api/elections/voter-resources?state=District%20of%20Columbia');
+    expect(fullName.status).toBe(200);
+    expect(fullName.body.data.state).toEqual({ code: 'DC', name: 'District of Columbia' });
+
+    const invalid = await get('/api/elections/voter-resources?state=Atlantis');
+    expect(invalid.status).toBe(400);
+  });
+
+  it('compares every active race candidate using procedural accountability records', async () => {
+    const staff = await registerUser('comparestaff');
+    const suffix = Date.now().toString(36);
+    const raceId = `edge-compare-race-${suffix}`;
+    const candidateA = `edge-compare-a-${suffix}`;
+    const candidateB = `edge-compare-b-${suffix}`;
+    const candidateC = `edge-compare-c-${suffix}`;
+    const challenge1 = `edge-compare-chal-1-${suffix}`;
+    const challenge2 = `edge-compare-chal-2-${suffix}`;
+    const challenge3 = `edge-compare-chal-3-${suffix}`;
+    const adId = `edge-compare-ad-${suffix}`;
+    const rebuttalId = `edge-compare-rebuttal-${suffix}`;
+    const statementA = `edge-compare-stmt-a-${suffix}`;
+    const statementB = `edge-compare-stmt-b-${suffix}`;
+
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(
+        `INSERT INTO races (id, name, office, state, district, status)
+         VALUES (?, ?, 'Senate', 'TX', NULL, 'active')`
+      ).bind(raceId, `Compare Race ${suffix}`),
+      env.ARENA_DB.prepare(
+        `INSERT INTO candidates (id, race_id, user_id, name, party, verification_status, credit_balance, is_active, issue_positions)
+         VALUES (?, ?, ?, 'Compare Alice', 'Democrat', 'verified', 5, 1, ?)`
+      ).bind(candidateA, raceId, staff.id, JSON.stringify([{ issue: 'Housing', position: 'Expand supply.' }])),
+      env.ARENA_DB.prepare(
+        `INSERT INTO candidates (id, race_id, user_id, name, party, verification_status, credit_balance, is_active)
+         VALUES (?, ?, ?, 'Compare Bob', 'Republican', 'verified', 5, 1)`
+      ).bind(candidateB, raceId, staff.id),
+      env.ARENA_DB.prepare(
+        `INSERT INTO candidates (id, race_id, user_id, name, party, verification_status, credit_balance, is_active)
+         VALUES (?, ?, ?, 'Compare Casey', 'Independent', 'pending', 5, 1)`
+      ).bind(candidateC, raceId, staff.id),
+      env.ARENA_DB.prepare(
+        `INSERT INTO challenges
+         (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, claim_text, challenge_type, status, deadline_business_days, response_deadline, is_visible)
+         VALUES (?, ?, ?, ?, ?, 'Please source this tax claim.', 'The plan raises taxes.', 'fact_check', 'responded', 3, ?, 1)`
+      ).bind(challenge1, raceId, candidateB, candidateA, staff.id, new Date(Date.now() + 86400000).toISOString()),
+      env.ARENA_DB.prepare(
+        `INSERT INTO challenges
+         (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, deadline_business_days, response_deadline, is_visible)
+         VALUES (?, ?, ?, ?, ?, 'Will you debate housing policy?', 'debate_request', 'open', 3, ?, 1)`
+      ).bind(challenge2, raceId, candidateB, candidateA, staff.id, new Date(Date.now() + 86400000).toISOString()),
+      env.ARENA_DB.prepare(
+        `INSERT INTO challenges
+         (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, challenge_type, status, deadline_business_days, response_deadline, is_visible)
+         VALUES (?, ?, ?, ?, ?, 'Explain the public-safety vote.', 'policy_question', 'refused', 3, ?, 1)`
+      ).bind(challenge3, raceId, candidateA, candidateB, staff.id, new Date(Date.now() - 86400000).toISOString()),
+      env.ARENA_DB.prepare(
+        `INSERT INTO ad_flights (id, race_id, candidate_id, created_by, title, disclaimer_text, status)
+         VALUES (?, ?, ?, ?, 'Compare Ad', 'Paid for by Compare Alice', 'active')`
+      ).bind(adId, raceId, candidateA, staff.id),
+      env.ARENA_DB.prepare(
+        `INSERT INTO rebuttal_ads (id, parent_ad_id, race_id, candidate_id, created_by, response_text, disclaimer_text, status)
+         VALUES (?, ?, ?, ?, ?, 'Compare response.', 'Paid for by Compare Bob', 'approved')`
+      ).bind(rebuttalId, adId, raceId, candidateB, staff.id),
+      env.ARENA_DB.prepare(
+        `INSERT INTO public_statements
+         (id, candidate_id, race_id, created_by, statement_text, source_type, source_url, truth_status, answer_status, evasion_score, is_public)
+         VALUES (?, ?, ?, ?, 'We expanded housing starts.', 'article', ?, 'supported', 'answered', 0, 1)`
+      ).bind(statementA, candidateA, raceId, staff.id, `https://example.com/compare-statement-a-${suffix}`),
+      env.ARENA_DB.prepare(
+        `INSERT INTO public_statements
+         (id, candidate_id, race_id, created_by, statement_text, source_type, source_url, truth_status, answer_status, evasion_score, is_public)
+         VALUES (?, ?, ?, ?, 'I answered the transit question.', 'article', ?, 'disputed', 'dodged', 70, 1)`
+      ).bind(statementB, candidateB, raceId, staff.id, `https://example.com/compare-statement-b-${suffix}`),
+      env.ARENA_DB.prepare(
+        `INSERT INTO recites (id, content_type, content_id, user_id, url, title, publisher, source_type, stance, status)
+         VALUES (?, 'challenge', ?, ?, ?, 'Official tax filing', 'State Revenue Office', 'official_record', 'context', 'verified')`
+      ).bind(`edge-compare-rec-${suffix}`, challenge1, staff.id, `https://example.com/compare-rec-${suffix}`),
+    ]);
+
+    const res = await get(`/api/races/${raceId}/compare`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.race).toMatchObject({ id: raceId, office: 'Senate', state: 'TX' });
+    expect(res.body.data.candidates.map(candidate => candidate.party)).toEqual([
+      'Democrat',
+      'Republican',
+      'Independent',
+    ]);
+    expect(res.body.data.metric_note).toContain('procedural counts');
+
+    const alice = res.body.data.candidates.find(candidate => candidate.id === candidateA);
+    expect(alice.issue_positions).toEqual([{ issue: 'Housing', position: 'Expand supply.' }]);
+    expect(alice.accountability.targeted_challenges).toMatchObject({
+      total: 2,
+      open: 1,
+      responded: 1,
+      response_rate: 50,
+    });
+    expect(alice.accountability.issued_challenges.total).toBe(1);
+    expect(alice.accountability.ads.total).toBe(1);
+    expect(alice.accountability.statements.supported).toBe(1);
+    expect(alice.accountability.verified_recites.total).toBe(1);
+
+    const bob = res.body.data.candidates.find(candidate => candidate.id === candidateB);
+    expect(bob.accountability.targeted_challenges).toMatchObject({
+      total: 1,
+      refused: 1,
+      response_rate: 0,
+    });
+    expect(bob.accountability.issued_challenges.total).toBe(2);
+    expect(bob.accountability.rebuttals.total).toBe(1);
+    expect(bob.accountability.statements).toMatchObject({
+      total: 1,
+      disputed_or_false: 1,
+      dodged: 1,
+      avg_evasion_score: 70,
+    });
+
+    const casey = res.body.data.candidates.find(candidate => candidate.id === candidateC);
+    expect(casey.accountability.targeted_challenges.response_rate).toBeNull();
+  });
+
   it('rejects subscriptions to missing targets and keeps duplicate detection', async () => {
     const user = await registerUser('subscriber');
 

@@ -84,6 +84,189 @@ async function getReciteSummaries(db, items, contentType) {
 const getChallengeReciteSummaries = (db, challenges) => getReciteSummaries(db, challenges, 'challenge');
 const getAdReciteSummaries = (db, ads) => getReciteSummaries(db, ads, 'ad');
 
+function safeParseIssuePositions(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function percent(numerator, denominator, defaultValue = null) {
+  if (!denominator) return defaultValue;
+  return Number(((numerator / denominator) * 100).toFixed(1));
+}
+
+async function getCandidateComparisonStats(db, candidateIds) {
+  const stats = new Map();
+  for (const id of candidateIds) {
+    stats.set(id, {
+      targeted_challenges: {
+        total: 0,
+        open: 0,
+        responded: 0,
+        expired: 0,
+        refused: 0,
+        withdrawn: 0,
+        response_rate: null,
+      },
+      issued_challenges: { total: 0 },
+      ads: { total: 0 },
+      rebuttals: { total: 0 },
+      statements: {
+        total: 0,
+        supported: 0,
+        disputed_or_false: 0,
+        dodged: 0,
+        avg_evasion_score: null,
+      },
+      verified_recites: { total: 0 },
+    });
+  }
+
+  if (candidateIds.length === 0) return stats;
+
+  const placeholders = candidateIds.map(() => '?').join(',');
+  const [
+    targetedResult,
+    issuedResult,
+    adsResult,
+    rebuttalsResult,
+    statementsResult,
+    recitesResult,
+  ] = await Promise.all([
+    db.prepare(
+      `SELECT
+         target_candidate_id as candidate_id,
+         COUNT(*) as total,
+         SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open,
+         SUM(CASE WHEN status = 'responded' THEN 1 ELSE 0 END) as responded,
+         SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) as expired,
+         SUM(CASE WHEN status = 'refused' THEN 1 ELSE 0 END) as refused,
+         SUM(CASE WHEN status = 'withdrawn' THEN 1 ELSE 0 END) as withdrawn
+       FROM challenges
+       WHERE target_candidate_id IN (${placeholders}) AND is_visible = 1
+       GROUP BY target_candidate_id`
+    ).bind(...candidateIds).all(),
+    db.prepare(
+      `SELECT challenger_candidate_id as candidate_id, COUNT(*) as total
+       FROM challenges
+       WHERE challenger_candidate_id IN (${placeholders}) AND is_visible = 1
+       GROUP BY challenger_candidate_id`
+    ).bind(...candidateIds).all(),
+    db.prepare(
+      `SELECT candidate_id, COUNT(*) as total
+       FROM ad_flights
+       WHERE candidate_id IN (${placeholders}) AND status IN ('approved','active','completed')
+       GROUP BY candidate_id`
+    ).bind(...candidateIds).all(),
+    db.prepare(
+      `SELECT candidate_id, COUNT(*) as total
+       FROM rebuttal_ads
+       WHERE candidate_id IN (${placeholders}) AND status IN ('approved','active','completed')
+       GROUP BY candidate_id`
+    ).bind(...candidateIds).all(),
+    db.prepare(
+      `SELECT
+         candidate_id,
+         COUNT(*) as total,
+         AVG(evasion_score) as avg_evasion_score,
+         SUM(CASE WHEN answer_status = 'dodged' THEN 1 ELSE 0 END) as dodged,
+         SUM(CASE WHEN truth_status IN ('disputed','false') THEN 1 ELSE 0 END) as disputed_or_false,
+         SUM(CASE WHEN truth_status = 'supported' THEN 1 ELSE 0 END) as supported
+       FROM public_statements
+       WHERE candidate_id IN (${placeholders}) AND is_public = 1
+       GROUP BY candidate_id`
+    ).bind(...candidateIds).all(),
+    db.prepare(
+      `SELECT candidate_id, SUM(total) as total
+       FROM (
+         SELECT ch.challenger_candidate_id as candidate_id, COUNT(r.id) as total
+         FROM recites r
+         JOIN challenges ch ON r.content_type = 'challenge' AND r.content_id = ch.id
+         WHERE r.status = 'verified' AND ch.challenger_candidate_id IN (${placeholders})
+         GROUP BY ch.challenger_candidate_id
+         UNION ALL
+         SELECT ch.target_candidate_id as candidate_id, COUNT(r.id) as total
+         FROM recites r
+         JOIN challenges ch ON r.content_type = 'challenge' AND r.content_id = ch.id
+         WHERE r.status = 'verified' AND ch.target_candidate_id IN (${placeholders})
+         GROUP BY ch.target_candidate_id
+         UNION ALL
+         SELECT af.candidate_id, COUNT(r.id) as total
+         FROM recites r
+         JOIN ad_flights af ON r.content_type = 'ad' AND r.content_id = af.id
+         WHERE r.status = 'verified' AND af.candidate_id IN (${placeholders})
+         GROUP BY af.candidate_id
+         UNION ALL
+         SELECT ra.candidate_id, COUNT(r.id) as total
+         FROM recites r
+         JOIN rebuttal_ads ra ON r.content_type = 'rebuttal' AND r.content_id = ra.id
+         WHERE r.status = 'verified' AND ra.candidate_id IN (${placeholders})
+         GROUP BY ra.candidate_id
+         UNION ALL
+         SELECT cr.candidate_id, COUNT(r.id) as total
+         FROM recites r
+         JOIN challenge_responses cr ON r.content_type = 'challenge_response' AND r.content_id = cr.id
+         WHERE r.status = 'verified' AND cr.candidate_id IN (${placeholders})
+         GROUP BY cr.candidate_id
+       )
+       GROUP BY candidate_id`
+    ).bind(
+      ...candidateIds,
+      ...candidateIds,
+      ...candidateIds,
+      ...candidateIds,
+      ...candidateIds,
+    ).all(),
+  ]);
+
+  for (const row of targetedResult.results || []) {
+    const current = stats.get(row.candidate_id);
+    const total = row.total || 0;
+    const responded = row.responded || 0;
+    current.targeted_challenges = {
+      total,
+      open: row.open || 0,
+      responded,
+      expired: row.expired || 0,
+      refused: row.refused || 0,
+      withdrawn: row.withdrawn || 0,
+      response_rate: percent(responded, total),
+    };
+  }
+
+  for (const row of issuedResult.results || []) {
+    stats.get(row.candidate_id).issued_challenges = { total: row.total || 0 };
+  }
+
+  for (const row of adsResult.results || []) {
+    stats.get(row.candidate_id).ads = { total: row.total || 0 };
+  }
+
+  for (const row of rebuttalsResult.results || []) {
+    stats.get(row.candidate_id).rebuttals = { total: row.total || 0 };
+  }
+
+  for (const row of statementsResult.results || []) {
+    stats.get(row.candidate_id).statements = {
+      total: row.total || 0,
+      supported: row.supported || 0,
+      disputed_or_false: row.disputed_or_false || 0,
+      dodged: row.dodged || 0,
+      avg_evasion_score: row.avg_evasion_score === null ? null : Math.round(Number(row.avg_evasion_score)),
+    };
+  }
+
+  for (const row of recitesResult.results || []) {
+    stats.get(row.candidate_id).verified_recites = { total: row.total || 0 };
+  }
+
+  return stats;
+}
+
 // GET /api/races — Public, filterable, with activity counts for trending
 router.get('/', async (request, env) => {
   const url = new URL(request.url);
@@ -213,6 +396,52 @@ router.get('/', async (request, env) => {
     total: countResult.total,
     page: Math.floor(offset / limit) + 1,
     limit,
+  });
+});
+
+// GET /api/races/:id/compare — Public side-by-side accountability metrics
+router.get('/:id/compare', async (request, env) => {
+  const { id } = request.params;
+
+  const race = await env.ARENA_DB.prepare(
+    `SELECT id, name, office, state, district, jurisdiction_level, election_date, status, description
+     FROM races WHERE id = ?`
+  ).bind(id).first();
+  if (!race) return errorResponse('Race not found', 404);
+
+  const candidatesResult = await env.ARENA_DB.prepare(
+    `SELECT
+       id, race_id, name, party, biography, issue_positions, photo_url, website_url,
+       verification_status, created_at, updated_at
+     FROM candidates
+     WHERE race_id = ? AND is_active = 1
+     ORDER BY CASE WHEN verification_status = 'verified' THEN 0 ELSE 1 END, name ASC`
+  ).bind(id).all();
+
+  const candidateRows = candidatesResult.results || [];
+  const statsByCandidate = await getCandidateComparisonStats(
+    env.ARENA_DB,
+    candidateRows.map(candidate => candidate.id)
+  );
+
+  return successResponse({
+    race,
+    candidates: candidateRows.map(candidate => ({
+      id: candidate.id,
+      race_id: candidate.race_id,
+      name: candidate.name,
+      party: candidate.party,
+      biography: candidate.biography,
+      issue_positions: safeParseIssuePositions(candidate.issue_positions),
+      photo_url: candidate.photo_url,
+      website_url: candidate.website_url,
+      verification_status: candidate.verification_status,
+      created_at: candidate.created_at,
+      updated_at: candidate.updated_at,
+      accountability: statsByCandidate.get(candidate.id),
+    })),
+    metric_note: 'Comparison metrics are procedural counts from public platform records, not endorsements or ballot-certification claims.',
+    generated_at: new Date().toISOString(),
   });
 });
 
