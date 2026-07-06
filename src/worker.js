@@ -84,6 +84,8 @@ const HTML_CSP = [
   "connect-src 'self'",
   "font-src 'self' data: https://fonts.gstatic.com",
   "object-src 'none'",
+  "frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com",
+  "child-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
