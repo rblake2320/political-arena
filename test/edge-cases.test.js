@@ -238,6 +238,35 @@ describe('edge-case regressions', () => {
     expect(receipt.body.data.timeline.map(entry => entry.chain_seq)).toEqual([1, 2]);
     expect(receipt.body.data.timeline[0].entry_hash).toMatch(/^[a-f0-9]{64}$/);
 
+    const admin = await makeAdmin('auditanchor');
+    const anchor = await post('/api/audit/anchors', {
+      scope_type: 'entity',
+      entity_type: 'challenge',
+      entity_id: sourced.body.data.id,
+    }, admin.token);
+    expect(anchor.status).toBe(200);
+    expect(anchor.body.data.anchor.merkle_root).toMatch(/^[a-f0-9]{64}$/);
+    expect(anchor.body.data.anchor.manifest_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(anchor.body.data.anchor.storage_key).toContain('/anch_');
+    expect(anchor.body.data.anchor.entry_count).toBeGreaterThanOrEqual(2);
+
+    const manifestObject = await env.ARENA_MEDIA.get(anchor.body.data.anchor.storage_key);
+    expect(manifestObject).toBeTruthy();
+    const manifest = JSON.parse(await manifestObject.text());
+    expect(manifest.anchor_id).toBe(anchor.body.data.anchor.id);
+    expect(manifest.scope.entity_type).toBe('challenge');
+    expect(manifest.scope.entity_id).toBe(sourced.body.data.id);
+    expect(manifest.entries.map(entry => entry.entry_hash)).toContain(receipt.body.data.timeline[0].entry_hash);
+
+    const anchoredReceipt = await get(`/api/challenges/${sourced.body.data.public_receipt_slug}/receipt`);
+    expect(anchoredReceipt.status).toBe(200);
+    expect(anchoredReceipt.body.data.audit_anchors[0].id).toBe(anchor.body.data.anchor.id);
+    expect(anchoredReceipt.body.data.audit_anchors[0].storage_key).toBe(anchor.body.data.anchor.storage_key);
+
+    const anchorList = await get(`/api/audit/anchors?entity_type=challenge&entity_id=${sourced.body.data.id}`, admin.token);
+    expect(anchorList.status).toBe(200);
+    expect(anchorList.body.data.anchors[0].id).toBe(anchor.body.data.anchor.id);
+
     const notification = await env.ARENA_DB.prepare(
       `SELECT notification_type, link_url FROM notifications WHERE user_id = ? AND notification_type = 'challenge_tagged' ORDER BY created_at DESC LIMIT 1`
     ).bind(targetStaff.id).first();
