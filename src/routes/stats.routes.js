@@ -31,7 +31,7 @@ router.get('/stats/cycle', async (request, env) => {
     env.ARENA_DB.prepare(
       `SELECT
          COALESCE(SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END), 0) as open_callouts,
-         COALESCE(SUM(CASE WHEN status IN ('responded','expired','refused','withdrawn') THEN 1 ELSE 0 END), 0) as resolved_callouts,
+         COALESCE(SUM(CASE WHEN status IN ('responded','refused','withdrawn') OR (status = 'expired' AND notice_status != 'unserved') THEN 1 ELSE 0 END), 0) as resolved_callouts,
          COALESCE(SUM(CASE WHEN status = 'responded' THEN 1 ELSE 0 END), 0) as responded_callouts
        FROM challenges
        WHERE is_visible = 1`
@@ -148,7 +148,7 @@ router.get('/feed/live', async (request, env) => {
        JOIN races r ON r.id = ch.race_id
        JOIN candidates challenger ON challenger.id = ch.challenger_candidate_id
        JOIN candidates target ON target.id = ch.target_candidate_id
-       WHERE ch.is_visible = 1 AND ch.expired_at IS NOT NULL
+       WHERE ch.is_visible = 1 AND ch.expired_at IS NOT NULL AND ch.notice_status != 'unserved'
      )
      WHERE event_at IS NOT NULL
      ORDER BY event_at DESC

@@ -105,6 +105,7 @@ async function getCandidateComparisonStats(db, candidateIds) {
     stats.set(id, {
       targeted_challenges: {
         total: 0,
+        accountable_total: 0,
         open: 0,
         responded: 0,
         expired: 0,
@@ -141,9 +142,10 @@ async function getCandidateComparisonStats(db, candidateIds) {
       `SELECT
          target_candidate_id as candidate_id,
          COUNT(*) as total,
+         SUM(CASE WHEN notice_status != 'unserved' THEN 1 ELSE 0 END) as accountable_total,
          SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open,
          SUM(CASE WHEN status = 'responded' THEN 1 ELSE 0 END) as responded,
-         SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) as expired,
+         SUM(CASE WHEN status = 'expired' AND notice_status != 'unserved' THEN 1 ELSE 0 END) as expired,
          SUM(CASE WHEN status = 'refused' THEN 1 ELSE 0 END) as refused,
          SUM(CASE WHEN status = 'withdrawn' THEN 1 ELSE 0 END) as withdrawn
        FROM challenges
@@ -226,15 +228,17 @@ async function getCandidateComparisonStats(db, candidateIds) {
   for (const row of targetedResult.results || []) {
     const current = stats.get(row.candidate_id);
     const total = row.total || 0;
+    const accountableTotal = row.accountable_total || 0;
     const responded = row.responded || 0;
     current.targeted_challenges = {
       total,
+      accountable_total: accountableTotal,
       open: row.open || 0,
       responded,
       expired: row.expired || 0,
       refused: row.refused || 0,
       withdrawn: row.withdrawn || 0,
-      response_rate: percent(responded, total),
+      response_rate: percent(responded, accountableTotal),
     };
   }
 
@@ -479,7 +483,7 @@ router.get('/:id', async (request, env) => {
   // Lazy expiration: update expired challenges
   const now = new Date().toISOString();
   const expiredChallenges = (challengesResult.results || []).filter(
-    c => c.status === 'open' && c.response_deadline < now
+    c => c.status === 'open' && c.notice_status !== 'unserved' && c.response_deadline < now
   );
   if (expiredChallenges.length > 0) {
     await env.ARENA_DB.batch(

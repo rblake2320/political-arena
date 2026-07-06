@@ -217,7 +217,9 @@ export default {
       // 1. Expire open challenges past deadline
       const expired = await env.ARENA_DB.prepare(
         `UPDATE challenges SET status = 'expired', expired_at = datetime('now'), updated_at = datetime('now')
-         WHERE status = 'open' AND response_deadline < datetime('now')`
+         WHERE status = 'open'
+           AND notice_status != 'unserved'
+           AND response_deadline < datetime('now')`
       ).run();
       if (expired.meta?.changes > 0) {
         console.log(`Expired ${expired.meta.changes} challenges`);

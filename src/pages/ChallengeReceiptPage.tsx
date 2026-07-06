@@ -100,9 +100,11 @@ export function ChallengeReceiptPage() {
   const chainBadge = chain.status === "verified" ? { t: "CHAIN VERIFIED", c: "#34C384" } : chain.status === "partial" ? { t: "PARTIALLY VERIFIED", c: "#EFB643" } : chain.status === "failed" ? { t: "VERIFICATION FAILED", c: "#E5484D" } : { t: "NO CHAIN ENTRIES", c: "#9B9BAB" };
   const slug = challenge.public_receipt_slug || challenge.id;
   const claim = challenge.claim_text || challenge.challenge_text;
+  const noticeServed = challenge.notice_status && challenge.notice_status !== "unserved";
+  const servedNoticeDate = challenge.notice_served_at || challenge.created_at;
   const steps = [
     { label: "FILED", on: true },
-    { label: "NOTICE", on: true },
+    { label: "NOTICE", on: noticeServed },
     { label: "RECITES", on: (recites || []).length > 0 },
     { label: status === "responded" ? "RESPONSE" : status === "expired" ? "NO RESP" : status === "refused" ? "REFUSED" : "PENDING", on: status === "responded" },
   ];
@@ -177,10 +179,12 @@ export function ChallengeReceiptPage() {
                   </span>
                   <span style={{ font: `400 15px/1.5 'Hanken Grotesk',sans-serif`, color: "#D6D6DE" }}>
                     {status === "expired"
-                      ? `${challenge.target_name} was served notice on ${fmtDate(challenge.created_at)} and did not respond before the deadline of ${fmtDate(challenge.response_deadline)}. The non-response is recorded here as a matter of public record.`
+                      ? `${challenge.target_name} was served notice on ${fmtDate(servedNoticeDate)} and did not respond before the deadline of ${fmtDate(challenge.response_deadline)}. The non-response is recorded here as a matter of public record.`
                       : status === "refused"
                         ? `${challenge.target_name} declined to respond${challenge.refusal_reason ? `: “${challenge.refusal_reason}”` : "."}`
-                        : `${challenge.target_name} has until ${fmtDate(challenge.response_deadline)} to respond. The clock is public.`}
+                        : noticeServed
+                          ? `${challenge.target_name} has until ${fmtDate(challenge.response_deadline)} to respond. The clock is public.`
+                          : `${challenge.target_name} has not yet been served through a candidate-controlled channel, so no public non-response mark is counted.`}
                   </span>
                 </div>
               </div>

@@ -364,6 +364,9 @@ describe('runtime migrations', () => {
     expect(db.adColumns.has('posted_for_rebuttal_by')).toBe(true);
     expect(db.challengeColumns.has('claim_text')).toBe(true);
     expect(db.challengeColumns.has('public_receipt_slug')).toBe(true);
+    expect(db.challengeColumns.has('notice_status')).toBe(true);
+    expect(db.challengeColumns.has('notice_served_at')).toBe(true);
+    expect(db.challengeColumns.has('notice_channels')).toBe(true);
     expect(db.reciteColumns.has('archive_url')).toBe(true);
     expect(db.reciteColumns.has('review_note')).toBe(true);
     expect(db.issueCategoryColumns.has('parent_category_id')).toBe(true);
@@ -404,6 +407,9 @@ describe('runtime migrations', () => {
       'ALTER TABLE challenges ADD COLUMN dispute_summary TEXT',
       'ALTER TABLE challenges ADD COLUMN requested_response TEXT',
       'ALTER TABLE challenges ADD COLUMN public_receipt_slug TEXT',
+      "ALTER TABLE challenges ADD COLUMN notice_status TEXT NOT NULL DEFAULT 'unserved' CHECK(notice_status IN ('unserved','in_app','email','both'))",
+      'ALTER TABLE challenges ADD COLUMN notice_served_at TEXT',
+      'ALTER TABLE challenges ADD COLUMN notice_channels TEXT',
       'ALTER TABLE recites ADD COLUMN source_published_at TEXT',
       'ALTER TABLE recites ADD COLUMN accessed_at TEXT',
       'ALTER TABLE recites ADD COLUMN archive_url TEXT',
@@ -633,7 +639,7 @@ describe('runtime migrations', () => {
       users: ['id', 'password_reset_token_hash', 'password_reset_expires_at'],
       candidates: ['id', 'source_status', 'source_url', 'source_label', 'source_updated_at'],
       adFlights: ['id', 'source_type', 'source_url', 'source_label', 'posted_for_rebuttal_by'],
-      challenges: ['id', 'claim_text', 'dispute_summary', 'requested_response', 'public_receipt_slug'],
+      challenges: ['id', 'claim_text', 'dispute_summary', 'requested_response', 'public_receipt_slug', 'notice_status', 'notice_served_at', 'notice_channels'],
       recites: ['id', 'source_published_at', 'accessed_at', 'archive_url', 'evidence_media_url', 'review_note'],
       issueCategories: ['id', 'parent_category_id'],
       voterWriteins: ['id', 'writein_rank'],
