@@ -478,6 +478,7 @@ describe('edge-case regressions', () => {
     expect(res.body.data.metric_note).toContain('procedural counts');
 
     const alice = res.body.data.candidates.find(candidate => candidate.id === candidateA);
+    expect(alice.source_status).toBe('platform_claim');
     expect(alice.issue_positions).toEqual([{ issue: 'Housing', position: 'Expand supply.' }]);
     expect(alice.accountability.targeted_challenges).toMatchObject({
       total: 2,

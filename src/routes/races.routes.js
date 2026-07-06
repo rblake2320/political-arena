@@ -412,6 +412,7 @@ router.get('/:id/compare', async (request, env) => {
   const candidatesResult = await env.ARENA_DB.prepare(
     `SELECT
        id, race_id, name, party, biography, issue_positions, photo_url, website_url,
+       source_status, source_url, source_label, source_updated_at,
        verification_status, created_at, updated_at
      FROM candidates
      WHERE race_id = ? AND is_active = 1
@@ -435,6 +436,10 @@ router.get('/:id/compare', async (request, env) => {
       issue_positions: safeParseIssuePositions(candidate.issue_positions),
       photo_url: candidate.photo_url,
       website_url: candidate.website_url,
+      source_status: candidate.source_status,
+      source_url: candidate.source_url,
+      source_label: candidate.source_label,
+      source_updated_at: candidate.source_updated_at,
       verification_status: candidate.verification_status,
       created_at: candidate.created_at,
       updated_at: candidate.updated_at,

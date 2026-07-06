@@ -1,0 +1,1161 @@
+{
+  "source": {
+    "title": "2026 United States gubernatorial elections - Race summary (states)",
+    "url": "https://en.wikipedia.org/wiki/2026_United_States_gubernatorial_elections",
+    "api_url": "https://en.wikipedia.org/w/api.php?action=parse&page=2026_United_States_gubernatorial_elections&prop=wikitext&format=json&origin=*",
+    "status": "wikipedia_listed",
+    "label": "Wikipedia-listed; not state ballot-certified",
+    "fetched_at": "2026-07-06T01:11:38.618Z",
+    "notes": "Snapshot of the state race-summary candidate column. Use only as a public-reference directory source."
+  },
+  "races": [
+    {
+      "state": "Alaska",
+      "state_code": "AK",
+      "race_id": "race-2026-AK-GOV",
+      "candidates": [
+        {
+          "name": "Tom Begich",
+          "party": "Democratic"
+        },
+        {
+          "name": "Click Bishop",
+          "party": "Republican"
+        },
+        {
+          "name": "Dave Bronson",
+          "party": "Republican"
+        },
+        {
+          "name": "Adam Crum",
+          "party": "Republican"
+        },
+        {
+          "name": "Edna DeVries",
+          "party": "Republican"
+        },
+        {
+          "name": "Meda DeWitt",
+          "party": "Independent"
+        },
+        {
+          "name": "Michael Gilbert",
+          "party": "Republican"
+        },
+        {
+          "name": "Matt Heilala",
+          "party": "Republican"
+        },
+        {
+          "name": "Shelley Hughes",
+          "party": "Republican"
+        },
+        {
+          "name": "Jonathan Kreiss-Tomkins",
+          "party": "Democratic"
+        },
+        {
+          "name": "Henry Kroll",
+          "party": "Republican"
+        },
+        {
+          "name": "Lesil McGuire",
+          "party": "Republican"
+        },
+        {
+          "name": "James Parkin",
+          "party": "Republican"
+        },
+        {
+          "name": "Destry Payne Sr.",
+          "party": "Independent"
+        },
+        {
+          "name": "Treg Taylor",
+          "party": "Republican"
+        },
+        {
+          "name": "Bill Walker",
+          "party": "Independent"
+        },
+        {
+          "name": "Bernadette Wilson",
+          "party": "Republican"
+        }
+      ]
+    },
+    {
+      "state": "Alabama",
+      "state_code": "AL",
+      "race_id": "race-2026-AL-GOV",
+      "candidates": [
+        {
+          "name": "Doug Jones",
+          "party": "Democratic"
+        },
+        {
+          "name": "Tommy Tuberville",
+          "party": "Republican"
+        }
+      ]
+    },
+    {
+      "state": "Arkansas",
+      "state_code": "AR",
+      "race_id": "race-2026-AR-GOV",
+      "candidates": [
+        {
+          "name": "Fredrick Love",
+          "party": "Democratic"
+        },
+        {
+          "name": "Sarah Huckabee Sanders",
+          "party": "Republican"
+        },
+        {
+          "name": "Colt Shelby",
+          "party": "Libertarian"
+        }
+      ]
+    },
+    {
+      "state": "Arizona",
+      "state_code": "AZ",
+      "race_id": "race-2026-AZ-GOV",
+      "candidates": [
+        {
+          "name": "Andy Biggs",
+          "party": "Republican"
+        },
+        {
+          "name": "Katie Hobbs",
+          "party": "Democratic"
+        },
+        {
+          "name": "Teri Hourihan",
+          "party": "American Independent"
+        },
+        {
+          "name": "Hugh Lytle",
+          "party": "American Independent"
+        },
+        {
+          "name": "Ken Miceli",
+          "party": "Republican"
+        },
+        {
+          "name": "Scott Neely",
+          "party": "Republican"
+        },
+        {
+          "name": "David Schweikert",
+          "party": "Republican"
+        },
+        {
+          "name": "Risa Lombardo",
+          "party": "Green"
+        },
+        {
+          "name": "Leezah Sun",
+          "party": "Independent"
+        }
+      ]
+    },
+    {
+      "state": "California",
+      "state_code": "CA",
+      "race_id": "race-2026-CA-GOV",
+      "candidates": [
+        {
+          "name": "Xavier Becerra",
+          "party": "Democratic"
+        },
+        {
+          "name": "Steve Hilton",
+          "party": "Republican"
+        }
+      ]
+    },
+    {
+      "state": "Colorado",
+      "state_code": "CO",
+      "race_id": "race-2026-CO-GOV",
+      "candidates": [
+        {
+          "name": "Barbara Kirkmeyer",
+          "party": "Republican"
+        },
+        {
+          "name": "Greg Lopez",
+          "party": "Independent"
+        },
+        {
+          "name": "Victor Marx",
+          "party": "Republican"
+        },
+        {
+          "name": "Jeff Peckman",
+          "party": "Unity"
+        },
+        {
+          "name": "Phil Weiser",
+          "party": "Democratic"
+        }
+      ]
+    },
+    {
+      "state": "Connecticut",
+      "state_code": "CT",
+      "race_id": "race-2026-CT-GOV",
+      "candidates": [
+        {
+          "name": "Josh Elliott",
+          "party": "Democratic"
+        },
+        {
+          "name": "Ryan Fazio",
+          "party": "Republican"
+        },
+        {
+          "name": "Ned Lamont",
+          "party": "Democratic"
+        }
+      ]
+    },
+    {
+      "state": "Florida",
+      "state_code": "FL",
+      "race_id": "race-2026-FL-GOV",
+      "candidates": [
+        {
+          "name": "Dean Abrams",
+          "party": "Independent"
+        },
+        {
+          "name": "Charles Burkett",
+          "party": "Independent"
+        },
+        {
+          "name": "Evelyn Castillo-Bach",
+          "party": "Democratic"
+        },
+        {
+          "name": "Jay Collins",
+          "party": "Republican"
+        },
+        {
+          "name": "Jeffrey Datto",
+          "party": "Independent"
+        },
+        {
+          "name": "Moe Dimanche",
+          "party": "Independent"
+        },
+        {
+          "name": "Byron Donalds",
+          "party": "Republican"
+        },
+        {
+          "name": "Thomas Fernandez",
+          "party": "Democratic"
+        },
+        {
+          "name": "James Fishback",
+          "party": "Republican"
+        },
+        {
+          "name": "Dayna Foster",
+          "party": "Democratic"
+        },
+        {
+          "name": "Scott Jewett",
+          "party": "Libertarian"
+        },
+        {
+          "name": "David Jolly",
+          "party": "Democratic"
+        },
+        {
+          "name": "Dotie Joseph",
+          "party": "Democratic"
+        },
+        {
+          "name": "Desmond Meade",
+          "party": "Independent"
+        },
+        {
+          "name": "Daniel Nokovich",
+          "party": "Republican"
+        },
+        {
+          "name": "Stephann Norman",
+          "party": "Democratic"
+        },
+        {
+          "name": "Paul Renner",
+          "party": "Republican"
+        },
+        {
+          "name": "Rachel Rodriguez",
+          "party": "Republican"
+        },
+        {
+          "name": "Frank Russo",
+          "party": "Independent"
+        },
+        {
+          "name": "James Shaw",
+          "party": "Republican"
+        },
+        {
+          "name": "Caneste Succe",
+          "party": "Republican"
+        },
+        {
+          "name": "Bobby Williams",
+          "party": "Republican"
+        }
+      ]
+    },
+    {
+      "state": "Georgia",
+      "state_code": "GA",
+      "race_id": "race-2026-GA-GOV",
+      "candidates": [
+        {
+          "name": "Keisha Lance Bottoms",
+          "party": "Democratic"
+        },
+        {
+          "name": "Rick Jackson",
+          "party": "Republican"
+        }
+      ]
+    },
+    {
+      "state": "Hawaii",
+      "state_code": "HI",
+      "race_id": "race-2026-HI-GOV",
+      "candidates": [
+        {
+          "name": "Josh Green",
+          "party": "Democratic"
+        },
+        {
+          "name": "Gary Cordery",
+          "party": "Republican"
+        },
+        {
+          "name": "Ken Fujiyama",
+          "party": "Republican"
+        },
+        {
+          "name": "Bu La'ia Hill",
+          "party": "Independent"
+        }
+      ]
+    },
+    {
+      "state": "Iowa",
+      "state_code": "IA",
+      "race_id": "race-2026-IA-GOV",
+      "candidates": [
+        {
+          "name": "Zach Lahn",
+          "party": "Republican"
+        },
+        {
+          "name": "Rob Sand",
+          "party": "Democratic"
+        },
+        {
+          "name": "Sondra Wilson",
+          "party": "Independent"
+        }
+      ]
+    },
+    {
+      "state": "Idaho",
+      "state_code": "ID",
+      "race_id": "race-2026-ID-GOV",
+      "candidates": [
+        {
+          "name": "Brad Little",
+          "party": "Republican"
+        },
+        {
+          "name": "Terri Pickens",
+          "party": "Democratic"
+        },
+        {
+          "name": "Pro-Life",
+          "party": "Constitution"
+        },
+        {
+          "name": "Paul Sand",
+          "party": "Libertarian"
+        },
+        {
+          "name": "John Stegner",
+          "party": "Independent"
+        }
+      ]
+    },
+    {
+      "state": "Illinois",
+      "state_code": "IL",
+      "race_id": "race-2026-IL-GOV",
+      "candidates": [
+        {
+          "name": "Darren Bailey",
+          "party": "Republican"
+        },
+        {
+          "name": "JB Pritzker",
+          "party": "Democratic"
+        }
+      ]
+    },
+    {
+      "state": "Kansas",
+      "state_code": "KS",
+      "race_id": "race-2026-KS-GOV",
+      "candidates": [
+        {
+          "name": "Ethan Corson",
+          "party": "Democratic"
+        },
+        {
+          "name": "Joy Eakins",
+          "party": "Republican"
+        },
+        {
+          "name": "Cindy Holscher",
+          "party": "Democratic"
+        },
+        {
+          "name": "Ty Masterson",
+          "party": "Republican"
+        },
+        {
+          "name": "Charlotte O'Hara",
+          "party": "Republican"
+        },
+        {
+          "name": "Stacy Rogers",
+          "party": "Republican"
+        },
+        {
+          "name": "Philip Sarnecki",
+          "party": "Republican"
+        },
+        {
+          "name": "Vicki Schmidt",
+          "party": "Republican"
+        },
+        {
+          "name": "Scott Schwab",
+          "party": "Republican"
+        },
+        {
+          "name": "Curt Skoog",
+          "party": "Democratic"
+        },
+        {
+          "name": "Marty Tuley",
+          "party": "Democratic"
+        }
+      ]
+    },
+    {
+      "state": "Massachusetts",
+      "state_code": "MA",
+      "race_id": "race-2026-MA-GOV",
+      "candidates": [
+        {
+          "name": "Andrea James",
+          "party": "Independent"
+        },
+        {
+          "name": "Muhammed Kokonezis-Hanino",
+          "party": "Independent"
+        },
+        {
+          "name": "Mike Minogue",
+          "party": "Republican"
+        },
+        {
+          "name": "Brian Shortsleeve",
+          "party": "Republican"
+        }
+      ]
+    },
+    {
+      "state": "Maryland",
+      "state_code": "MD",
+      "race_id": "race-2026-MD-GOV",
+      "candidates": [
+        {
+          "name": "Dan Cox",
+          "party": "Republican"
+        },
+        {
+          "name": "Andy Ellis",
+          "party": "Green"
+        },
+        {
+          "name": "Wes Moore",
+          "party": "Democratic"
+        }
+      ]
+    },
+    {
+      "state": "Maine",
+      "state_code": "ME",
+      "race_id": "race-2026-ME-GOV",
+      "candidates": [
+        {
+          "name": "Rick Bennett",
+          "party": "Independent"
+        },
+        {
+          "name": "Robert B. Charles",
+          "party": "Republican"
+        },
+        {
+          "name": "Hannah Pingree",
+          "party": "Democratic"
+        }
+      ]
+    },
+    {
+      "state": "Michigan",
+      "state_code": "MI",
+      "race_id": "race-2026-MI-GOV",
+      "candidates": [
+        {
+          "name": "Jocelyn Benson",
+          "party": "Democratic"
+        },
+        {
+          "name": "Mike Cox",
+          "party": "Republican"
+        },
+        {
+          "name": "Anthony Hudson",
+          "party": "Libertarian"
+        },
+        {
+          "name": "John James",
+          "party": "Republican"
+        },
+        {
+          "name": "Perry Johnson",
+          "party": "Republican"
+        },
+        {
+          "name": "Chris Swanson",
+          "party": "Democratic"
+        },
+        {
+          "name": "Karla Wagner",
+          "party": "Independent"
+        }
+      ]
+    },
+    {
+      "state": "Minnesota",
+      "state_code": "MN",
+      "race_id": "race-2026-MN-GOV",
+      "candidates": [
+        {
+          "name": "Loner Blue",
+          "party": "Republican"
+        },
+        {
+          "name": "Lisa Demuth",
+          "party": "Republican"
+        },
+        {
+          "name": "Raul Estrada",
+          "party": "Republican"
+        },
+        {
+          "name": "Thomas Evenstad",
+          "party": "DFL"
+        },
+        {
+          "name": "Bill E. Gates Jr.",
+          "party": "DFL"
+        },
+        {
+          "name": "Tim Holden",
+          "party": "DFL"
+        },
+        {
+          "name": "Amy Klobuchar",
+          "party": "DFL"
+        },
+        {
+          "name": "John Krhin",
+          "party": "Republican"
+        },
+        {
+          "name": "Kobey Layne",
+          "party": "DFL"
+        },
+        {
+          "name": "Mike Lindell",
+          "party": "Republican"
+        },
+        {
+          "name": "Ross Nova",
+          "party": "Republican"
+        },
+        {
+          "name": "Kendall Qualls",
+          "party": "Republican"
+        },
+        {
+          "name": "Ole Savior",
+          "party": "DFL"
+        },
+        {
+          "name": "Po Vang",
+          "party": "DFL"
+        },
+        {
+          "name": "Mohammad Wazwaz",
+          "party": "DFL"
+        }
+      ]
+    },
+    {
+      "state": "Nebraska",
+      "state_code": "NE",
+      "race_id": "race-2026-NE-GOV",
+      "candidates": [
+        {
+          "name": "Rick Beard",
+          "party": "Legal Marijuana Now"
+        },
+        {
+          "name": "Jim Pillen",
+          "party": "Republican"
+        },
+        {
+          "name": "Lynne Walz",
+          "party": "Democratic"
+        }
+      ]
+    },
+    {
+      "state": "New Hampshire",
+      "state_code": "NH",
+      "race_id": "race-2026-NH-GOV",
+      "candidates": [
+        {
+          "name": "Kelly Ayotte",
+          "party": "Republican"
+        },
+        {
+          "name": "Jon Kiper",
+          "party": "Community First"
+        },
+        {
+          "name": "Cinde Warmington (Democratic)}}",
+          "party": "Unknown"
+        }
+      ]
+    },
+    {
+      "state": "New Mexico",
+      "state_code": "NM",
+      "race_id": "race-2026-NM-GOV",
+      "candidates": [
+        {
+          "name": "Deb Haaland",
+          "party": "Democratic"
+        },
+        {
+          "name": "Gregg Hull",
+          "party": "Republican"
+        },
+        {
+          "name": "Ken Miyagishima",
+          "party": "Independent"
+        }
+      ]
+    },
+    {
+      "state": "Nevada",
+      "state_code": "NV",
+      "race_id": "race-2026-NV-GOV",
+      "candidates": [
+        {
+          "name": "Christopher Battenberg",
+          "party": "Independent"
+        },
+        {
+          "name": "Max Beck",
+          "party": "Independent"
+        },
+        {
+          "name": "Aaron Ford",
+          "party": "Democratic"
+        },
+        {
+          "name": "Danielle Ford",
+          "party": "Independent"
+        },
+        {
+          "name": "Jordan Koteras",
+          "party": "Independent"
+        },
+        {
+          "name": "Joe Lombardo",
+          "party": "Republican"
+        },
+        {
+          "name": "Allen Rheinhart",
+          "party": "Independent"
+        },
+        {
+          "name": "Emilio Rodriguez",
+          "party": "Independent"
+        },
+        {
+          "name": "John Scott",
+          "party": "Independent"
+        },
+        {
+          "name": "Gracie Vanburn",
+          "party": "Independent"
+        }
+      ]
+    },
+    {
+      "state": "New York",
+      "state_code": "NY",
+      "race_id": "race-2026-NY-GOV",
+      "candidates": [
+        {
+          "name": "Bruce Blakeman",
+          "party": "Republican"
+        },
+        {
+          "name": "Kathy Hochul",
+          "party": "Democratic"
+        },
+        {
+          "name": "Amy Taylor",
+          "party": "Working Families"
+        }
+      ]
+    },
+    {
+      "state": "Ohio",
+      "state_code": "OH",
+      "race_id": "race-2026-OH-GOV",
+      "candidates": [
+        {
+          "name": "Amy Acton",
+          "party": "Democratic"
+        },
+        {
+          "name": "Timothy Grady",
+          "party": "Independent"
+        },
+        {
+          "name": "Donald Kissick",
+          "party": "Libertarian"
+        },
+        {
+          "name": "Vivek Ramaswamy",
+          "party": "Republican"
+        }
+      ]
+    },
+    {
+      "state": "Oklahoma",
+      "state_code": "OK",
+      "race_id": "race-2026-OK-GOV",
+      "candidates": [
+        {
+          "name": "Robert Brooks Sr.",
+          "party": "Independent"
+        },
+        {
+          "name": "Jerry Griffin",
+          "party": "Independent"
+        },
+        {
+          "name": "Gentner Drummond",
+          "party": "Republican"
+        },
+        {
+          "name": "Mike Mazzei",
+          "party": "Republican"
+        },
+        {
+          "name": "Cyndi Munson",
+          "party": "Democratic"
+        }
+      ]
+    },
+    {
+      "state": "Oregon",
+      "state_code": "OR",
+      "race_id": "race-2026-OR-GOV",
+      "candidates": [
+        {
+          "name": "Christine Drazan",
+          "party": "Republican"
+        },
+        {
+          "name": "Tina Kotek",
+          "party": "Democratic"
+        }
+      ]
+    },
+    {
+      "state": "Pennsylvania",
+      "state_code": "PA",
+      "race_id": "race-2026-PA-GOV",
+      "candidates": [
+        {
+          "name": "Tony Dastra (Green) <ref>{{cite news|url =https://www.gpofpa.org/tony_dastra_campaign_for_governor_of_pennsylvania|title =",
+          "party": "Unknown"
+        },
+        {
+          "name": "Stacy Garrity",
+          "party": "Republican"
+        },
+        {
+          "name": "Ken Krawchuk",
+          "party": "Libertarian"
+        },
+        {
+          "name": "Bill Messner",
+          "party": "Constitution"
+        },
+        {
+          "name": "Josh Shapiro",
+          "party": "Democratic"
+        }
+      ]
+    },
+    {
+      "state": "Rhode Island",
+      "state_code": "RI",
+      "race_id": "race-2026-RI-GOV",
+      "candidates": [
+        {
+          "name": "Emmanuel Adjei",
+          "party": "Republican"
+        },
+        {
+          "name": "Ken Block",
+          "party": "Independent"
+        },
+        {
+          "name": "Jonathan Coker",
+          "party": "Democratic"
+        },
+        {
+          "name": "Amy Ferreira",
+          "party": "Republican"
+        },
+        {
+          "name": "Helena Foulkes",
+          "party": "Democratic"
+        },
+        {
+          "name": "Frank Gallucci",
+          "party": "Republican"
+        },
+        {
+          "name": "Steven Gregersen",
+          "party": "Democratic"
+        },
+        {
+          "name": "Aaron Guckian",
+          "party": "Republican"
+        },
+        {
+          "name": "Dan McKee",
+          "party": "Democratic"
+        },
+        {
+          "name": "Elaine Pelino",
+          "party": "Republican"
+        },
+        {
+          "name": "Gregory Stevens",
+          "party": "Democratic"
+        }
+      ]
+    },
+    {
+      "state": "South Carolina",
+      "state_code": "SC",
+      "race_id": "race-2026-SC-GOV",
+      "candidates": [
+        {
+          "name": "Michael Addison",
+          "party": "United Citizens"
+        },
+        {
+          "name": "Walid Hakim",
+          "party": "Green"
+        },
+        {
+          "name": "Jermaine Johnson",
+          "party": "Democratic"
+        },
+        {
+          "name": "Alan Wilson",
+          "party": "Republican"
+        }
+      ]
+    },
+    {
+      "state": "South Dakota",
+      "state_code": "SD",
+      "race_id": "race-2026-SD-GOV",
+      "candidates": [
+        {
+          "name": "Dan Ahlers",
+          "party": "Democratic"
+        },
+        {
+          "name": "Toby Doeden",
+          "party": "Republican"
+        },
+        {
+          "name": "Allison Renville",
+          "party": "Independent"
+        },
+        {
+          "name": "Larry Rhoden",
+          "party": "Republican"
+        }
+      ]
+    },
+    {
+      "state": "Tennessee",
+      "state_code": "TN",
+      "race_id": "race-2026-TN-GOV",
+      "candidates": [
+        {
+          "name": "Misam Abidi",
+          "party": "Independent"
+        },
+        {
+          "name": "Santiago Asconape",
+          "party": "Independent"
+        },
+        {
+          "name": "Carnita Atwater",
+          "party": "Democratic"
+        },
+        {
+          "name": "Marsha Blackburn",
+          "party": "Republican"
+        },
+        {
+          "name": "Carlton Boleyjack",
+          "party": "Republican"
+        },
+        {
+          "name": "Dean Brewer",
+          "party": "Independent"
+        },
+        {
+          "name": "Ray Brown",
+          "party": "Independent"
+        },
+        {
+          "name": "Tim Cyr",
+          "party": "Democratic"
+        },
+        {
+          "name": "Monty Fritts",
+          "party": "Republican"
+        },
+        {
+          "name": "Jerri Green",
+          "party": "Democratic"
+        },
+        {
+          "name": "Taylor Hafley",
+          "party": "Independent"
+        },
+        {
+          "name": "David Hatley",
+          "party": "Independent"
+        },
+        {
+          "name": "Rebecca Inman",
+          "party": "Republican"
+        },
+        {
+          "name": "Wendell Jackson",
+          "party": "Independent"
+        },
+        {
+          "name": "Martin Kennedy",
+          "party": "Democratic"
+        },
+        {
+          "name": "Adam Kurtz",
+          "party": "Democratic"
+        },
+        {
+          "name": "Kevin McCants",
+          "party": "Democratic"
+        },
+        {
+          "name": "Charles Van Morgan",
+          "party": "Independent"
+        },
+        {
+          "name": "Eddie Lee Murphy",
+          "party": "Independent"
+        },
+        {
+          "name": "Lauren Pinkston",
+          "party": "Independent"
+        },
+        {
+          "name": "John Rose",
+          "party": "Republican"
+        },
+        {
+          "name": "Karl Smithson",
+          "party": "Independent"
+        },
+        {
+          "name": "L. Webb Taylor",
+          "party": "Independent"
+        },
+        {
+          "name": "Robert Vick",
+          "party": "Independent"
+        }
+      ]
+    },
+    {
+      "state": "Texas",
+      "state_code": "TX",
+      "race_id": "race-2026-TX-GOV",
+      "candidates": [
+        {
+          "name": "Greg Abbott",
+          "party": "Republican"
+        },
+        {
+          "name": "Gina Hinojosa",
+          "party": "Democratic"
+        }
+      ]
+    },
+    {
+      "state": "Vermont",
+      "state_code": "VT",
+      "race_id": "race-2026-VT-GOV",
+      "candidates": [
+        {
+          "name": "Amanda Janoo",
+          "party": "Democratic"
+        },
+        {
+          "name": "Aly Richards",
+          "party": "Democratic"
+        },
+        {
+          "name": "Phil Scott",
+          "party": "Republican"
+        }
+      ]
+    },
+    {
+      "state": "Wisconsin",
+      "state_code": "WI",
+      "race_id": "race-2026-WI-GOV",
+      "candidates": [
+        {
+          "name": "Mandela Barnes",
+          "party": "Democratic"
+        },
+        {
+          "name": "Joel Brennan",
+          "party": "Democratic"
+        },
+        {
+          "name": "David Crowley",
+          "party": "Democratic"
+        },
+        {
+          "name": "Jill Ferguson",
+          "party": "Green"
+        },
+        {
+          "name": "Francesca Hong",
+          "party": "Democratic"
+        },
+        {
+          "name": "Brett Hulsey",
+          "party": "Democratic"
+        },
+        {
+          "name": "Sara Rodriguez",
+          "party": "Democratic"
+        },
+        {
+          "name": "Zachary Roper",
+          "party": "Democratic"
+        },
+        {
+          "name": "Kelda Roys",
+          "party": "Democratic"
+        },
+        {
+          "name": "Ryan Strnad",
+          "party": "Democratic"
+        },
+        {
+          "name": "Tom Tiffany",
+          "party": "Republican"
+        }
+      ]
+    },
+    {
+      "state": "Wyoming",
+      "state_code": "WY",
+      "race_id": "race-2026-WY-GOV",
+      "candidates": [
+        {
+          "name": "Eric Barlow",
+          "party": "Republican"
+        },
+        {
+          "name": "Brent Bien",
+          "party": "Republican"
+        },
+        {
+          "name": "Megan Degenfelder",
+          "party": "Republican"
+        },
+        {
+          "name": "Gabriel Green",
+          "party": "Democratic"
+        },
+        {
+          "name": "Joseph Kibler",
+          "party": "Constitution"
+        }
+      ]
+    }
+  ]
+}
