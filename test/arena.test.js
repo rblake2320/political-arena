@@ -245,10 +245,13 @@ describe('races & demo seed (test env only)', () => {
     expect(ncRace.status).toBe(200);
     const cooperAd = ncRace.body.data.ads.find(ad => ad.id === 'ad-ext-roy-cooper-easier-2026');
     expect(cooperAd).toMatchObject({
+      title: 'SAMPLE - HISTORICAL AD: Daisy (1964)',
       source_type: 'external',
       media_type: 'video',
       max_rebuttals: 1,
-      source_label: 'SAMPLE official campaign TV ad link',
+      media_url: 'https://upload.wikimedia.org/wikipedia/commons/5/5f/Daisy_%281964%29.webm',
+      source_label: 'SAMPLE - HISTORICAL AD (public-domain Wikimedia video)',
+      disclaimer_text: 'SAMPLE - HISTORICAL AD. Public-domain historical ad for workflow demonstration; not paid for by the current candidate or campaign.',
       ad_recite_summary: {
         recite_count: expect.any(Number),
         fact_score: {
@@ -265,9 +268,12 @@ describe('races & demo seed (test env only)', () => {
     expect(kyRace.status).toBe(200);
     const barrAd = kyRace.body.data.ads.find(ad => ad.id === 'ad-ext-andy-barr-stop-dei-2026');
     expect(barrAd).toMatchObject({
+      title: 'SAMPLE - HISTORICAL AD: I Like Ike (1952)',
       source_type: 'external',
       media_type: 'video',
+      media_url: 'https://upload.wikimedia.org/wikipedia/commons/d/d8/1952_Eisenhower_Political_Ad_-_I_Like_Ike_-_Presidential_Campaign_Ad.webm',
       max_rebuttals: 1,
+      disclaimer_text: 'SAMPLE - HISTORICAL AD. Public-domain historical ad for workflow demonstration; not paid for by the current candidate or campaign.',
     });
     expect(kyRace.body.data.rebuttals.filter(rebuttal => rebuttal.parent_ad_id === barrAd.id)).toHaveLength(0);
     expect(barrAd.ad_recite_summary.recite_count).toBeGreaterThanOrEqual(2);
