@@ -119,7 +119,7 @@ describe('production workflow smoke', () => {
 
     expect(mediaUrls.length).toBeGreaterThan(0);
     expect(mediaUrls.every(url => !url.includes('example.com'))).toBe(true);
-    expect(mediaUrls.every(url => /\.(png|mp4)(\?|#|$)/i.test(new URL(url).pathname))).toBe(true);
+    expect(mediaUrls.every(url => /\.(png|mp4|webm)(\?|#|$)/i.test(new URL(url).pathname))).toBe(true);
   });
 
   it('seeds source-backed demo recites for race summaries and receipts', async () => {
