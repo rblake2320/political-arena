@@ -302,6 +302,10 @@ export const favoriteSchema = z.object({
   target_id: z.string().min(1),
 });
 
+export const launchEmailTestSchema = z.object({
+  to_email: z.string().email().max(255).optional(),
+});
+
 // ===== Survey Schemas =====
 
 export const submitPrioritiesSchema = z.object({

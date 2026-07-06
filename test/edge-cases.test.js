@@ -360,6 +360,26 @@ describe('edge-case regressions', () => {
     expect(readiness.body.data.blockers.map(item => item.gate)).toContain('transactional_email');
   });
 
+  it('provides an admin-only transactional email readiness smoke endpoint', async () => {
+    const voter = await makeVerifiedVoter('emailtestvoter');
+    const admin = await makeAdmin('emailtestadmin');
+
+    const anonymous = await post('/api/stats/readiness/email-test', {});
+    expect(anonymous.status).toBe(401);
+
+    const regularUser = await post('/api/stats/readiness/email-test', {}, voter.token);
+    expect(regularUser.status).toBe(403);
+
+    const invalid = await post('/api/stats/readiness/email-test', {
+      to_email: 'not-an-email',
+    }, admin.token);
+    expect(invalid.status).toBe(400);
+
+    const unconfigured = await post('/api/stats/readiness/email-test', {}, admin.token);
+    expect(unconfigured.status).toBe(503);
+    expect(unconfigured.body.error).toContain('Transactional email is not configured');
+  });
+
   it('rejects duplicate priority ranks and unknown issue categories', async () => {
     const voter = await makeVerifiedVoter('priorityvoter');
 
