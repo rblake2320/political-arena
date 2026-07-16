@@ -7,7 +7,7 @@ import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { requireAuth, errorResponse, successResponse, parseBody } from '../middleware.js';
 import { validate, favoriteSchema } from '../validation.js';
-import { enrichSavedItems, savedTargetExists } from './saved-items.helpers.js';
+import { enrichSavedItems, savedTargetExists, SAVED_ITEMS_LIST_LIMIT } from './saved-items.helpers.js';
 
 const router = Router({ base: '/api/favorites' });
 
@@ -20,8 +20,9 @@ router.get('/', async (request, env) => {
     `SELECT id, favorite_type, target_id, created_at
      FROM user_favorites
      WHERE user_id = ?
-     ORDER BY created_at DESC`
-  ).bind(request.user.id).all();
+     ORDER BY created_at DESC
+     LIMIT ?`
+  ).bind(request.user.id, SAVED_ITEMS_LIST_LIMIT).all();
 
   const { items, grouped } = await enrichSavedItems(env, result.results || [], 'favorite_type');
   return successResponse({ favorites: items, grouped });

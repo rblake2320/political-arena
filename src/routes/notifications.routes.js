@@ -7,7 +7,7 @@ import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { requireAuth, errorResponse, successResponse, parseBody, parsePagination } from '../middleware.js';
 import { validate, subscribeSchema } from '../validation.js';
-import { enrichSavedItems, savedTargetExists } from './saved-items.helpers.js';
+import { enrichSavedItems, savedTargetExists, SAVED_ITEMS_LIST_LIMIT } from './saved-items.helpers.js';
 
 const router = Router({ base: '/api/notifications' });
 
@@ -76,8 +76,9 @@ router.get('/watchlist', async (request, env) => {
     `SELECT id, subscription_type, target_id, notify_on, channel, created_at
      FROM notification_subscriptions
      WHERE user_id = ? AND is_active = 1
-     ORDER BY created_at DESC`
-  ).bind(request.user.id).all();
+     ORDER BY created_at DESC
+     LIMIT ?`
+  ).bind(request.user.id, SAVED_ITEMS_LIST_LIMIT).all();
 
   const { items, grouped } = await enrichSavedItems(env, result.results || [], 'subscription_type');
   return successResponse({ subscriptions: items, grouped });
