@@ -132,6 +132,10 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+// Cap outbound provider calls so a slow/unresponsive email API cannot pin a
+// Worker invocation until the platform kills it.
+const EMAIL_PROVIDER_TIMEOUT_MS = 10000;
+
 export async function sendTransactionalEmail(env, message, fetchImpl = fetch) {
   const config = assertProviderConfig(env);
   if (!config) {
@@ -146,6 +150,7 @@ export async function sendTransactionalEmail(env, message, fetchImpl = fetch) {
   if (config.provider === 'resend') {
     const response = await fetchImpl(config.url, {
       method: 'POST',
+      signal: AbortSignal.timeout(EMAIL_PROVIDER_TIMEOUT_MS),
       headers: {
         Authorization: `Bearer ${env.RESEND_API_KEY}`,
         'Content-Type': 'application/json',
@@ -172,6 +177,7 @@ export async function sendTransactionalEmail(env, message, fetchImpl = fetch) {
   if (config.provider === 'postmark') {
     const response = await fetchImpl(config.url, {
       method: 'POST',
+      signal: AbortSignal.timeout(EMAIL_PROVIDER_TIMEOUT_MS),
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
@@ -196,6 +202,7 @@ export async function sendTransactionalEmail(env, message, fetchImpl = fetch) {
 
   const response = await fetchImpl(config.url, {
     method: 'POST',
+    signal: AbortSignal.timeout(EMAIL_PROVIDER_TIMEOUT_MS),
     headers: {
       'Content-Type': 'application/json',
       ...(env.PASSWORD_RESET_WEBHOOK_TOKEN ? { Authorization: `Bearer ${env.PASSWORD_RESET_WEBHOOK_TOKEN}` } : {}),
