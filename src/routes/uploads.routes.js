@@ -18,6 +18,17 @@ import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { requireAuth, errorResponse, successResponse, parseBody, getClientIP } from '../middleware.js';
 import { auditLog } from '../audit.js';
+import { checkRateLimit } from '../ratelimit.js';
+
+// Uploads are the most expensive abuse surface (100MB direct writes to R2).
+const UPLOAD_MAX_PER_USER = 30;          // per hour
+const UPLOAD_WINDOW_SECONDS = 60 * 60;
+
+async function checkUploadRateLimit(env, userId) {
+  const rl = await checkRateLimit(env.ARENA_DB, `upload:${userId}`, UPLOAD_MAX_PER_USER, UPLOAD_WINDOW_SECONDS);
+  if (rl.limited) return errorResponse('Upload limit reached. Please try again later.', 429);
+  return null;
+}
 import { resolveUploadType, r2MediaResponse, supportedMediaTypes } from '../media.js';
 
 const router = Router({ base: '/api/uploads' });
@@ -26,6 +37,9 @@ const router = Router({ base: '/api/uploads' });
 router.post('/presign', async (request, env, ctx) => {
   const authError = await requireAuth(request, env);
   if (authError) return authError;
+
+  const rlError = await checkUploadRateLimit(env, request.user.id);
+  if (rlError) return rlError;
 
   const body = await parseBody(request);
   if (!body) return errorResponse('Invalid request body');
@@ -86,6 +100,9 @@ router.post('/direct', handleDirectUpload);
 async function handleDirectUpload(request, env, ctx) {
   const authError = await requireAuth(request, env);
   if (authError) return authError;
+
+  const rlError = await checkUploadRateLimit(env, request.user.id);
+  if (rlError) return rlError;
 
   // Handle multipart form data
   const formData = await request.formData().catch(() => null);

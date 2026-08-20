@@ -6,9 +6,10 @@
 import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import {
-  requireAuth, requireVerifiedVoter, requireApprovedPress,
-  optionalAuth, successResponse, errorResponse, parsePagination, parseBody,
+  requireAuth, requireVerifiedVoter, requireApprovedPress, requireRole,
+  optionalAuth, successResponse, errorResponse, parsePagination, parseBody, getClientIP,
 } from '../middleware.js';
+import { auditLog } from '../audit.js';
 import { validate, submitQuestionSchema } from '../validation.js';
 import { checkRateLimit } from '../ratelimit.js';
 
@@ -53,12 +54,16 @@ router.get('/:raceId', async (request, env) => {
   let userVotes = {};
   if (request.user && questions.results.length > 0) {
     const qIds = questions.results.map(q => q.id);
-    const placeholders = qIds.map(() => '?').join(',');
-    const votes = await env.ARENA_DB.prepare(
-      `SELECT question_id FROM question_votes WHERE user_id = ? AND question_id IN (${placeholders})`
-    ).bind(request.user.id, ...qIds).all();
-    for (const v of votes.results) {
-      userVotes[v.question_id] = true;
+    // D1 caps bound parameters at 100 per statement — chunk the IN list.
+    for (let i = 0; i < qIds.length; i += 90) {
+      const chunk = qIds.slice(i, i + 90);
+      const placeholders = chunk.map(() => '?').join(',');
+      const votes = await env.ARENA_DB.prepare(
+        `SELECT question_id FROM question_votes WHERE user_id = ? AND question_id IN (${placeholders})`
+      ).bind(request.user.id, ...chunk).all();
+      for (const v of votes.results) {
+        userVotes[v.question_id] = true;
+      }
     }
   }
 
@@ -225,6 +230,38 @@ router.post('/:questionId/vote', async (request, env) => {
 });
 
 // 404 for unknown question routes
+// PUT /api/questions/:questionId/status — Moderator hide/restore (takedown path)
+router.put('/:questionId/status', async (request, env, ctx) => {
+  const authError = await requireRole('moderator', 'admin', 'super_admin')(request, env);
+  if (authError) return authError;
+
+  const { questionId } = request.params;
+  const body = await parseBody(request);
+  const status = body?.status;
+  if (!['active', 'hidden'].includes(status)) {
+    return errorResponse('status must be active or hidden');
+  }
+
+  const question = await env.ARENA_DB.prepare(`SELECT id, status FROM questions WHERE id = ?`).bind(questionId).first();
+  if (!question) return errorResponse('Question not found', 404);
+
+  await env.ARENA_DB.prepare(
+    `UPDATE questions SET status = ?, updated_at = datetime('now') WHERE id = ?`
+  ).bind(status, questionId).run();
+
+  auditLog(env.ARENA_DB, ctx, {
+    actorId: request.user.id,
+    action: `question.${status === 'hidden' ? 'hide' : 'restore'}`,
+    entityType: 'question',
+    entityId: questionId,
+    beforeState: { status: question.status },
+    afterState: { status, reason: body?.reason || null },
+    ipAddress: getClientIP(request),
+  });
+
+  return successResponse({ id: questionId, status });
+});
+
 router.all('*', () => errorResponse('Questions endpoint not found', 404));
 
 export default router;

@@ -194,7 +194,7 @@ export function ChallengeReceiptPage() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 34px", borderTop: "1px dashed rgba(255,255,255,.14)", flexWrap: "wrap", gap: 12 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 <span style={{ font: `500 8.5px ${mono}`, letterSpacing: ".14em", color: "#5C5C6E" }}>PERMANENT PUBLIC URL</span>
-                <span style={{ font: `500 10.5px ${mono}`, color: "#9B9BAB" }}>arena.vote/challenge/{slug}</span>
+                <span style={{ font: `500 10.5px ${mono}`, color: "#9B9BAB" }}>{location.host}/challenge/{slug}</span>
               </div>
               <div style={{ display: "flex", gap: 9 }}>
                 <button onClick={() => { navigator.clipboard?.writeText(`${location.origin}/challenge/${slug}`).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); }}

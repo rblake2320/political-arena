@@ -31,6 +31,16 @@ export async function savedTargetExists(env, targetType, targetId) {
 
 async function fetchTargetsByType(env, targetType, targetIds) {
   if (targetIds.length === 0) return [];
+  // D1 caps bound parameters at 100 per statement — chunk the IN list
+  // (saved-item lists allow up to 200 ids per type).
+  const rows = [];
+  for (let i = 0; i < targetIds.length; i += 90) {
+    rows.push(...await fetchTargetsByTypeChunk(env, targetType, targetIds.slice(i, i + 90)));
+  }
+  return rows;
+}
+
+async function fetchTargetsByTypeChunk(env, targetType, targetIds) {
   const placeholders = targetIds.map(() => '?').join(',');
 
   if (targetType === 'race') {

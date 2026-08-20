@@ -418,11 +418,16 @@ router.post('/:id/respond', async (request, env) => {
     return errorResponse('responses cannot contain duplicate question_id entries', 400);
   }
 
-  const placeholders = uniqueQuestionIds.map(() => '?').join(',');
-  const questions = await env.ARENA_DB.prepare(
-    `SELECT id FROM survey_questions WHERE survey_id = ? AND id IN (${placeholders})`
-  ).bind(id, ...uniqueQuestionIds).all();
-  const validQuestionIds = new Set((questions.results || []).map(q => q.id));
+  // D1 caps bound parameters at 100 per statement — chunk the IN list.
+  const validQuestionIds = new Set();
+  for (let i = 0; i < uniqueQuestionIds.length; i += 90) {
+    const chunk = uniqueQuestionIds.slice(i, i + 90);
+    const placeholders = chunk.map(() => '?').join(',');
+    const questions = await env.ARENA_DB.prepare(
+      `SELECT id FROM survey_questions WHERE survey_id = ? AND id IN (${placeholders})`
+    ).bind(id, ...chunk).all();
+    for (const q of questions.results || []) validQuestionIds.add(q.id);
+  }
   const missingQuestionIds = uniqueQuestionIds.filter(questionId => !validQuestionIds.has(questionId));
   if (missingQuestionIds.length > 0) {
     return errorResponse(`Unknown survey questions: ${missingQuestionIds.join(', ')}`, 400);
@@ -449,6 +454,29 @@ router.post('/:id/respond', async (request, env) => {
   if (inserts.length > 0) await env.ARENA_DB.batch(inserts);
 
   return successResponse({ submitted: inserts.length });
+});
+
+// PUT /api/surveys/:id/status — Admin moves a survey through its lifecycle.
+// Without this, every survey stays 'draft' forever: invisible and unanswerable.
+router.put('/:id/status', async (request, env) => {
+  const authError = await requireRole('admin', 'super_admin')(request, env);
+  if (authError) return authError;
+
+  const { id } = request.params;
+  const body = await parseBody(request);
+  const status = body?.status;
+  if (!['draft', 'active', 'closed'].includes(status)) {
+    return errorResponse('status must be draft, active, or closed');
+  }
+
+  const survey = await env.ARENA_DB.prepare(`SELECT id, status FROM surveys WHERE id = ?`).bind(id).first();
+  if (!survey) return errorResponse('Survey not found', 404);
+
+  await env.ARENA_DB.prepare(
+    `UPDATE surveys SET status = ? WHERE id = ?`
+  ).bind(status, id).run();
+
+  return successResponse({ id, status });
 });
 
 export default router;

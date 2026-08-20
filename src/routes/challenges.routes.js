@@ -7,7 +7,7 @@
 import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { auditLogNow, listAuditAnchors, verifyAuditChain } from '../audit.js';
-import { requireAuth, errorResponse, successResponse, parseBody, parsePagination, getClientIP } from '../middleware.js';
+import { requireAuth, requireRole, errorResponse, successResponse, parseBody, parsePagination, getClientIP } from '../middleware.js';
 import { validate, createChallengeSchema, respondToChallengeSchema, refuseChallengeSchema } from '../validation.js';
 import { computeFactScore, getRecitesForContent } from './recites.routes.js';
 import { isTransactionalEmailConfigured, sendAndRecordTransactionalEmail } from '../email.js';
@@ -96,8 +96,9 @@ function buildChallengeNoticeEmail({ challenge, race, challenger, target, receip
 }
 
 function enqueueChallengeNoticeEmails({ request, env, ctx, challenge, race, challenger, target, directStaff, subscriberRows }) {
-  if (!isTransactionalEmailConfigured(env)) return;
-
+  // No early return when the provider is unconfigured:
+  // sendAndRecordTransactionalEmail records a status='skipped' delivery row,
+  // so an unsent served-notice stays observable instead of vanishing.
   const receiptUrl = receiptUrlFor(request, challenge.public_receipt_slug);
   const emailTasks = [];
   const directUserIds = new Set(directStaff.map(row => row.user_id));
@@ -381,6 +382,9 @@ router.post('/', async (request, env, ctx) => {
   if (!race) return errorResponse('Race not found', 404);
   if (challenger.race_id !== data.race_id || target.race_id !== data.race_id) return errorResponse('Both candidates must be in the specified race');
   if (data.challenger_candidate_id === data.target_candidate_id) return errorResponse('Cannot challenge yourself');
+  if (challenger.verification_status !== 'verified') {
+    return errorResponse('Challenger candidate must be verified before issuing public callouts', 403);
+  }
 
   if (data.challenge_type === 'fact_check') {
     const duplicate = await env.ARENA_DB.prepare(
@@ -511,7 +515,21 @@ router.post('/', async (request, env, ctx) => {
     );
   }
 
-  await env.ARENA_DB.batch(challengeBatch);
+  try {
+    await env.ARENA_DB.batch(challengeBatch);
+  } catch (err) {
+    // Compensate: the credit was already deducted atomically above. If the
+    // challenge write fails, refund it so a 500 never silently burns a credit.
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(
+        `UPDATE candidates SET credit_balance = credit_balance + 1 WHERE id = ?`
+      ).bind(data.challenger_candidate_id),
+      env.ARENA_DB.prepare(
+        `INSERT INTO credit_transactions (id, candidate_id, amount, transaction_type, description, reference_id) VALUES (?, ?, 1, 'refund', 'Challenge creation failed — credit refunded', ?)`
+      ).bind(generateId('ctx'), data.challenger_candidate_id, challengeId),
+    ]).catch(refundErr => console.error('Challenge credit refund failed:', refundErr));
+    throw err;
+  }
 
   const targetStaff = await env.ARENA_DB.prepare(
     `SELECT DISTINCT u.id as user_id, u.email, u.display_name
@@ -789,6 +807,42 @@ router.post('/:id/withdraw', async (request, env, ctx) => {
   });
 
   return successResponse({ id, status: 'withdrawn', credit_refunded: true, credits_remaining: updatedCandidate?.credit_balance ?? 0 });
+});
+
+// PUT /api/challenges/:id/visibility — Moderator takedown/restore.
+// The public record is append-only in spirit: hiding is reversible, audited,
+// and never deletes rows.
+router.put('/:id/visibility', async (request, env, ctx) => {
+  const authError = await requireRole('moderator', 'admin', 'super_admin')(request, env);
+  if (authError) return authError;
+
+  const { id } = request.params;
+  const body = await parseBody(request);
+  if (!body || typeof body.is_visible !== 'boolean') {
+    return errorResponse('is_visible (boolean) required');
+  }
+  if (!body.is_visible && !body.reason) {
+    return errorResponse('reason is required when hiding a challenge');
+  }
+
+  const challenge = await env.ARENA_DB.prepare(`SELECT id, is_visible FROM challenges WHERE id = ?`).bind(id).first();
+  if (!challenge) return errorResponse('Challenge not found', 404);
+
+  await env.ARENA_DB.prepare(
+    `UPDATE challenges SET is_visible = ?, updated_at = datetime('now') WHERE id = ?`
+  ).bind(body.is_visible ? 1 : 0, id).run();
+
+  await auditLogNow(env.ARENA_DB, {
+    actorId: request.user.id,
+    action: body.is_visible ? 'challenge.restore' : 'challenge.hide',
+    entityType: 'challenge',
+    entityId: id,
+    beforeState: { is_visible: !!challenge.is_visible },
+    afterState: { is_visible: body.is_visible, reason: body.reason || null },
+    ipAddress: getClientIP(request),
+  });
+
+  return successResponse({ id, is_visible: body.is_visible });
 });
 
 export default router;

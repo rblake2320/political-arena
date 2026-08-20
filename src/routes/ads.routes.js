@@ -59,6 +59,78 @@ router.get('/races/:raceId', async (request, env) => {
   return successResponse({ ads: adPairs });
 });
 
+// GET /api/ads/moderation-queue — Pending ad + rebuttal reviews (moderator/admin)
+// NOTE: must be registered before GET /:id or ':id' would swallow it.
+router.get('/moderation-queue', async (request, env) => {
+  const authError = await requireRole('moderator', 'admin', 'super_admin')(request, env);
+  if (authError) return authError;
+
+  const [ads, rebuttals] = await Promise.all([
+    env.ARENA_DB.prepare(
+      `SELECT af.*, c.name as candidate_name, c.party as candidate_party, r.name as race_name
+       FROM ad_flights af
+       JOIN candidates c ON c.id = af.candidate_id
+       JOIN races r ON r.id = af.race_id
+       WHERE af.status = 'submitted'
+       ORDER BY af.updated_at ASC LIMIT 100`
+    ).all(),
+    env.ARENA_DB.prepare(
+      `SELECT ra.*, c.name as candidate_name, c.party as candidate_party, r.name as race_name,
+              af.title as parent_ad_title
+       FROM rebuttal_ads ra
+       JOIN candidates c ON c.id = ra.candidate_id
+       JOIN races r ON r.id = ra.race_id
+       JOIN ad_flights af ON af.id = ra.parent_ad_id
+       WHERE ra.status = 'submitted'
+       ORDER BY ra.created_at ASC LIMIT 100`
+    ).all(),
+  ]);
+
+  return successResponse({
+    ads: ads.results || [],
+    rebuttals: rebuttals.results || [],
+  });
+});
+
+// PUT /api/ads/rebuttals/:id/review — Moderator approves/rejects a rebuttal.
+// Approval activates immediately: the parent ad's rebuttal window is
+// time-sensitive, so there is no separate activation step.
+router.put('/rebuttals/:id/review', async (request, env, ctx) => {
+  const authError = await requireRole('moderator', 'admin', 'super_admin')(request, env);
+  if (authError) return authError;
+
+  const { id } = request.params;
+  const body = await parseBody(request);
+  const { valid, errors, data } = validate(reviewAdSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+
+  const rebuttal = await env.ARENA_DB.prepare(`SELECT * FROM rebuttal_ads WHERE id = ?`).bind(id).first();
+  if (!rebuttal) return errorResponse('Rebuttal not found', 404);
+  if (rebuttal.status !== 'submitted') return errorResponse('Rebuttal is not pending review');
+
+  const newStatus = data.action === 'approve' ? 'active' : 'rejected';
+  await env.ARENA_DB.batch([
+    env.ARENA_DB.prepare(
+      `UPDATE rebuttal_ads SET status = ?, reviewed_by = ?, reviewed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
+    ).bind(newStatus, request.user.id, id),
+    env.ARENA_DB.prepare(
+      `UPDATE moderation_queue SET status = 'final', resolved_by = ?, resolution_notes = ?, updated_at = datetime('now') WHERE content_type = 'rebuttal_ad' AND content_id = ? AND status IN ('flagged','under_review')`
+    ).bind(request.user.id, data.action === 'approve' ? 'approved' : (data.rejection_reason || 'rejected'), id),
+  ]);
+
+  auditLog(env.ARENA_DB, ctx, {
+    actorId: request.user.id,
+    action: `rebuttal.${data.action}`,
+    entityType: 'rebuttal_ad',
+    entityId: id,
+    beforeState: { status: rebuttal.status },
+    afterState: { status: newStatus },
+    ipAddress: getClientIP(request),
+  });
+
+  return successResponse({ id, status: newStatus });
+});
+
 // GET /api/ads/:id — Public single ad (drafts/rejected visible only to staff/admin)
 router.get('/:id', async (request, env) => {
   const { id } = request.params;
@@ -196,14 +268,24 @@ router.post('/:id/review', async (request, env, ctx) => {
   const rebuttalWindowHours = parseInt(env.REBUTTAL_WINDOW_HOURS || '48');
   const rebuttalExpires = new Date(Date.now() + rebuttalWindowHours * 60 * 60 * 1000).toISOString();
 
+  const resolveQueueRow = env.ARENA_DB.prepare(
+    `UPDATE moderation_queue SET status = 'final', resolved_by = ?, resolution_notes = ?, updated_at = datetime('now') WHERE content_type = 'ad_flight' AND content_id = ? AND status IN ('flagged','under_review')`
+  ).bind(request.user.id, data.action === 'approve' ? 'approved' : (data.rejection_reason || 'rejected'), id);
+
   if (data.action === 'approve') {
-    await env.ARENA_DB.prepare(
-      `UPDATE ad_flights SET status = 'approved', reviewed_by = ?, reviewed_at = datetime('now'), approved_at = datetime('now'), rebuttal_window_expires = ?, updated_at = datetime('now') WHERE id = ?`
-    ).bind(request.user.id, rebuttalExpires, id).run();
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(
+        `UPDATE ad_flights SET status = 'approved', reviewed_by = ?, reviewed_at = datetime('now'), approved_at = datetime('now'), rebuttal_window_expires = ?, updated_at = datetime('now') WHERE id = ?`
+      ).bind(request.user.id, rebuttalExpires, id),
+      resolveQueueRow,
+    ]);
   } else {
-    await env.ARENA_DB.prepare(
-      `UPDATE ad_flights SET status = 'rejected', reviewed_by = ?, reviewed_at = datetime('now'), rejection_reason = ?, updated_at = datetime('now') WHERE id = ?`
-    ).bind(request.user.id, data.rejection_reason || null, id).run();
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(
+        `UPDATE ad_flights SET status = 'rejected', reviewed_by = ?, reviewed_at = datetime('now'), rejection_reason = ?, updated_at = datetime('now') WHERE id = ?`
+      ).bind(request.user.id, data.rejection_reason || null, id),
+      resolveQueueRow,
+    ]);
   }
 
   auditLog(env.ARENA_DB, ctx, {
@@ -318,12 +400,12 @@ router.get('/:adId/rebuttal-eligibility', async (request, env) => {
   const rebuttalCount = await env.ARENA_DB.prepare(
     `SELECT COUNT(*) as count FROM rebuttal_ads WHERE parent_ad_id = ?`
   ).bind(adId).first();
-  if (rebuttalCount.count >= (ad.max_rebuttals || 3)) issues.push('Maximum rebuttals reached for this ad');
+  if (rebuttalCount.count >= (ad.max_rebuttals || parseInt(env.MAX_REBUTTALS_PER_AD || '3'))) issues.push('Maximum rebuttals reached for this ad');
 
   return successResponse({
     eligible: issues.length === 0,
     issues,
-    slots_remaining: Math.max(0, (ad.max_rebuttals || 3) - rebuttalCount.count),
+    slots_remaining: Math.max(0, (ad.max_rebuttals || parseInt(env.MAX_REBUTTALS_PER_AD || '3')) - rebuttalCount.count),
     window_expires: ad.rebuttal_window_expires,
   });
 });
@@ -366,13 +448,21 @@ router.post('/rebuttals', async (request, env, ctx) => {
   const rebuttalCount = await env.ARENA_DB.prepare(
     `SELECT COUNT(*) as count FROM rebuttal_ads WHERE parent_ad_id = ?`
   ).bind(data.parent_ad_id).first();
-  if (rebuttalCount.count >= (ad.max_rebuttals || 3)) return errorResponse('Max rebuttals reached');
+  if (rebuttalCount.count >= (ad.max_rebuttals || parseInt(env.MAX_REBUTTALS_PER_AD || '3'))) return errorResponse('Max rebuttals reached');
 
+  // Rebuttals carry their full text + disclaimer at creation and have no edit
+  // endpoint, so they submit straight into the moderation queue — a 'draft'
+  // here would be unreachable limbo while the 48h response window burns.
   const rebuttalId = generateId('reb');
-  const rebuttalStatus = 'draft';
-  await env.ARENA_DB.prepare(
-    `INSERT INTO rebuttal_ads (id, parent_ad_id, race_id, candidate_id, created_by, response_text, disclaimer_text, media_url, status, slot_claimed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-  ).bind(rebuttalId, data.parent_ad_id, ad.race_id, data.candidate_id, request.user.id, data.response_text, data.disclaimer_text, data.media_url || null, rebuttalStatus).run();
+  const rebuttalStatus = 'submitted';
+  await env.ARENA_DB.batch([
+    env.ARENA_DB.prepare(
+      `INSERT INTO rebuttal_ads (id, parent_ad_id, race_id, candidate_id, created_by, response_text, disclaimer_text, media_url, status, slot_claimed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    ).bind(rebuttalId, data.parent_ad_id, ad.race_id, data.candidate_id, request.user.id, data.response_text, data.disclaimer_text, data.media_url || null, rebuttalStatus),
+    env.ARENA_DB.prepare(
+      `INSERT INTO moderation_queue (id, content_type, content_id, reason, reported_by, status) VALUES (?, 'rebuttal_ad', ?, 'policy_review', ?, 'flagged')`
+    ).bind(generateId('mod'), rebuttalId, request.user.id),
+  ]);
 
   auditLog(env.ARENA_DB, ctx, {
     actorId: request.user.id,

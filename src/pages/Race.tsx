@@ -7,7 +7,73 @@ import { useAuth } from "../stores/auth";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ContentMedia, MediaUploadField } from "../components/Media";
 
+// Mirrors the backend's inferAdMediaType — an image upload must not be stored as 'video'.
+function inferMediaType(url: string): "video" | "image" | "text" {
+  if (!url) return "text";
+  if (/(youtube\.com|youtu\.be|vimeo\.com)/i.test(url)) return "video";
+  if (/\.(mp4|m4v|mov|webm|ogv|ogg|3gp|3g2)(\?|#|$)/i.test(url)) return "video";
+  if (/\.(jpg|jpeg|png|gif|webp|avif|heic|heif)(\?|#|$)/i.test(url)) return "image";
+  return "video";
+}
+
 const mono = "'IBM Plex Mono', ui-monospace, monospace";
+
+function WatchRaceButton({ raceId, signedIn }: { raceId: string; signedIn: boolean }) {
+  const [subId, setSubId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (!signedIn) { setLoaded(true); return; }
+    api.getMySubscriptions()
+      .then(d => {
+        const sub = (d.subscriptions || []).find((x: any) => x.subscription_type === 'race' && x.target_id === raceId);
+        setSubId(sub ? sub.id : null);
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, [raceId, signedIn]);
+  if (!signedIn || !loaded) return null;
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      if (subId) { await api.unsubscribe(subId); setSubId(null); }
+      else {
+        const created = await api.subscribe({ subscription_type: 'race', target_id: raceId });
+        setSubId(created.id);
+      }
+    } catch { /* leave state as-is */ }
+    finally { setBusy(false); }
+  };
+  return (
+    <button onClick={toggle} disabled={busy} style={{ cursor: busy ? 'default' : 'pointer', font: `600 10px ${mono}`, letterSpacing: '.12em', color: subId ? '#34C384' : '#9B9BAB', background: subId ? 'rgba(52,195,132,.08)' : 'rgba(255,255,255,.03)', border: subId ? '1px solid rgba(52,195,132,.4)' : '1px solid rgba(255,255,255,.14)', padding: '6px 12px', borderRadius: 99 }}>
+      {subId ? '★ WATCHING' : '☆ WATCH RACE'}
+    </button>
+  );
+}
+
+// Platform rules come from the deployed configuration, not hardcoded copy.
+let cachedConfig: any = null;
+function RulesPanel() {
+  const [cfg, setCfg] = useState<any>(cachedConfig);
+  useEffect(() => {
+    if (cachedConfig) return;
+    api.getPlatformConfig().then(c => { cachedConfig = c; setCfg(c); }).catch(() => {});
+  }, []);
+  const rows: [string, string][] = [
+    ["RESPONSE SLA", `${(cfg?.default_deadline_business_days ?? 3)}–${(cfg?.max_deadline_business_days ?? 10)} BIZ DAYS`],
+    ["REBUTTAL WINDOW", `${cfg?.rebuttal_window_hours ?? 48} HOURS`],
+    ["REBUTTAL SLOTS", `${cfg?.max_rebuttals_per_ad ?? 3} PER AD`],
+    ["CALLOUT CAPS", `${cfg?.max_challenges_per_day ?? 3} / DAY · ${cfg?.max_challenges_per_week ?? 10} / WK`],
+  ];
+  return (
+    <div style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 14, background: "rgba(255,255,255,.02)", overflow: "hidden" }}>
+      <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.08)", font: `600 9.5px ${mono}`, letterSpacing: ".16em", color: "#5C5C6E" }}>RULES OF THIS ARENA</div>
+      {rows.map(([k, v], i, a) => (
+        <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "11px 16px", borderBottom: i < a.length - 1 ? "1px solid rgba(255,255,255,.05)" : "none" }}><span style={{ font: `500 10.5px ${mono}`, color: "#9B9BAB" }}>{k}</span><span style={{ font: `600 10.5px ${mono}`, color: "#F2F2F7" }}>{v}</span></div>
+      ))}
+    </div>
+  );
+}
 const display = "'Space Grotesk', system-ui, sans-serif";
 const serif = "'Instrument Serif', ui-serif, Georgia, serif";
 
@@ -331,7 +397,11 @@ export function Race() {
     const body = (
       <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: side === "l" ? "flex-end" : "flex-start", textAlign: side === "l" ? "right" : "left" }}>
         <span style={{ font: `600 9.5px ${mono}`, letterSpacing: ".16em", color: pc.text }}>{(c?.party || "candidate").toUpperCase()}</span>
-        <span style={{ font: `600 24px ${display}`, color: "#F2F2F7", lineHeight: 1.1 }}>{c?.name}</span>
+        {c?.id ? (
+          <Link to={`/profile/candidate/${c.id}`} style={{ font: `600 24px ${display}`, color: "#F2F2F7", lineHeight: 1.1, textDecoration: "none" }} title="Open public trust profile">{c?.name}</Link>
+        ) : (
+          <span style={{ font: `600 24px ${display}`, color: "#F2F2F7", lineHeight: 1.1 }}>{c?.name}</span>
+        )}
         <span style={{ font: `400 12px/1.5 'Hanken Grotesk',sans-serif`, color: "#9B9BAB", maxWidth: 300 }}>{(c?.biography || "Campaign profile awaiting source-backed activity.").slice(0, 92)}</span>
         <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
           <Stat v={s.filed} label="CALLOUTS FILED" align={side === "l" ? "end" : "start"} />
@@ -357,6 +427,7 @@ export function Race() {
       <div style={{ padding: isMobile ? "34px 16px 28px" : "44px 40px 36px", borderBottom: "1px solid rgba(255,255,255,.08)", background: "linear-gradient(90deg,rgba(77,138,240,.09),transparent 32%,transparent 68%,rgba(229,72,77,.09)),#0A0A10" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginBottom: 24 }}>
           <span style={{ font: `600 10px ${mono}`, letterSpacing: ".16em", color: "#8F8FF9" }}>{race.state} · {level} · {(race.office || "").toUpperCase()}</span>
+          {id && <WatchRaceButton raceId={id} signedIn={Boolean(user)} />}
         </div>
         <div style={{ textAlign: "center", marginBottom: 34 }}>
           <div style={{ font: `400 ${isMobile ? 32 : 54}px/1.05 ${serif}`, color: "#F2F2F7" }}>{race.name}</div>
@@ -434,7 +505,9 @@ export function Race() {
             const cand = cands.find((c: any) => c.id === ad.candidate_id);
             const pc = partyC(cand?.party);
             const reb = rebuttals.filter((r: any) => r.parent_ad_id === ad.id);
-            const canClaimRebuttal = Boolean(isCandidateInRace && activeCandidateId && ad.candidate_id !== activeCandidateId && !reb.some((r: any) => r.candidate_id === activeCandidateId));
+            const windowOpen = ad.rebuttal_window_active !== false && (!ad.rebuttal_window_expires || new Date(ad.rebuttal_window_expires) > new Date());
+            const slotsLeft = reb.length < Number(ad.max_rebuttals || 3);
+            const canClaimRebuttal = Boolean(isCandidateInRace && activeCandidateId && ad.candidate_id !== activeCandidateId && !reb.some((r: any) => r.candidate_id === activeCandidateId) && windowOpen && slotsLeft);
             const slotCount = Math.max(1, Math.min(Number(ad.max_rebuttals || 3), 3));
             const adSources = ad.ad_recite_summary;
             return (
@@ -529,12 +602,7 @@ export function Race() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          <div style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 14, background: "rgba(255,255,255,.02)", overflow: "hidden" }}>
-            <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.08)", font: `600 9.5px ${mono}`, letterSpacing: ".16em", color: "#5C5C6E" }}>RULES OF THIS ARENA</div>
-            {[["RESPONSE SLA", "72 HOURS"], ["REBUTTAL WINDOW", "48 HOURS"], ["REBUTTAL SLOTS", "3 PER AD"], ["CALLOUT CAPS", "3 / DAY · 10 / WK"]].map(([k, v], i, a) => (
-              <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "11px 16px", borderBottom: i < a.length - 1 ? "1px solid rgba(255,255,255,.05)" : "none" }}><span style={{ font: `500 10.5px ${mono}`, color: "#9B9BAB" }}>{k}</span><span style={{ font: `600 10.5px ${mono}`, color: "#F2F2F7" }}>{v}</span></div>
-            ))}
-          </div>
+          <RulesPanel />
           <div style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 14, background: "rgba(255,255,255,.02)", overflow: "hidden" }}>
             <div style={{ padding: "11px 16px", borderBottom: "1px solid rgba(255,255,255,.08)", font: `600 9.5px ${mono}`, letterSpacing: ".16em", color: "#5C5C6E" }}>TRUST LEDGER · THIS RACE</div>
             {[[dem, dS], [rep, rS]].filter(([c]) => c).map(([c, s]: any, i) => (
@@ -779,7 +847,7 @@ function PostAdModal({ raceId, candidateId, onClose }: { raceId: string; candida
         ad_content_text: content.trim(),
         disclaimer_text: disclaimer.trim(),
         media_url: mediaUrl.trim() || undefined,
-        media_type: mediaUrl.trim() ? "video" : "text",
+        media_type: inferMediaType(mediaUrl.trim()),
       });
       onClose(true, "Ad draft created for moderation.");
     } catch (err: any) {

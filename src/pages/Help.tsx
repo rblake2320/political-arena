@@ -274,16 +274,16 @@ export function Help() {
           </p>
           <div className="space-y-1 mt-2 text-xs">
             <div className="flex justify-between py-1 border-b border-zinc-800/50">
-              <span>Issue a Challenge</span><span className="text-white">5 credits</span>
+              <span>Issue a fact-check callout</span><span className="text-white">1 credit</span>
             </div>
             <div className="flex justify-between py-1 border-b border-zinc-800/50">
-              <span>Run a Campaign Ad</span><span className="text-white">10 credits</span>
+              <span>Campaign ads &amp; rebuttals</span><span className="text-white">Free — moderation-reviewed</span>
             </div>
             <div className="flex justify-between py-1 border-b border-zinc-800/50">
-              <span>Submit a Rebuttal</span><span className="text-white">3 credits</span>
+              <span>Withdrawn or undeliverable callouts</span><span className="text-white">Credit refunded</span>
             </div>
             <div className="flex justify-between py-1">
-              <span>New accounts start with</span><span className="text-emerald-400">50 credits</span>
+              <span>Verified campaigns start with</span><span className="text-emerald-400">50 credits</span>
             </div>
           </div>
         </Section>

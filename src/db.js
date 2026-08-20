@@ -151,9 +151,13 @@ export async function runRuntimeMigrations(db) {
 
   const userFavoriteColumnsResult = await db.prepare(`PRAGMA table_info(user_favorites)`).all();
   const userFavoriteColumns = new Set((userFavoriteColumnsResult.results || []).map(c => c.name));
-  if (!userFavoriteColumns.has('id')) {
+  if (userFavoriteColumns.size > 0 && !userFavoriteColumns.has('id')) {
+    // Legacy table exists without the id column — CREATE TABLE IF NOT EXISTS
+    // would be a no-op, so rebuild it (rename → create → copy → drop),
+    // mirroring the correction_requests migration pattern.
     await db.batch([
-      db.prepare(`CREATE TABLE IF NOT EXISTS user_favorites (
+      db.prepare(`ALTER TABLE user_favorites RENAME TO user_favorites_legacy`),
+      db.prepare(`CREATE TABLE user_favorites (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id),
         favorite_type TEXT NOT NULL CHECK(favorite_type IN ('race','candidate','challenge')),
@@ -161,6 +165,10 @@ export async function runRuntimeMigrations(db) {
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(user_id, favorite_type, target_id)
       )`),
+      db.prepare(`INSERT OR IGNORE INTO user_favorites (id, user_id, favorite_type, target_id, created_at)
+        SELECT lower(hex(randomblob(8))), user_id, favorite_type, target_id, COALESCE(created_at, datetime('now'))
+        FROM user_favorites_legacy`),
+      db.prepare(`DROP TABLE user_favorites_legacy`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_favorites_user
         ON user_favorites(user_id, created_at)`),
       db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_favorites_target
@@ -1220,6 +1228,11 @@ export async function initDatabase(db) {
     db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vsr_user_survey_question ON voter_survey_responses(user_id, survey_id, question_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_analytics_events_type ON analytics_events(event_type, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_analytics_events_race ON analytics_events(race_id, created_at)`),
+    // Cron sweep + auth hot paths (avoid full scans every 15 minutes)
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_analytics_events_created ON analytics_events(created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_auth_rate_limits_reset ON auth_rate_limits(reset_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_cooldowns_until ON challenge_cooldowns(cooldown_until)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_users_verification_token ON users(verification_token)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_analytics_agg_period ON analytics_aggregates(period_type, period_start, metric_name)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_mod_queue_status ON moderation_queue(status, priority)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_status ON correction_requests(status, created_at)`),

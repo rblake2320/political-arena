@@ -114,14 +114,15 @@ CI (GitHub Actions) runs typecheck, build, the full workerd test suite, and `npm
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CHALLENGE_SLA_HOURS` | 72 | Challenge response SLA |
 | `REBUTTAL_WINDOW_HOURS` | 48 | Rebuttal window after ad approval |
-| `REBUTTAL_RESERVATION_HOURS` | 12 | Rebuttal slot reservation |
 | `MAX_REBUTTALS_PER_AD` | 3 | Rebuttal slots per ad |
 | `CHALLENGE_COOLDOWN_HOURS` | 24 | Cooldown per challenger→target pair |
 | `MAX_CHALLENGES_PER_DAY` / `_WEEK` | 3 / 10 | Per-candidate challenge caps |
 | `IMPRESSION_LOG_RETENTION_DAYS` | 30 | Analytics/impression retention |
 | `EMAIL_PROVIDER` | inferred | `resend`, `postmark`, or `webhook`; inferred from configured secret when omitted |
+| `PRESS_FEED_RSS_SOURCES` | newser + san | Public press feed RSS sources (`label\|url`, comma-separated), ingested by cron |
+| `CORS_ALLOWED_ORIGINS` | — | Extra CORS origins (comma-separated) for custom domains |
+| `IP_HASH_SALT` (secret) | fallback constant | Salt for hashed IPs — set via `wrangler secret put IP_HASH_SALT` |
 | `EMAIL_FROM` | none | Verified sender used for transactional email, for example `Arena <noreply@example.com>` |
 | `EMAIL_REPLY_TO` | none | Optional reply-to address for transactional email |
 | `POSTMARK_MESSAGE_STREAM` | `outbound` | Optional Postmark message stream |

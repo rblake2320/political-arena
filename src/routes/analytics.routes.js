@@ -29,7 +29,7 @@ function boundedMetadata(metadata) {
 // POST /api/analytics/events — Non-blocking batch event ingestion
 router.post('/events', async (request, env, ctx) => {
   const ip = getClientIP(request);
-  const ipHash = await hashIP(ip);
+  const ipHash = await hashIP(ip, env);
   if (ipHash) {
     const rl = await checkRateLimit(env.ARENA_DB, `analytics:${ipHash}`, ANALYTICS_MAX_PER_IP, ANALYTICS_WINDOW_SECONDS);
     if (rl.limited) return errorResponse('Too many analytics events. Please slow down.', 429);
@@ -138,6 +138,9 @@ router.get('/race/:raceId/insights', async (request, env) => {
     ad_stats: adStats.results || [],
     challenge_stats: challengeStats.results || [],
     issue_priorities: priorityStats.results || [],
+    // Honest-metrics flag: nothing increments total_impressions yet, so any
+    // impressions figure here is structural zero, not a measurement.
+    impressions_tracking: 'not_implemented',
   });
 });
 
@@ -180,6 +183,7 @@ router.get('/candidate/:id/performance', async (request, env) => {
     ads: adPerf,
     challenges: challengePerf,
     reactions: reactionPerf.results || [],
+    impressions_tracking: 'not_implemented',
   });
 });
 

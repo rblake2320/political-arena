@@ -170,9 +170,13 @@ export async function hashToken(token) {
     .map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function hashIP(ip) {
+export async function hashIP(ip, env) {
   if (!ip) return null;
-  const encoded = new TextEncoder().encode(ip + 'arena-ip-salt');
+  // Salt from env secret so hashed IPs cannot be reversed by brute-forcing
+  // the IPv4 space against a salt visible in source. The literal fallback
+  // keeps existing rate-limit buckets working until IP_HASH_SALT is set.
+  const salt = env?.IP_HASH_SALT || 'arena-ip-salt';
+  const encoded = new TextEncoder().encode(ip + salt);
   const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
   return Array.from(new Uint8Array(hashBuffer))
     .map(b => b.toString(16).padStart(2, '0')).join('');

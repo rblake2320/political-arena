@@ -6,7 +6,8 @@
 import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
-import { requireAuth, requireRole, errorResponse, successResponse, parseBody, getClientIP } from '../middleware.js';
+import { requireAuth, requireRole, errorResponse, successResponse, parseBody, getClientIP, safeParseIssuePositions } from '../middleware.js';
+import { checkRateLimit } from '../ratelimit.js';
 import { validate, createCandidateSchema, updateCandidateSchema, verifyCandidateSchema, addCandidateStaffSchema } from '../validation.js';
 
 const router = Router({ base: '/api/candidates' });
@@ -16,15 +17,20 @@ function clampScore(value) {
 }
 
 // GET /api/candidates/races/:raceId — Public
+// Self-registered ('platform_claim') profiles stay hidden until verified so an
+// arbitrary account cannot publish fake candidates next to FEC-sourced ones.
 router.get('/races/:raceId', async (request, env) => {
   const { raceId } = request.params;
   const result = await env.ARENA_DB.prepare(
-    `SELECT * FROM candidates WHERE race_id = ? AND is_active = 1 ORDER BY name`
+    `SELECT * FROM candidates
+     WHERE race_id = ? AND is_active = 1
+       AND NOT (source_status = 'platform_claim' AND verification_status != 'verified')
+     ORDER BY name`
   ).bind(raceId).all();
 
   const candidates = (result.results || []).map(c => ({
     ...c,
-    issue_positions: c.issue_positions ? JSON.parse(c.issue_positions) : [],
+    issue_positions: safeParseIssuePositions(c.issue_positions),
   }));
 
   return successResponse({ candidates });
@@ -66,7 +72,7 @@ router.get('/pending', async (request, env) => {
 
   const candidates = (result.results || []).map(candidate => ({
     ...candidate,
-    issue_positions: candidate.issue_positions ? JSON.parse(candidate.issue_positions) : [],
+    issue_positions: safeParseIssuePositions(candidate.issue_positions),
   }));
 
   return successResponse({ candidates });
@@ -82,7 +88,7 @@ router.get('/:id/public-profile', async (request, env) => {
   ).bind(id).first();
 
   if (!candidate) return errorResponse('Candidate not found', 404);
-  candidate.issue_positions = candidate.issue_positions ? JSON.parse(candidate.issue_positions) : [];
+  candidate.issue_positions = safeParseIssuePositions(candidate.issue_positions);
 
   const [
     targeted,
@@ -247,7 +253,7 @@ router.get('/:id', async (request, env) => {
 
   if (!candidate) return errorResponse('Candidate not found', 404);
 
-  candidate.issue_positions = candidate.issue_positions ? JSON.parse(candidate.issue_positions) : [];
+  candidate.issue_positions = safeParseIssuePositions(candidate.issue_positions);
 
   return successResponse({ candidate });
 });
@@ -262,6 +268,11 @@ router.post('/', async (request, env, ctx) => {
 
   const { valid, errors, data } = validate(createCandidateSchema, body);
   if (!valid) return errorResponse(errors.join('; '));
+
+  // Rate limit profile applications — one account must not be able to mint
+  // candidate profiles across hundreds of races.
+  const rl = await checkRateLimit(env.ARENA_DB, `candidate-register:${request.user.id}`, 3, 24 * 60 * 60);
+  if (rl.limited) return errorResponse('Too many candidate registrations. Please try again tomorrow.', 429);
 
   // Verify race exists
   const race = await env.ARENA_DB.prepare(`SELECT id FROM races WHERE id = ? AND status IN ('upcoming','active')`).bind(data.race_id).first();
@@ -365,9 +376,10 @@ router.put('/:id', async (request, env, ctx) => {
   return successResponse({ id, ...data });
 });
 
-// POST /api/candidates/:id/verify — Admin verifies candidate
+// POST /api/candidates/:id/verify — Moderator/admin verifies candidate
+// (moderators can already see the pending queue; verify must match).
 router.post('/:id/verify', async (request, env, ctx) => {
-  const authError = await requireRole('admin', 'super_admin')(request, env);
+  const authError = await requireRole('admin', 'super_admin', 'moderator')(request, env);
   if (authError) return authError;
 
   const { id } = request.params;
@@ -379,9 +391,32 @@ router.post('/:id/verify', async (request, env, ctx) => {
   if (!candidate) return errorResponse('Candidate not found', 404);
 
   const newStatus = data.action === 'reject' ? 'rejected' : 'verified';
-  await env.ARENA_DB.prepare(
-    `UPDATE candidates SET verification_status = ?, verified_by = ?, verified_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
-  ).bind(newStatus, request.user.id, id).run();
+  const statements = [
+    env.ARENA_DB.prepare(
+      `UPDATE candidates SET verification_status = ?, verified_by = ?, verified_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
+    ).bind(newStatus, request.user.id, id),
+  ];
+
+  // First-time verification grants starter credits so a new campaign can
+  // actually use the callout system (documented in Help as 50 credits).
+  const STARTER_CREDITS = 50;
+  if (newStatus === 'verified' && candidate.verification_status !== 'verified') {
+    const priorGrant = await env.ARENA_DB.prepare(
+      `SELECT id FROM credit_transactions WHERE candidate_id = ? AND transaction_type = 'grant' AND reference_id = 'starter-grant' LIMIT 1`
+    ).bind(id).first();
+    if (!priorGrant) {
+      statements.push(
+        env.ARENA_DB.prepare(
+          `UPDATE candidates SET credit_balance = credit_balance + ? WHERE id = ?`
+        ).bind(STARTER_CREDITS, id),
+        env.ARENA_DB.prepare(
+          `INSERT INTO credit_transactions (id, candidate_id, amount, transaction_type, description, reference_id) VALUES (?, ?, ?, 'grant', 'Starter credits on verification', 'starter-grant')`
+        ).bind(generateId('ctx'), id, STARTER_CREDITS),
+      );
+    }
+  }
+
+  await env.ARENA_DB.batch(statements);
 
   auditLog(env.ARENA_DB, ctx, {
     actorId: request.user.id,

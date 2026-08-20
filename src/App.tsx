@@ -1,20 +1,24 @@
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation, Navigate } from "react-router";
-import React, { useEffect, useState, createContext, useContext, useMemo, useRef } from "react";
+import React, { useEffect, useState, createContext, useContext, useMemo, useRef, lazy, Suspense } from "react";
 import { Home } from "./pages/Home";
-import { Race } from "./pages/Race";
-import { CandidateDashboard } from "./pages/CandidateDashboard";
-import { WhatMattersPage } from "./pages/WhatMattersPage";
-import { MyPrioritiesPage } from "./pages/MyPrioritiesPage";
-import { NotificationsPage } from "./pages/NotificationsPage";
-import { PressRegistrationPage } from "./pages/PressRegistrationPage";
-import { Help } from "./pages/Help";
-import { ChallengeReceiptPage } from "./pages/ChallengeReceiptPage";
-import { ModerationPage } from "./pages/ModerationPage";
-import { CandidateProfilePage } from "./pages/CandidateProfilePage";
 import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
-import { ForgotPassword } from "./pages/ForgotPassword";
-import { ResetPassword } from "./pages/ResetPassword";
+
+// Route-level code splitting: heavy pages load on demand so the entry chunk
+// stays small for the voter landing path (Home/Login/Register stay eager).
+const Race = lazy(() => import("./pages/Race").then((m) => ({ default: m.Race })));
+const CandidateDashboard = lazy(() => import("./pages/CandidateDashboard").then((m) => ({ default: m.CandidateDashboard })));
+const WhatMattersPage = lazy(() => import("./pages/WhatMattersPage").then((m) => ({ default: m.WhatMattersPage })));
+const MyPrioritiesPage = lazy(() => import("./pages/MyPrioritiesPage").then((m) => ({ default: m.MyPrioritiesPage })));
+const NotificationsPage = lazy(() => import("./pages/NotificationsPage").then((m) => ({ default: m.NotificationsPage })));
+const PressRegistrationPage = lazy(() => import("./pages/PressRegistrationPage").then((m) => ({ default: m.PressRegistrationPage })));
+const Help = lazy(() => import("./pages/Help").then((m) => ({ default: m.Help })));
+const ChallengeReceiptPage = lazy(() => import("./pages/ChallengeReceiptPage").then((m) => ({ default: m.ChallengeReceiptPage })));
+const ModerationPage = lazy(() => import("./pages/ModerationPage").then((m) => ({ default: m.ModerationPage })));
+const CandidateProfilePage = lazy(() => import("./pages/CandidateProfilePage").then((m) => ({ default: m.CandidateProfilePage })));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword").then((m) => ({ default: m.ForgotPassword })));
+const ResetPassword = lazy(() => import("./pages/ResetPassword").then((m) => ({ default: m.ResetPassword })));
+const VerifyEmail = lazy(() => import("./pages/VerifyEmail").then((m) => ({ default: m.VerifyEmail })));
 import { LiveWire } from "./components/LiveWire";
 import { useAuth } from "./stores/auth";
 import { useArenaStore } from "./store";
@@ -137,6 +141,11 @@ function Navigation() {
             <BarChart3 className="w-3.5 h-3.5" />
             What Matters
           </Link>
+          {user && (
+            <Link to="/my-priorities" className="text-zinc-400 hover:text-white transition-colors">
+              My Priorities
+            </Link>
+          )}
           {user && (
             <Link to="/press/register" className="text-zinc-400 hover:text-white transition-colors flex items-center gap-1">
               <Newspaper className="w-3.5 h-3.5" />
@@ -354,14 +363,16 @@ function AppContent() {
     fetchRaces();
   }, [userId]);
 
-  // Fetch all race details for candidate list (bug #1 fix: use allSettled)
+  // Build the portal candidate list from the user's staff-linked races only —
+  // fetching every race detail here was up to ~600 requests per app mount.
   useEffect(() => {
-    if (races.length > 0) {
-      Promise.allSettled(races.map(r => fetchRace(r.id))).then(() => {
-        fetchAllCandidates();
-      });
-    }
-  }, [races.length, userId]);
+    const links = (user?.staff_links || []) as any[];
+    if (links.length === 0) return;
+    const raceIds = [...new Set(links.map(l => l.race_id).filter(Boolean))];
+    Promise.allSettled(raceIds.map(rid => fetchRace(rid))).then(() => {
+      fetchAllCandidates();
+    });
+  }, [userId, races.length]);
 
   // Set default active candidate
   useEffect(() => {
@@ -402,7 +413,22 @@ function AppContent() {
       <div className="min-h-screen text-zinc-50 font-sans selection:bg-indigo-500/30" style={{ background: '#08080C' }}>
         <LiveWire />
         <Navigation />
+        {user && !user.email_verified && (
+          <div style={{ background: 'rgba(110,110,247,.12)', borderBottom: '1px solid rgba(110,110,247,.3)', padding: '8px 16px', textAlign: 'center' }}>
+            <span style={{ font: "500 12px 'Hanken Grotesk',sans-serif", color: '#C9C9F4' }}>
+              Verify your email to unlock voter actions.{' '}
+              <Link to="/verify-email" style={{ color: '#8F8FF9', textDecoration: 'underline' }}>Verify now</Link>
+            </span>
+          </div>
+        )}
         <main>
+          <Suspense
+            fallback={
+              <div className="min-h-[40vh] flex items-center justify-center">
+                <div className="w-8 h-8 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+              </div>
+            }
+          >
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/race/:id" element={<Race />} />
@@ -420,8 +446,10 @@ function AppContent() {
             <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
             <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPassword />} />
             <Route path="/reset-password" element={user ? <Navigate to="/" replace /> : <ResetPassword />} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
         </main>
         <footer style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 40, padding: '22px 40px', textAlign: 'center' }}>
           <span style={{ font: "500 10px 'IBM Plex Mono', ui-monospace, monospace", letterSpacing: '.18em', color: '#5C5C6E' }}>
