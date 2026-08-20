@@ -10,6 +10,14 @@ import { z } from 'zod';
 // would cause double-encoding (&amp; displayed instead of &).
 // Zod validation + React JSX escaping = safe by default.
 
+// Media URLs may be absolute http(s) links OR platform paths returned by the
+// upload API (/media/<key>, /api/uploads/serve/<id>). Plain .url() rejected
+// every really-uploaded file.
+const mediaUrlValue = z.string().max(1000).refine(
+  v => /^https?:\/\/.+/i.test(v) || v.startsWith('/media/') || v.startsWith('/api/uploads/serve/'),
+  'Must be an http(s) URL or an uploaded media path'
+);
+
 // ===== Auth Schemas =====
 
 const passwordPolicy = z.string().min(8).max(128).regex(
@@ -90,7 +98,7 @@ export const createAdSchema = z.object({
   title: z.string().min(1).max(200),
   ad_content_text: z.string().min(1).max(5000),
   disclaimer_text: z.string().min(1).max(500),
-  media_url: z.string().url().max(1000).optional(),
+  media_url: mediaUrlValue.optional(),
   media_type: z.enum(['image', 'video', 'text']).optional().default('text'),
   budget_cents: z.number().int().min(0).optional().default(0),
   start_date: z.string().optional(),
@@ -101,7 +109,7 @@ export const updateAdSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   ad_content_text: z.string().min(1).max(5000).optional(),
   disclaimer_text: z.string().min(1).max(500).optional(),
-  media_url: z.string().url().max(1000).optional(),
+  media_url: mediaUrlValue.optional(),
   media_type: z.enum(['image', 'video', 'text']).optional(),
   budget_cents: z.number().int().min(0).optional(),
   start_date: z.string().optional(),
@@ -120,7 +128,7 @@ export const createRebuttalSchema = z.object({
   candidate_id: z.string().min(1),
   response_text: z.string().min(1).max(5000),
   disclaimer_text: z.string().min(1).max(500),
-  media_url: z.string().url().max(1000).optional(),
+  media_url: mediaUrlValue.optional(),
 });
 
 export const createExternalAdResponseSchema = z.object({
@@ -128,11 +136,11 @@ export const createExternalAdResponseSchema = z.object({
   source_candidate_id: z.string().min(1),
   responder_candidate_id: z.string().min(1),
   source_title: z.string().min(1).max(200),
-  source_media_url: z.string().url().max(1000),
+  source_media_url: mediaUrlValue,
   source_description: z.string().max(5000).optional(),
   source_disclaimer_text: z.string().max(500).optional(),
   response_text: z.string().min(1).max(5000),
-  response_media_url: z.string().url().max(1000).optional(),
+  response_media_url: mediaUrlValue.optional(),
   disclaimer_text: z.string().min(1).max(500),
 });
 
@@ -141,7 +149,7 @@ export const createExternalAdSourceSchema = z.object({
   source_candidate_id: z.string().min(1),
   posting_candidate_id: z.string().min(1),
   source_title: z.string().min(1).max(200),
-  source_media_url: z.string().url().max(1000),
+  source_media_url: mediaUrlValue,
   source_description: z.string().max(5000).optional(),
   source_disclaimer_text: z.string().max(500).optional(),
 });
@@ -162,7 +170,7 @@ const reciteEvidenceSchema = z.object({
   source_published_at: z.string().max(50).optional(),
   accessed_at: z.string().max(50).optional(),
   archive_url: z.string().url().max(1000).optional(),
-  evidence_media_url: z.string().url().max(1000).optional(),
+  evidence_media_url: mediaUrlValue.optional(),
 });
 
 export const createChallengeSchema = z.object({
@@ -174,7 +182,7 @@ export const createChallengeSchema = z.object({
   dispute_summary: z.string().max(1000).optional(),
   requested_response: z.string().max(500).optional(),
   challenge_type: z.enum(['open', 'debate_request', 'fact_check', 'policy_question']).optional().default('open'),
-  media_url: z.string().url().max(1000).optional(),
+  media_url: mediaUrlValue.optional(),
   deadline_business_days: z.number().int().min(3).max(10).optional().default(3),
   initial_recites: z.array(reciteEvidenceSchema).max(5).optional().default([]),
 }).superRefine((data, ctx) => {
@@ -196,7 +204,7 @@ export const createChallengeSchema = z.object({
 
 export const respondToChallengeSchema = z.object({
   response_text: z.string().min(1).max(5000),
-  media_url: z.string().url().max(1000).optional(),
+  media_url: mediaUrlValue.optional(),
 });
 
 export const refuseChallengeSchema = z.object({
@@ -280,7 +288,7 @@ export const createReciteSchema = z.object({
   source_published_at: z.string().max(50).optional(),
   accessed_at: z.string().max(50).optional(),
   archive_url: z.string().url().max(1000).optional(),
-  evidence_media_url: z.string().url().max(1000).optional(),
+  evidence_media_url: mediaUrlValue.optional(),
 });
 
 export const reviewReciteSchema = z.object({
@@ -389,7 +397,7 @@ export const submitWriteinsSchema = z.object({
 export const submitQuestionSchema = z.object({
   source_type: z.enum(['voter', 'press']),
   question_text: z.string().min(10).max(2000),
-  media_url: z.string().url().max(1000).optional(),
+  media_url: mediaUrlValue.optional(),
 });
 
 // ===== Press Credential Schemas =====

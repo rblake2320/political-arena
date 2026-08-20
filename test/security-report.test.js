@@ -4,7 +4,7 @@
  */
 import { SELF, env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll } from 'vitest';
-import { HTML_CSP } from '../src/worker.js';
+import { HTML_CSP } from '../src/csp.js';
 import assetHeaders from '../public/_headers?raw';
 
 const BASE = 'https://example.com';

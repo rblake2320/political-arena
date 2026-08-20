@@ -12,6 +12,7 @@ import { ingestPressFeeds } from './press-ingest.js';
 import { archiveAndPurge } from './archive.js';
 import { corsHeaders, json } from './middleware.js';
 import { r2MediaResponse } from './media.js';
+import { HTML_CSP } from './csp.js';
 
 // Route modules
 import authRoutes from './routes/auth.routes.js';
@@ -81,26 +82,7 @@ const SECURITY_HEADERS = {
   'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
 };
 
-// CSP for HTML documents (the React SPA). Media/images may come from R2 or
-// external https hosts (e.g. campaign photo CDNs), so img/media allow https.
-// Embedded political ads are limited to privacy-mode YouTube and Vimeo.
-// The redesign imports Google Fonts; keep that allowance explicit instead of
-// widening all style/font sources.
-export const HTML_CSP = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "img-src 'self' https: data: blob:",
-  "media-src 'self' https: blob:",
-  "connect-src 'self'",
-  "font-src 'self' data: https://fonts.gstatic.com",
-  "frame-src https://www.youtube-nocookie.com https://player.vimeo.com",
-  "child-src https://www.youtube-nocookie.com https://player.vimeo.com",
-  "object-src 'none'",
-  "frame-ancestors 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-].join('; ');
+// HTML CSP lives in csp.js — workerd rejects non-handler exports from the entry module.
 
 function withSecurityHeaders(response, { isHtml = false } = {}) {
   const headers = new Headers(response.headers);

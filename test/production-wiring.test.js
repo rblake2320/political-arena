@@ -271,6 +271,38 @@ describe('ad and rebuttal lifecycle', () => {
   });
 });
 
+describe('uploaded media paths', () => {
+  it('ads accept platform media paths returned by the upload API (not just absolute URLs)', async () => {
+    const staff = await registerUser('mediapath');
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(`INSERT OR IGNORE INTO candidate_staff_links (id, user_id, candidate_id, role, is_active) VALUES (?, ?, 'cand-3', 'primary', 1)`).bind(`pw-media-${staff.id}`, staff.id),
+      env.ARENA_DB.prepare(`UPDATE candidates SET verification_status = 'verified' WHERE id = 'cand-3'`),
+    ]);
+    const cand = await env.ARENA_DB.prepare(`SELECT race_id FROM candidates WHERE id = 'cand-3'`).first();
+    const res = await post('/api/ads', {
+      race_id: cand.race_id,
+      candidate_id: 'cand-3',
+      title: 'Uploaded media path ad',
+      ad_content_text: 'Regression: relative platform media paths must validate.',
+      disclaimer_text: 'Paid for by Test Committee.',
+      media_url: '/media/uploads/cand-3/media_regression.mp4',
+      media_type: 'video',
+    }, staff.token);
+    expect(res.status).toBe(200);
+
+    const bad = await post('/api/ads', {
+      race_id: cand.race_id,
+      candidate_id: 'cand-3',
+      title: 'Bad media path ad',
+      ad_content_text: 'Relative paths outside the platform prefixes must still fail.',
+      disclaimer_text: 'Paid for by Test Committee.',
+      media_url: 'not-a-url-or-platform-path',
+      media_type: 'video',
+    }, staff.token);
+    expect(bad.status).toBe(400);
+  });
+});
+
 describe('rate limits', () => {
   it('forgot-password is limited per email', async () => {
     const user = await registerUser('forgotlimit');
