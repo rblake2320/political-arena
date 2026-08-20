@@ -183,9 +183,19 @@ export const createChallengeSchema = z.object({
   requested_response: z.string().max(500).optional(),
   challenge_type: z.enum(['open', 'debate_request', 'fact_check', 'policy_question']).optional().default('open'),
   media_url: mediaUrlValue.optional(),
+  // Optional clip highlight: isolate the exact segment of the referenced
+  // media being challenged. Omit both to reference the whole thing.
+  media_start_seconds: z.number().min(0).max(86400).optional(),
+  media_end_seconds: z.number().min(0).max(86400).optional(),
   deadline_business_days: z.number().int().min(3).max(10).optional().default(3),
   initial_recites: z.array(reciteEvidenceSchema).max(5).optional().default([]),
 }).superRefine((data, ctx) => {
+  if ((data.media_start_seconds !== undefined || data.media_end_seconds !== undefined) && !data.media_url) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['media_url'], message: 'A media clip range requires media_url' });
+  }
+  if (data.media_start_seconds !== undefined && data.media_end_seconds !== undefined && data.media_end_seconds <= data.media_start_seconds) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['media_end_seconds'], message: 'Clip end must be after clip start' });
+  }
   if (data.challenge_type === 'fact_check' && data.initial_recites.length === 0) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

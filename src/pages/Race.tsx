@@ -701,6 +701,9 @@ function IssueChallengeModal({ raceId, challengerId, candidates, onClose }: { ra
   const [sourceTitle, setSourceTitle] = useState("");
   const [publisher, setPublisher] = useState("");
   const [sourceType, setSourceType] = useState("official_record");
+  const [mediaUrl, setMediaUrl] = useState("");
+  const [clipStart, setClipStart] = useState("");
+  const [clipEnd, setClipEnd] = useState("");
   const [notice, setNotice] = useState<Notice>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -710,6 +713,8 @@ function IssueChallengeModal({ raceId, challengerId, candidates, onClose }: { ra
     setNotice(null);
     try {
       const factCheck = challengeType === "fact_check";
+      const start = clipStart.trim() === "" ? undefined : Number(clipStart);
+      const end = clipEnd.trim() === "" ? undefined : Number(clipEnd);
       await api.createChallenge({
         race_id: raceId,
         challenger_candidate_id: challengerId,
@@ -718,6 +723,9 @@ function IssueChallengeModal({ raceId, challengerId, candidates, onClose }: { ra
         claim_text: claimText.trim() || undefined,
         challenge_text: challengeText.trim(),
         requested_response: requestedResponse.trim() || undefined,
+        media_url: mediaUrl.trim() || undefined,
+        media_start_seconds: mediaUrl.trim() ? start : undefined,
+        media_end_seconds: mediaUrl.trim() ? end : undefined,
         deadline_business_days: 3,
         initial_recites: factCheck ? [{
           url: sourceUrl.trim(),
@@ -751,6 +759,14 @@ function IssueChallengeModal({ raceId, challengerId, candidates, onClose }: { ra
         <TextAreaField label="Specific claim" value={claimText} onChange={setClaimText} required={challengeType === "fact_check"} maxLength={500} rows={3} placeholder="Quote or summarize the claim being challenged." />
         <TextAreaField label="Challenge statement" value={challengeText} onChange={setChallengeText} required maxLength={2000} rows={5} placeholder="Explain what the target campaign should answer." />
         <TextAreaField label="Requested response" value={requestedResponse} onChange={setRequestedResponse} maxLength={500} rows={3} placeholder="What would answer this cleanly?" />
+        <MediaUploadField label="Referenced media (optional — the moment being challenged)" candidateId={challengerId} onMediaUrl={setMediaUrl} />
+        {mediaUrl.trim() && (
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+            <Field label="Highlight from (seconds)" type="number" value={clipStart} onChange={setClipStart} placeholder="e.g. 12" />
+            <Field label="to (seconds)" type="number" value={clipEnd} onChange={setClipEnd} placeholder="e.g. 19" />
+            <span style={{ font: "400 11px 'Hanken Grotesk',sans-serif", color: "#9B9BAB", paddingBottom: 10 }}>Leave blank to reference the whole thing.</span>
+          </div>
+        )}
         {challengeType === "fact_check" && (
           <div style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 12, padding: 14, display: "grid", gap: 12 }}>
             <span style={{ font: `700 10px ${mono}`, letterSpacing: ".14em", color: "#34C384" }}>INITIAL RECITE REQUIRED</span>

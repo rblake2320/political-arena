@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import * as api from "../api";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { ContentMedia } from "../components/Media";
 
 const mono = "'IBM Plex Mono', ui-monospace, monospace";
 const display = "'Space Grotesk', system-ui, sans-serif";
@@ -143,6 +144,19 @@ export function ChallengeReceiptPage() {
                   <div style={{ font: `italic 400 24px/1.4 ${serif}`, color: "#EDEDF3" }}>“{claim}”</div>
                 </div>
               </div>
+              {challenge.media_url && (
+                <div style={{ maxWidth: 560 }}>
+                  <span style={{ font: `600 8.5px ${mono}`, letterSpacing: ".14em", color: "#5C5C6E", display: "block", marginBottom: 6 }}>
+                    {challenge.media_start_seconds != null || challenge.media_end_seconds != null ? "REFERENCED MOMENT — HIGHLIGHTED CLIP" : "REFERENCED MEDIA"}
+                  </span>
+                  <ContentMedia
+                    url={challenge.media_url}
+                    compact
+                    clipStart={challenge.media_start_seconds ?? undefined}
+                    clipEnd={challenge.media_end_seconds ?? undefined}
+                  />
+                </div>
+              )}
             </div>
 
             {/* recites */}

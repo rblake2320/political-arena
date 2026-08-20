@@ -39,8 +39,8 @@ const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', '
 
 const SIZE_LIMITS_MB: Record<MediaKind, number> = {
   image: 15,
-  video: 100,
-  audio: 50,
+  video: 5120,
+  audio: 2048,
   embed: 0,
   link: 0,
   unknown: 15,
@@ -193,16 +193,25 @@ export function MediaUploadField({
   const handlePaste = () => {
     const url = pasteUrl.trim();
     if (!url) return;
+    // Platform media paths (returned by our own uploader / shown on ads) are
+    // first-class here — pasting them must not be rejected as "invalid".
+    const isPlatformPath = url.startsWith('/media/') || url.startsWith('/api/uploads/serve/');
     try {
-      const parsed = new URL(url);
-      if (!['http:', 'https:'].includes(parsed.protocol)) {
+      const parsed = new URL(url, window.location.origin);
+      if (!isPlatformPath && !['http:', 'https:'].includes(parsed.protocol)) {
         setError('Only http/https URLs are allowed');
         return;
       }
       const kind = inferMediaKind(url);
       setError('');
       if (preview?.localUrl) URL.revokeObjectURL(preview.localUrl);
-      setPreview({ name: parsed.hostname, size: kind === 'link' ? 'Linked media' : 'External media', type: 'link', kind, url });
+      setPreview({
+        name: isPlatformPath ? 'Platform media' : parsed.hostname,
+        size: kind === 'link' ? 'Linked media' : isPlatformPath ? 'Uploaded media' : 'External media',
+        type: 'link',
+        kind,
+        url,
+      });
       onMediaUrl(url);
     } catch {
       setError('Invalid URL format');
@@ -284,18 +293,38 @@ export function MediaUploadField({
   );
 }
 
+function fmtClock(sec: number) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 export function ContentMedia({
   url,
   mediaType,
   alt,
   compact = false,
+  clipStart,
+  clipEnd,
 }: {
   url: string;
   mediaType?: string;
   alt?: string;
   compact?: boolean;
+  /** Isolate a highlighted segment (seconds). Viewer can switch to the whole thing. */
+  clipStart?: number;
+  clipEnd?: number;
 }) {
   const [errored, setErrored] = useState(false);
+  const hasClip = typeof clipStart === 'number' || typeof clipEnd === 'number';
+  const [showFull, setShowFull] = useState(false);
+  // Native media fragments: #t=start,end starts playback at `start` and pauses at `end`.
+  const clipFragment = hasClip && !showFull
+    ? `#t=${Math.max(0, clipStart ?? 0)}${typeof clipEnd === 'number' ? `,${clipEnd}` : ''}`
+    : '';
+  const clipLabel = hasClip
+    ? `${fmtClock(clipStart ?? 0)}–${typeof clipEnd === 'number' ? fmtClock(clipEnd) : 'end'}`
+    : '';
   const youtubeId = getYouTubeId(url);
   const vimeoId = getVimeoId(url);
   const kind = inferMediaKind(url, mediaType);
@@ -345,15 +374,32 @@ export function ContentMedia({
 
   if (kind === 'video') {
     return (
-      <div className={`aspect-video bg-black rounded-lg ${mediaMargin} overflow-hidden border border-zinc-800`}>
-        <video
-          src={url}
-          controls
-          playsInline
-          preload="metadata"
-          className="w-full h-full object-contain"
-          onError={() => setErrored(true)}
-        />
+      <div className={mediaMargin}>
+        <div className="aspect-video bg-black rounded-lg overflow-hidden border border-zinc-800 relative">
+          <video
+            key={showFull ? 'full' : 'clip'}
+            src={url + clipFragment}
+            controls
+            playsInline
+            preload="metadata"
+            className="w-full h-full object-contain"
+            onError={() => setErrored(true)}
+          />
+          {hasClip && !showFull && (
+            <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-amber-500/90 text-black text-[10px] font-bold tracking-wider pointer-events-none">
+              CLIP {clipLabel}
+            </span>
+          )}
+        </div>
+        {hasClip && (
+          <button
+            type="button"
+            onClick={() => setShowFull(f => !f)}
+            className="mt-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+          >
+            {showFull ? `↩ Back to highlighted clip (${clipLabel})` : '▶ Play the whole video'}
+          </button>
+        )}
       </div>
     );
   }
@@ -361,7 +407,19 @@ export function ContentMedia({
   if (kind === 'audio') {
     return (
       <div className={`bg-zinc-950 rounded-lg ${mediaMargin} p-4 border border-zinc-800`}>
-        <audio src={url} controls preload="metadata" className="w-full" onError={() => setErrored(true)} />
+        <audio
+          key={showFull ? 'full' : 'clip'}
+          src={url + clipFragment}
+          controls
+          preload="metadata"
+          className="w-full"
+          onError={() => setErrored(true)}
+        />
+        {hasClip && (
+          <button type="button" onClick={() => setShowFull(f => !f)} className="mt-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
+            {showFull ? `↩ Back to highlighted clip (${clipLabel})` : '▶ Play the whole recording'}
+          </button>
+        )}
       </div>
     );
   }

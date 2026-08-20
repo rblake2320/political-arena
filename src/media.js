@@ -3,15 +3,15 @@ const MB = 1024 * 1024;
 export const ALLOWED_MEDIA_TYPES = {
   // Common browser/phone video containers. Browser playback still depends on
   // the user's device codecs; unsupported codecs fall back to an external link.
-  'video/mp4': { ext: 'mp4', maxSize: 100 * MB, kind: 'video' },
-  'video/x-m4v': { ext: 'm4v', maxSize: 100 * MB, kind: 'video' },
-  'video/quicktime': { ext: 'mov', maxSize: 100 * MB, kind: 'video' },
-  'video/webm': { ext: 'webm', maxSize: 100 * MB, kind: 'video' },
-  'video/ogg': { ext: 'ogv', maxSize: 100 * MB, kind: 'video' },
-  'video/3gpp': { ext: '3gp', maxSize: 100 * MB, kind: 'video' },
-  'video/3gpp2': { ext: '3g2', maxSize: 100 * MB, kind: 'video' },
-  'video/mpeg': { ext: 'mpg', maxSize: 100 * MB, kind: 'video' },
-  'video/x-msvideo': { ext: 'avi', maxSize: 100 * MB, kind: 'video' },
+  'video/mp4': { ext: 'mp4', maxSize: 5 * 1024 * MB, kind: 'video' },
+  'video/x-m4v': { ext: 'm4v', maxSize: 5 * 1024 * MB, kind: 'video' },
+  'video/quicktime': { ext: 'mov', maxSize: 5 * 1024 * MB, kind: 'video' },
+  'video/webm': { ext: 'webm', maxSize: 5 * 1024 * MB, kind: 'video' },
+  'video/ogg': { ext: 'ogv', maxSize: 5 * 1024 * MB, kind: 'video' },
+  'video/3gpp': { ext: '3gp', maxSize: 5 * 1024 * MB, kind: 'video' },
+  'video/3gpp2': { ext: '3g2', maxSize: 5 * 1024 * MB, kind: 'video' },
+  'video/mpeg': { ext: 'mpg', maxSize: 5 * 1024 * MB, kind: 'video' },
+  'video/x-msvideo': { ext: 'avi', maxSize: 5 * 1024 * MB, kind: 'video' },
 
   // Images, including formats commonly produced by modern phones.
   'image/jpeg': { ext: 'jpg', maxSize: 15 * MB, kind: 'image' },
@@ -23,13 +23,13 @@ export const ALLOWED_MEDIA_TYPES = {
   'image/heif': { ext: 'heif', maxSize: 15 * MB, kind: 'image' },
 
   // Audio recordings and audio-only campaign responses.
-  'audio/mpeg': { ext: 'mp3', maxSize: 50 * MB, kind: 'audio' },
-  'audio/mp4': { ext: 'm4a', maxSize: 50 * MB, kind: 'audio' },
-  'audio/aac': { ext: 'aac', maxSize: 50 * MB, kind: 'audio' },
-  'audio/wav': { ext: 'wav', maxSize: 50 * MB, kind: 'audio' },
-  'audio/webm': { ext: 'weba', maxSize: 50 * MB, kind: 'audio' },
-  'audio/ogg': { ext: 'oga', maxSize: 50 * MB, kind: 'audio' },
-  'audio/flac': { ext: 'flac', maxSize: 50 * MB, kind: 'audio' },
+  'audio/mpeg': { ext: 'mp3', maxSize: 2 * 1024 * MB, kind: 'audio' },
+  'audio/mp4': { ext: 'm4a', maxSize: 2 * 1024 * MB, kind: 'audio' },
+  'audio/aac': { ext: 'aac', maxSize: 2 * 1024 * MB, kind: 'audio' },
+  'audio/wav': { ext: 'wav', maxSize: 2 * 1024 * MB, kind: 'audio' },
+  'audio/webm': { ext: 'weba', maxSize: 2 * 1024 * MB, kind: 'audio' },
+  'audio/ogg': { ext: 'oga', maxSize: 2 * 1024 * MB, kind: 'audio' },
+  'audio/flac': { ext: 'flac', maxSize: 2 * 1024 * MB, kind: 'audio' },
 };
 
 const MIME_ALIASES = {

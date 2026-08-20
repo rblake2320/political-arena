@@ -462,8 +462,8 @@ router.post('/', async (request, env, ctx) => {
     env.ARENA_DB.prepare(
       `INSERT INTO challenges
        (id, race_id, challenger_candidate_id, target_candidate_id, created_by, challenge_text, claim_text,
-        dispute_summary, requested_response, media_url, challenge_type, deadline_business_days, response_deadline, public_receipt_slug)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        dispute_summary, requested_response, media_url, media_start_seconds, media_end_seconds, challenge_type, deadline_business_days, response_deadline, public_receipt_slug)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       challengeId,
       data.race_id,
@@ -475,6 +475,8 @@ router.post('/', async (request, env, ctx) => {
       data.dispute_summary || null,
       data.requested_response || null,
       data.media_url || null,
+      data.media_start_seconds ?? null,
+      data.media_end_seconds ?? null,
       data.challenge_type,
       bizDays,
       deadline,
@@ -654,6 +656,8 @@ router.post('/', async (request, env, ctx) => {
     notice_served_at: noticeServedAt,
     notice_channels: noticeChannels,
     media_url: data.media_url || null,
+    media_start_seconds: data.media_start_seconds ?? null,
+    media_end_seconds: data.media_end_seconds ?? null,
     initial_recites: initialRecites.length,
     credits_remaining: updatedCandidate?.credit_balance ?? 0,
     rate_limit: {
