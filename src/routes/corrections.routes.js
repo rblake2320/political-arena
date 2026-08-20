@@ -66,7 +66,8 @@ router.get('/public', async (request, env) => {
     `SELECT id, content_type, content_id, candidate_id, reason, status, public_note, created_at, reviewed_at
      FROM correction_requests
      WHERE content_type = ? AND content_id = ?
-     ORDER BY created_at DESC`
+     ORDER BY created_at DESC
+     LIMIT 90`
   ).bind(contentType, contentId).all();
 
   const requestIds = (result.results || []).map(row => row.id);

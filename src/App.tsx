@@ -406,6 +406,13 @@ function AppContent() {
         <LiveWire />
         <Navigation />
         <main>
+          <Suspense
+            fallback={
+              <div className="min-h-[40vh] flex items-center justify-center">
+                <div className="w-8 h-8 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+              </div>
+            }
+          >
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/race/:id" element={<Race />} />
@@ -425,6 +432,7 @@ function AppContent() {
             <Route path="/reset-password" element={user ? <Navigate to="/" replace /> : <ResetPassword />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
         </main>
         <footer style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 40, padding: '22px 40px', textAlign: 'center' }}>
           <span style={{ font: "500 10px 'IBM Plex Mono', ui-monospace, monospace", letterSpacing: '.18em', color: '#5C5C6E' }}>

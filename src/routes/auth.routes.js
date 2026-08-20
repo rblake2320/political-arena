@@ -23,6 +23,23 @@ const REGISTER_MAX_PER_IP = 5;      // per hour
 const REGISTER_WINDOW_SECONDS = 60 * 60;
 const VERIFY_EMAIL_MAX_PER_IP = 5;  // per 10 min
 const VERIFY_EMAIL_WINDOW_SECONDS = 10 * 60;
+const FORGOT_PASSWORD_MAX_PER_IP = 5;     // per hour
+const FORGOT_PASSWORD_MAX_PER_EMAIL = 3;  // per hour
+const FORGOT_PASSWORD_WINDOW_SECONDS = 60 * 60;
+const RESET_PASSWORD_MAX_PER_IP = 10;     // per 15 min
+const RESET_PASSWORD_WINDOW_SECONDS = 15 * 60;
+const RESEND_VERIFICATION_MAX_PER_USER = 3; // per 10 min
+const RESEND_VERIFICATION_WINDOW_SECONDS = 10 * 60;
+
+async function getStaffLinks(env, userId) {
+  const staffLinks = await env.ARENA_DB.prepare(
+    `SELECT csl.*, c.name as candidate_name, c.party as candidate_party, c.race_id
+     FROM candidate_staff_links csl
+     JOIN candidates c ON csl.candidate_id = c.id
+     WHERE csl.user_id = ? AND csl.is_active = 1`
+  ).bind(userId).all();
+  return staffLinks.results || [];
+}
 
 function getPasswordResetUrl(request, env, token) {
   const requestOrigin = new URL(request.url).origin;
@@ -79,6 +96,52 @@ async function deliverPasswordReset(request, env, user, token) {
   return { ...result, resetUrl };
 }
 
+function getEmailVerificationUrl(request, env, token) {
+  const requestOrigin = new URL(request.url).origin;
+  const baseUrl = (env.PASSWORD_RESET_BASE_URL || requestOrigin).replace(/\/+$/, '');
+  return `${baseUrl}/verify-email?token=${encodeURIComponent(token)}`;
+}
+
+async function deliverEmailVerification(request, env, user, token) {
+  const verifyUrl = getEmailVerificationUrl(request, env, token);
+  const subject = 'Verify your Arena email address';
+  const text = [
+    'Welcome to Arena. Verify your email address to unlock voter actions',
+    '(priorities, questions, and question votes).',
+    '',
+    'Verification link:',
+    verifyUrl,
+    '',
+    'If you did not create this account, you can ignore this email.',
+  ].join('\n');
+  const html = `
+    <p>Welcome to Arena. Verify your email address to unlock voter actions
+    (priorities, questions, and question votes).</p>
+    <p><a href="${escapeHtml(verifyUrl)}">Verify your email</a></p>
+    <p>If you did not create this account, you can ignore this email.</p>
+  `;
+
+  const result = await sendAndRecordTransactionalEmail(env.ARENA_DB, env, {
+    to: user.email,
+    subject,
+    text,
+    html,
+    tag: 'email_verification',
+    metadata: {
+      type: 'email_verification',
+      user_id: user.id,
+    },
+    idempotencyKey: `email-verification-${user.id}-${token.slice(0, 16)}`,
+  }, {
+    recipient_user_id: user.id,
+    related_entity_type: 'user',
+    related_entity_id: user.id,
+    template_key: 'email_verification',
+  });
+
+  return { ...result, verifyUrl };
+}
+
 // POST /api/auth/register
 router.post('/register', async (request, env, ctx) => {
   const body = await parseBody(request);
@@ -88,7 +151,7 @@ router.post('/register', async (request, env, ctx) => {
   if (!valid) return errorResponse(errors.join('; '));
 
   // Rate limit registrations per IP
-  const regIpHash = await hashIP(getClientIP(request));
+  const regIpHash = await hashIP(getClientIP(request), env);
   if (regIpHash) {
     const rl = await checkRateLimit(env.ARENA_DB, `register:${regIpHash}`, REGISTER_MAX_PER_IP, REGISTER_WINDOW_SECONDS);
     if (rl.limited) return errorResponse('Too many registration attempts. Please try again later.', 429);
@@ -147,7 +210,12 @@ router.post('/register', async (request, env, ctx) => {
     `INSERT INTO sessions (id, user_id, token_hash, ip_address, user_agent, expires_at) VALUES (?, ?, ?, ?, ?, ?)`
   ).bind(sessionId, userId, tokenHash, getClientIP(request), request.headers.get('User-Agent'), expiresAt).run();
 
-  return successResponse({
+  ctx.waitUntil(
+    deliverEmailVerification(request, env, { id: userId, email: data.email.toLowerCase() }, verificationToken)
+      .catch(err => console.error('Email verification delivery failed:', err)),
+  );
+
+  const responseData = {
     token,
     user: {
       id: userId,
@@ -157,8 +225,49 @@ router.post('/register', async (request, env, ctx) => {
       role: 'voter',
       email_verified: false,
       verification_status: 'unverified',
+      staff_links: [],
     },
+  };
+  if (env.ENVIRONMENT !== 'production' || env.PASSWORD_RESET_EXPOSE_DEV_TOKEN === 'true') {
+    responseData.dev_verification_token = verificationToken;
+  }
+
+  return successResponse(responseData);
+});
+
+// POST /api/auth/resend-verification — re-issue the email verification link
+router.post('/resend-verification', async (request, env, ctx) => {
+  const user = await authenticate(request, env);
+  if (!user) return errorResponse('Not authenticated', 401);
+  if (user.email_verified) return successResponse({ message: 'Email already verified' });
+
+  const rl = await checkRateLimit(env.ARENA_DB, `resend-verification:${user.id}`, RESEND_VERIFICATION_MAX_PER_USER, RESEND_VERIFICATION_WINDOW_SECONDS);
+  if (rl.limited) return errorResponse('Too many verification emails requested. Please try again later.', 429);
+
+  const verificationToken = generateVerificationToken();
+  await env.ARENA_DB.prepare(
+    `UPDATE users SET verification_token = ?, updated_at = datetime('now') WHERE id = ? AND email_verified = 0`
+  ).bind(verificationToken, user.id).run();
+
+  ctx.waitUntil(
+    deliverEmailVerification(request, env, user, verificationToken)
+      .catch(err => console.error('Email verification delivery failed:', err)),
+  );
+
+  auditLog(env.ARENA_DB, ctx, {
+    actorId: user.id,
+    action: 'user.resend_verification',
+    entityType: 'user',
+    entityId: user.id,
+    metadata: { delivery_configured: isTransactionalEmailConfigured(env) },
+    ipAddress: getClientIP(request),
   });
+
+  const responseData = { message: 'Verification email sent' };
+  if (env.ENVIRONMENT !== 'production' || env.PASSWORD_RESET_EXPOSE_DEV_TOKEN === 'true') {
+    responseData.dev_verification_token = verificationToken;
+  }
+  return successResponse(responseData);
 });
 
 // POST /api/auth/login
@@ -170,7 +279,7 @@ router.post('/login', async (request, env, ctx) => {
   if (!valid) return errorResponse(errors.join('; '));
 
   // Rate limit login attempts per IP and per target email (brute-force defense)
-  const loginIpHash = await hashIP(getClientIP(request));
+  const loginIpHash = await hashIP(getClientIP(request), env);
   const emailKey = `login:email:${data.email.toLowerCase()}`;
   if (loginIpHash) {
     const rlIp = await checkRateLimit(env.ARENA_DB, `login:ip:${loginIpHash}`, LOGIN_MAX_PER_IP, LOGIN_WINDOW_SECONDS);
@@ -237,6 +346,7 @@ router.post('/login', async (request, env, ctx) => {
       party_affiliation: user.party_affiliation,
       jurisdiction_state: user.jurisdiction_state,
       jurisdiction_district: user.jurisdiction_district,
+      staff_links: await getStaffLinks(env, user.id),
     },
   });
 });
@@ -272,6 +382,15 @@ router.post('/forgot-password', async (request, env, ctx) => {
 
   const { valid, errors, data } = validate(forgotPasswordSchema, body);
   if (!valid) return errorResponse(errors.join('; '));
+
+  // Rate limit per IP and per target email (email-bombing / write-amplification defense)
+  const forgotIpHash = await hashIP(getClientIP(request), env);
+  if (forgotIpHash) {
+    const rlIp = await checkRateLimit(env.ARENA_DB, `forgot-password:ip:${forgotIpHash}`, FORGOT_PASSWORD_MAX_PER_IP, FORGOT_PASSWORD_WINDOW_SECONDS);
+    if (rlIp.limited) return errorResponse('Too many password reset requests. Please try again later.', 429);
+  }
+  const rlEmail = await checkRateLimit(env.ARENA_DB, `forgot-password:email:${data.email.toLowerCase()}`, FORGOT_PASSWORD_MAX_PER_EMAIL, FORGOT_PASSWORD_WINDOW_SECONDS);
+  if (rlEmail.limited) return errorResponse('Too many password reset requests. Please try again later.', 429);
 
   const generic = { message: 'If an account exists for that email, password reset instructions have been sent.' };
   const user = await env.ARENA_DB.prepare(
@@ -322,6 +441,13 @@ router.post('/reset-password', async (request, env, ctx) => {
   const { valid, errors, data } = validate(resetPasswordSchema, body);
   if (!valid) return errorResponse(errors.join('; '));
 
+  // Rate limit token-guessing attempts per IP
+  const resetIpHash = await hashIP(getClientIP(request), env);
+  if (resetIpHash) {
+    const rlIp = await checkRateLimit(env.ARENA_DB, `reset-password:ip:${resetIpHash}`, RESET_PASSWORD_MAX_PER_IP, RESET_PASSWORD_WINDOW_SECONDS);
+    if (rlIp.limited) return errorResponse('Too many password reset attempts. Please try again later.', 429);
+  }
+
   const resetHash = await hashToken(data.token);
   const user = await env.ARENA_DB.prepare(
     `SELECT id FROM users
@@ -363,7 +489,7 @@ router.post('/verify-email', async (request, env, ctx) => {
   const body = await parseBody(request);
   if (!body || !body.token) return errorResponse('Verification token required');
 
-  const verifyIpHash = await hashIP(getClientIP(request));
+  const verifyIpHash = await hashIP(getClientIP(request), env);
   if (verifyIpHash) {
     const rl = await checkRateLimit(env.ARENA_DB, `verify-email:${verifyIpHash}`, VERIFY_EMAIL_MAX_PER_IP, VERIFY_EMAIL_WINDOW_SECONDS);
     if (rl.limited) return errorResponse('Too many verification attempts. Please try again later.', 429);

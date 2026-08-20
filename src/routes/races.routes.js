@@ -41,30 +41,37 @@ async function getReciteSummaries(db, items, contentType) {
 
   if (itemIds.length === 0) return summaries;
 
-  const placeholders = itemIds.map(() => '?').join(',');
-  const result = await db.prepare(
-    `SELECT id, content_id, url, title, publisher, source_type, stance, status, archive_url
-     FROM recites
-     WHERE content_type = ?
-       AND content_id IN (${placeholders})
-       AND status != 'rejected'
-     ORDER BY
-       content_id,
-       CASE status WHEN 'verified' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
-       CASE source_type
-         WHEN 'official_record' THEN 0
-         WHEN 'court_record' THEN 1
-         WHEN 'public_document' THEN 2
-         WHEN 'research' THEN 3
-         WHEN 'news' THEN 4
-         WHEN 'campaign_material' THEN 5
-         ELSE 6
-       END,
-       created_at DESC`
-  ).bind(contentType, ...itemIds).all();
+  // D1 caps bound parameters at 100 per statement — chunk the IN list.
+  const chunkSize = 90;
+  const allRecites = [];
+  for (let i = 0; i < itemIds.length; i += chunkSize) {
+    const chunk = itemIds.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => '?').join(',');
+    const result = await db.prepare(
+      `SELECT id, content_id, url, title, publisher, source_type, stance, status, archive_url
+       FROM recites
+       WHERE content_type = ?
+         AND content_id IN (${placeholders})
+         AND status != 'rejected'
+       ORDER BY
+         content_id,
+         CASE status WHEN 'verified' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
+         CASE source_type
+           WHEN 'official_record' THEN 0
+           WHEN 'court_record' THEN 1
+           WHEN 'public_document' THEN 2
+           WHEN 'research' THEN 3
+           WHEN 'news' THEN 4
+           WHEN 'campaign_material' THEN 5
+           ELSE 6
+         END,
+         created_at DESC`
+    ).bind(contentType, ...chunk).all();
+    allRecites.push(...(result.results || []));
+  }
 
   const recitesByItem = new Map();
-  for (const recite of result.results || []) {
+  for (const recite of allRecites) {
     const recites = recitesByItem.get(recite.content_id) || [];
     recites.push(recite);
     recitesByItem.set(recite.content_id, recites);
@@ -129,6 +136,16 @@ async function getCandidateComparisonStats(db, candidateIds) {
 
   if (candidateIds.length === 0) return stats;
 
+  // D1 caps bound parameters at 100/statement and the recites UNION below
+  // binds the ID list five times — chunk at 19 (5 × 19 = 95).
+  for (let i = 0; i < candidateIds.length; i += 19) {
+    await collectCandidateComparisonChunk(db, candidateIds.slice(i, i + 19), stats);
+  }
+
+  return stats;
+}
+
+async function collectCandidateComparisonChunk(db, candidateIds, stats) {
   const placeholders = candidateIds.map(() => '?').join(',');
   const [
     targetedResult,
@@ -267,8 +284,6 @@ async function getCandidateComparisonStats(db, candidateIds) {
   for (const row of recitesResult.results || []) {
     stats.get(row.candidate_id).verified_recites = { total: row.total || 0 };
   }
-
-  return stats;
 }
 
 // GET /api/races — Public, filterable, with activity counts for trending
@@ -285,7 +300,7 @@ router.get('/', async (request, env) => {
   const sort = url.searchParams.get('sort'); // 'trending', 'newest', 'name'
 
   let sql = `SELECT r.*,
-    (SELECT COUNT(*) FROM candidates c WHERE c.race_id = r.id AND c.is_active = 1) as candidate_count,
+    (SELECT COUNT(*) FROM candidates c WHERE c.race_id = r.id AND c.is_active = 1 AND NOT (c.source_status = 'platform_claim' AND c.verification_status != 'verified')) as candidate_count,
     (SELECT COUNT(*) FROM challenges ch WHERE ch.race_id = r.id AND ch.is_visible = 1) as challenge_count,
     (SELECT COUNT(*) FROM ad_flights af WHERE af.race_id = r.id AND af.status IN ('approved','active')) as ad_count,
     (SELECT COUNT(*) FROM questions q WHERE q.race_id = r.id AND q.status = 'active') as question_count,
@@ -336,6 +351,7 @@ router.get('/', async (request, env) => {
                ) as rn
              FROM candidates c
              WHERE c.race_id IN (${placeholders}) AND c.is_active = 1
+               AND NOT (c.source_status = 'platform_claim' AND c.verification_status != 'verified')
            )
            WHERE rn <= 2
            ORDER BY race_id, rn`
@@ -463,10 +479,10 @@ router.get('/:id', async (request, env) => {
 
   // Fetch related data in parallel
   const [candidatesResult, adsResult, rebuttalsResult, challengesResult, responsesResult] = await Promise.all([
-    env.ARENA_DB.prepare(`SELECT * FROM candidates WHERE race_id = ? AND is_active = 1 ORDER BY name`).bind(id).all(),
-    env.ARENA_DB.prepare(`SELECT * FROM ad_flights WHERE race_id = ? AND status IN ('approved','active') ORDER BY created_at DESC`).bind(id).all(),
-    env.ARENA_DB.prepare(`SELECT * FROM rebuttal_ads WHERE race_id = ? AND status IN ('approved','active') ORDER BY created_at DESC`).bind(id).all(),
-    env.ARENA_DB.prepare(`SELECT * FROM challenges WHERE race_id = ? AND is_visible = 1 ORDER BY created_at DESC`).bind(id).all(),
+    env.ARENA_DB.prepare(`SELECT * FROM candidates WHERE race_id = ? AND is_active = 1 AND NOT (source_status = 'platform_claim' AND verification_status != 'verified') ORDER BY name`).bind(id).all(),
+    env.ARENA_DB.prepare(`SELECT * FROM ad_flights WHERE race_id = ? AND status IN ('approved','active') ORDER BY created_at DESC LIMIT 100`).bind(id).all(),
+    env.ARENA_DB.prepare(`SELECT * FROM rebuttal_ads WHERE race_id = ? AND status IN ('approved','active') ORDER BY created_at DESC LIMIT 200`).bind(id).all(),
+    env.ARENA_DB.prepare(`SELECT * FROM challenges WHERE race_id = ? AND is_visible = 1 ORDER BY created_at DESC LIMIT 200`).bind(id).all(),
     env.ARENA_DB.prepare(
       `SELECT cr.* FROM challenge_responses cr
        JOIN challenges c ON cr.challenge_id = c.id
@@ -477,7 +493,7 @@ router.get('/:id', async (request, env) => {
   // Parse issue_positions JSON for candidates
   const candidates = (candidatesResult.results || []).map(c => ({
     ...c,
-    issue_positions: c.issue_positions ? JSON.parse(c.issue_positions) : [],
+    issue_positions: safeParseIssuePositions(c.issue_positions),
   }));
 
   // Lazy expiration: update expired challenges

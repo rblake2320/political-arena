@@ -120,10 +120,22 @@ async function bootstrap(env) {
   if (bootstrappedDbs.has(env.ARENA_DB)) return;
   await initDatabase(env.ARENA_DB);
   await seedIssueCategories(env.ARENA_DB);
-  await seedPressFeedItems(env.ARENA_DB);
-  await seedOutsideAdExamples(env.ARENA_DB);
   if (env.ENVIRONMENT !== 'production' || env.SEED_DEMO_DATA === 'true') {
+    await seedPressFeedItems(env.ARENA_DB);
+    await seedOutsideAdExamples(env.ARENA_DB);
     await seedDemoData(env.ARENA_DB);
+  } else {
+    // Production cleanup: earlier builds seeded sample historical ads
+    // (public-domain Daisy/Ike clips) attributed to real FEC candidates.
+    // Fabricated ad activity must never appear on a production ledger.
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(
+        `DELETE FROM rebuttal_ads WHERE parent_ad_id IN ('ad-ext-roy-cooper-easier-2026', 'ad-ext-andy-barr-stop-dei-2026')`
+      ),
+      env.ARENA_DB.prepare(
+        `DELETE FROM ad_flights WHERE id IN ('ad-ext-roy-cooper-easier-2026', 'ad-ext-andy-barr-stop-dei-2026')`
+      ),
+    ]);
   }
   bootstrappedDbs.add(env.ARENA_DB);
 }
@@ -223,6 +235,41 @@ export default {
       ).run();
       if (expired.meta?.changes > 0) {
         console.log(`Expired ${expired.meta.changes} challenges`);
+      }
+
+      // 1b. Close out unserved challenges 7 days past deadline. The target
+      // never received notice (unclaimed candidate), so the challenge can
+      // never resolve — expire it (the receipt keeps notice_status='unserved'
+      // for context) and refund the challenger's credit, since the platform
+      // could not deliver the accountability action they paid for.
+      const unservedExpired = await env.ARENA_DB.batch([
+        env.ARENA_DB.prepare(
+          `UPDATE candidates SET credit_balance = credit_balance + (
+             SELECT COUNT(*) FROM challenges
+             WHERE challenger_candidate_id = candidates.id
+               AND status = 'open' AND notice_status = 'unserved'
+               AND response_deadline < datetime('now', '-7 days'))
+           WHERE id IN (
+             SELECT challenger_candidate_id FROM challenges
+             WHERE status = 'open' AND notice_status = 'unserved'
+               AND response_deadline < datetime('now', '-7 days'))`
+        ),
+        env.ARENA_DB.prepare(
+          `INSERT INTO credit_transactions (id, candidate_id, amount, transaction_type, description, reference_id)
+           SELECT lower(hex(randomblob(8))), challenger_candidate_id, 1, 'refund', 'Callout notice never served — credit refunded', id
+           FROM challenges
+           WHERE status = 'open' AND notice_status = 'unserved'
+             AND response_deadline < datetime('now', '-7 days')`
+        ),
+        env.ARENA_DB.prepare(
+          `UPDATE challenges SET status = 'expired', expired_at = datetime('now'), updated_at = datetime('now')
+           WHERE status = 'open' AND notice_status = 'unserved'
+             AND response_deadline < datetime('now', '-7 days')`
+        ),
+      ]);
+      const unservedCount = unservedExpired[2]?.meta?.changes || 0;
+      if (unservedCount > 0) {
+        console.log(`Expired ${unservedCount} unserved challenges with credit refunds`);
       }
 
       // 2. Activate approved ads whose start_date has arrived

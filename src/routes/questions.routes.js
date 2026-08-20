@@ -53,12 +53,16 @@ router.get('/:raceId', async (request, env) => {
   let userVotes = {};
   if (request.user && questions.results.length > 0) {
     const qIds = questions.results.map(q => q.id);
-    const placeholders = qIds.map(() => '?').join(',');
-    const votes = await env.ARENA_DB.prepare(
-      `SELECT question_id FROM question_votes WHERE user_id = ? AND question_id IN (${placeholders})`
-    ).bind(request.user.id, ...qIds).all();
-    for (const v of votes.results) {
-      userVotes[v.question_id] = true;
+    // D1 caps bound parameters at 100 per statement — chunk the IN list.
+    for (let i = 0; i < qIds.length; i += 90) {
+      const chunk = qIds.slice(i, i + 90);
+      const placeholders = chunk.map(() => '?').join(',');
+      const votes = await env.ARENA_DB.prepare(
+        `SELECT question_id FROM question_votes WHERE user_id = ? AND question_id IN (${placeholders})`
+      ).bind(request.user.id, ...chunk).all();
+      for (const v of votes.results) {
+        userVotes[v.question_id] = true;
+      }
     }
   }
 

@@ -381,6 +381,9 @@ router.post('/', async (request, env, ctx) => {
   if (!race) return errorResponse('Race not found', 404);
   if (challenger.race_id !== data.race_id || target.race_id !== data.race_id) return errorResponse('Both candidates must be in the specified race');
   if (data.challenger_candidate_id === data.target_candidate_id) return errorResponse('Cannot challenge yourself');
+  if (challenger.verification_status !== 'verified') {
+    return errorResponse('Challenger candidate must be verified before issuing public callouts', 403);
+  }
 
   if (data.challenge_type === 'fact_check') {
     const duplicate = await env.ARENA_DB.prepare(
@@ -511,7 +514,21 @@ router.post('/', async (request, env, ctx) => {
     );
   }
 
-  await env.ARENA_DB.batch(challengeBatch);
+  try {
+    await env.ARENA_DB.batch(challengeBatch);
+  } catch (err) {
+    // Compensate: the credit was already deducted atomically above. If the
+    // challenge write fails, refund it so a 500 never silently burns a credit.
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(
+        `UPDATE candidates SET credit_balance = credit_balance + 1 WHERE id = ?`
+      ).bind(data.challenger_candidate_id),
+      env.ARENA_DB.prepare(
+        `INSERT INTO credit_transactions (id, candidate_id, amount, transaction_type, description, reference_id) VALUES (?, ?, 1, 'refund', 'Challenge creation failed — credit refunded', ?)`
+      ).bind(generateId('ctx'), data.challenger_candidate_id, challengeId),
+    ]).catch(refundErr => console.error('Challenge credit refund failed:', refundErr));
+    throw err;
+  }
 
   const targetStaff = await env.ARENA_DB.prepare(
     `SELECT DISTINCT u.id as user_id, u.email, u.display_name

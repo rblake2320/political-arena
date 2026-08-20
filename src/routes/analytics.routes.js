@@ -29,7 +29,7 @@ function boundedMetadata(metadata) {
 // POST /api/analytics/events — Non-blocking batch event ingestion
 router.post('/events', async (request, env, ctx) => {
   const ip = getClientIP(request);
-  const ipHash = await hashIP(ip);
+  const ipHash = await hashIP(ip, env);
   if (ipHash) {
     const rl = await checkRateLimit(env.ARENA_DB, `analytics:${ipHash}`, ANALYTICS_MAX_PER_IP, ANALYTICS_WINDOW_SECONDS);
     if (rl.limited) return errorResponse('Too many analytics events. Please slow down.', 429);

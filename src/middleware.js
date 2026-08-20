@@ -6,6 +6,18 @@
 import { authenticate } from './auth.js';
 
 // JSON response helper
+// Parse a JSON array column defensively — a malformed DB value must degrade
+// to [] instead of 500ing the whole endpoint.
+export function safeParseIssuePositions(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,

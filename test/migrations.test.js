@@ -127,7 +127,10 @@ function createFakeD1({
         if (issueCategoryMatch) issueCategoryColumns.add(issueCategoryMatch[1]);
         const voterWriteinMatch = statement.sql.match(/^ALTER TABLE voter_writeins ADD COLUMN (\w+)/);
         if (voterWriteinMatch) voterWriteinColumns.add(voterWriteinMatch[1]);
-        if (statement.sql.startsWith('CREATE TABLE IF NOT EXISTS user_favorites')) {
+        if (statement.sql.startsWith('ALTER TABLE user_favorites RENAME TO user_favorites_legacy')) {
+          userFavoriteColumns.clear();
+        }
+        if (statement.sql.startsWith('CREATE TABLE user_favorites')) {
           ['id', 'user_id', 'favorite_type', 'target_id', 'created_at'].forEach(column => userFavoriteColumns.add(column));
         }
         const auditMatch = statement.sql.match(/^ALTER TABLE audit_log ADD COLUMN (\w+)/);
@@ -334,7 +337,8 @@ describe('runtime migrations', () => {
         'created_at',
         'updated_at',
       ],
-      userFavorites: [],
+      // Legacy shape without the id primary key — triggers the rebuild path.
+      userFavorites: ['user_id', 'favorite_type', 'target_id', 'created_at'],
       auditLog: [
         'id',
         'actor_id',
@@ -417,7 +421,8 @@ describe('runtime migrations', () => {
       'ALTER TABLE recites ADD COLUMN review_note TEXT',
       'ALTER TABLE issue_categories ADD COLUMN parent_category_id TEXT REFERENCES issue_categories(id)',
       'ALTER TABLE voter_writeins ADD COLUMN writein_rank INTEGER NOT NULL DEFAULT 1 CHECK(writein_rank BETWEEN 1 AND 3)',
-      `CREATE TABLE IF NOT EXISTS user_favorites (
+      'ALTER TABLE user_favorites RENAME TO user_favorites_legacy',
+      `CREATE TABLE user_favorites (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id),
         favorite_type TEXT NOT NULL CHECK(favorite_type IN ('race','candidate','challenge')),
@@ -425,6 +430,10 @@ describe('runtime migrations', () => {
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(user_id, favorite_type, target_id)
       )`,
+      `INSERT OR IGNORE INTO user_favorites (id, user_id, favorite_type, target_id, created_at)
+        SELECT lower(hex(randomblob(8))), user_id, favorite_type, target_id, COALESCE(created_at, datetime('now'))
+        FROM user_favorites_legacy`,
+      'DROP TABLE user_favorites_legacy',
       `CREATE INDEX IF NOT EXISTS idx_user_favorites_user
         ON user_favorites(user_id, created_at)`,
       `CREATE INDEX IF NOT EXISTS idx_user_favorites_target

@@ -418,11 +418,16 @@ router.post('/:id/respond', async (request, env) => {
     return errorResponse('responses cannot contain duplicate question_id entries', 400);
   }
 
-  const placeholders = uniqueQuestionIds.map(() => '?').join(',');
-  const questions = await env.ARENA_DB.prepare(
-    `SELECT id FROM survey_questions WHERE survey_id = ? AND id IN (${placeholders})`
-  ).bind(id, ...uniqueQuestionIds).all();
-  const validQuestionIds = new Set((questions.results || []).map(q => q.id));
+  // D1 caps bound parameters at 100 per statement — chunk the IN list.
+  const validQuestionIds = new Set();
+  for (let i = 0; i < uniqueQuestionIds.length; i += 90) {
+    const chunk = uniqueQuestionIds.slice(i, i + 90);
+    const placeholders = chunk.map(() => '?').join(',');
+    const questions = await env.ARENA_DB.prepare(
+      `SELECT id FROM survey_questions WHERE survey_id = ? AND id IN (${placeholders})`
+    ).bind(id, ...chunk).all();
+    for (const q of questions.results || []) validQuestionIds.add(q.id);
+  }
   const missingQuestionIds = uniqueQuestionIds.filter(questionId => !validQuestionIds.has(questionId));
   if (missingQuestionIds.length > 0) {
     return errorResponse(`Unknown survey questions: ${missingQuestionIds.join(', ')}`, 400);
