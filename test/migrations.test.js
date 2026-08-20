@@ -409,6 +409,7 @@ describe('runtime migrations', () => {
       'ALTER TABLE ad_flights ADD COLUMN source_url TEXT',
       'ALTER TABLE ad_flights ADD COLUMN source_label TEXT',
       'ALTER TABLE ad_flights ADD COLUMN posted_for_rebuttal_by TEXT REFERENCES candidates(id)',
+      'ALTER TABLE ad_flights ADD COLUMN ai_disclosure INTEGER NOT NULL DEFAULT 0',
       'ALTER TABLE challenges ADD COLUMN claim_text TEXT',
       'ALTER TABLE challenges ADD COLUMN dispute_summary TEXT',
       'ALTER TABLE challenges ADD COLUMN requested_response TEXT',

@@ -56,6 +56,7 @@ export interface AdFlight {
 }
 
 export interface RebuttalAd {
+  ai_disclosure?: number;
   id: string;
   parent_ad_id: string;
   race_id: string;

@@ -37,6 +37,7 @@ import correctionsRoutes from './routes/corrections.routes.js';
 import electionsRoutes from './routes/elections.routes.js';
 import favoritesRoutes from './routes/favorites.routes.js';
 import safetyRoutes from './routes/safety.routes.js';
+import moderationRoutes from './routes/moderation.routes.js';
 
 // Main API router
 const api = Router({ base: '/api' });
@@ -65,6 +66,7 @@ api.all('/corrections/*', correctionsRoutes.fetch);
 api.all('/elections/*', electionsRoutes.fetch);
 api.all('/favorites/*', favoritesRoutes.fetch);
 api.all('/safety/*', safetyRoutes.fetch);
+api.all('/moderation/*', moderationRoutes.fetch);
 
 // Health check fallback; fetch() handles /api/health directly so bootstrap
 // failures can return degraded health before route dispatch.
@@ -168,6 +170,28 @@ export default {
       }
     }
 
+    // robots.txt + sitemap.xml — voters find candidates through search
+    if (url.pathname === '/robots.txt') {
+      return new Response(`User-agent: *\nAllow: /\nSitemap: ${url.origin}/sitemap.xml\n`, {
+        headers: { 'Content-Type': 'text/plain' },
+      });
+    }
+    if (url.pathname === '/sitemap.xml') {
+      const staticPaths = ['/', '/what-matters', '/help', '/press/register', '/terms', '/privacy', '/moderation-policy', '/dmca'];
+      let urls = staticPaths.map(p => `${url.origin}${p}`);
+      try {
+        const [races, challenges] = await Promise.all([
+          env.ARENA_DB.prepare(`SELECT id FROM races WHERE status IN ('upcoming','active','voting') ORDER BY id LIMIT 1000`).all(),
+          env.ARENA_DB.prepare(`SELECT COALESCE(public_receipt_slug, id) as slug FROM challenges WHERE is_visible = 1 ORDER BY created_at DESC LIMIT 1000`).all(),
+        ]);
+        urls = urls.concat((races.results || []).map(r => `${url.origin}/race/${r.id}`));
+        urls = urls.concat((challenges.results || []).map(c => `${url.origin}/challenge/${c.slug}`));
+      } catch { /* serve the static portion regardless */ }
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+        urls.map(u => `  <url><loc>${u.replace(/&/g, '&amp;')}</loc></url>`).join('\n') + `\n</urlset>`;
+      return new Response(xml, { headers: { 'Content-Type': 'application/xml', 'Cache-Control': 'public, max-age=3600' } });
+    }
+
     // Serve media files from R2
     if (url.pathname.startsWith('/media/')) {
       if (!env.ARENA_MEDIA) {
@@ -192,6 +216,55 @@ export default {
     // Serve static assets (the React SPA)
     try {
       const response = await env.ASSETS.fetch(request);
+
+      // Crawler-visible metadata: receipt and race pages get real titles/OG
+      // tags injected into the SPA shell so shared links render cards.
+      const receiptMatch = url.pathname.match(/^\/challenge\/([^/]+)$/);
+      const raceMatch = url.pathname.match(/^\/race\/([^/]+)$/);
+      if ((receiptMatch || raceMatch) && (response.status === 200 || response.status === 404)) {
+        try {
+          let title = null;
+          let description = null;
+          if (receiptMatch) {
+            const ch = await env.ARENA_DB.prepare(
+              `SELECT ch.claim_text, ch.challenge_text, ch.status, cc.name as challenger, tc.name as target
+               FROM challenges ch
+               JOIN candidates cc ON cc.id = ch.challenger_candidate_id
+               JOIN candidates tc ON tc.id = ch.target_candidate_id
+               WHERE (ch.id = ? OR ch.public_receipt_slug = ?) AND ch.is_visible = 1`
+            ).bind(receiptMatch[1], receiptMatch[1]).first();
+            if (ch) {
+              title = `${ch.challenger} calls out ${ch.target} — Public Callout Receipt`;
+              description = (ch.claim_text || ch.challenge_text || '').slice(0, 200);
+            }
+          } else if (raceMatch) {
+            const race = await env.ARENA_DB.prepare(`SELECT name, state, office FROM races WHERE id = ?`).bind(raceMatch[1]).first();
+            if (race) {
+              title = `${race.name} — Political Arena`;
+              description = `Ads, rebuttals, fact-check callouts, and voter questions for the ${race.name}, on the public record.`;
+            }
+          }
+          if (title) {
+            const shell = response.status === 200 ? response : await env.ASSETS.fetch(new Request(new URL('/', request.url), request));
+            const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            const rewritten = new HTMLRewriter()
+              .on('title', { element(el) { el.setInnerContent(title); } })
+              .on('head', { element(el) {
+                el.append(`<meta name="description" content="${esc(description)}">` +
+                  `<meta property="og:title" content="${esc(title)}">` +
+                  `<meta property="og:description" content="${esc(description)}">` +
+                  `<meta property="og:type" content="article">` +
+                  `<meta property="og:url" content="${esc(url.origin + url.pathname)}">` +
+                  `<meta property="og:site_name" content="Political Arena">` +
+                  `<meta name="twitter:card" content="summary">`, { html: true });
+              } })
+              .transform(shell);
+            return withSecurityHeaders(new Response(rewritten.body, { status: 200, headers: shell.headers }), { isHtml: true });
+          }
+        } catch (err) {
+          console.error('Meta injection failed:', err);
+        }
+      }
       if (response.status === 404) {
         // SPA fallback: serve index.html for client-side routing
         const indexRequest = new Request(new URL('/', request.url), request);

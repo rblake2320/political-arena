@@ -23,10 +23,14 @@ export function Register() {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [agreed, setAgreed] = useState(false);
+  const [ageOk, setAgeOk] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (!ageOk) { setError('You must confirm you are at least 13 years old.'); return; }
+    if (!agreed) { setError('You must agree to the Terms of Service and Privacy Policy.'); return; }
 
     if (form.password !== form.confirmPassword) {
       setError('Passwords do not match');
@@ -180,6 +184,15 @@ export function Register() {
               </select>
             </div>
           </div>
+          <label className="flex items-start gap-2 text-sm text-zinc-400 cursor-pointer">
+            <input type="checkbox" checked={ageOk} onChange={e => setAgeOk(e.target.checked)} className="mt-1" />
+            <span>I am at least 13 years old.</span>
+          </label>
+          <label className="flex items-start gap-2 text-sm text-zinc-400 cursor-pointer">
+            <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="mt-1" />
+            <span>I agree to the <Link to="/terms" className="text-indigo-400 hover:text-indigo-300">Terms of Service</Link> and <Link to="/privacy" className="text-indigo-400 hover:text-indigo-300">Privacy Policy</Link>.</span>
+          </label>
+
 
           <button
             type="submit"

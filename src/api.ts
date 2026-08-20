@@ -141,7 +141,7 @@ export async function createCandidate(data: {
 // ---- Ads ----
 export async function createAd(data: {
   race_id: string; candidate_id: string; title: string; ad_content_text: string;
-  disclaimer_text: string; media_url?: string; media_type?: string; budget_cents?: number;
+  disclaimer_text: string; media_url?: string; media_type?: string; ai_disclosure?: boolean; budget_cents?: number;
 }) {
   const result = unwrap<any>(await api.post('/ads', data));
   void trackEvent({
@@ -159,6 +159,7 @@ export async function createAd(data: {
 export async function createRebuttal(data: {
   parent_ad_id: string; race_id: string; candidate_id: string;
   response_text: string; disclaimer_text: string; media_url?: string;
+  ai_disclosure?: boolean;
 }) {
   const result = unwrap<any>(await api.post('/ads/rebuttals', data));
   void trackEvent({
@@ -354,6 +355,36 @@ export async function uploadMedia(file: File, candidateId?: string) {
     metadata: { media_kind: result.media_kind, content_type: result.type, size: result.size },
   });
   return result;
+}
+
+// ---- Account management ----
+export async function updateMe(data: { display_name?: string; party_affiliation?: string; jurisdiction_state?: string; jurisdiction_district?: string }) {
+  return unwrap<any>(await api.put('/users/me', data));
+}
+export async function changePassword(current_password: string, new_password: string) {
+  return unwrap<any>(await api.post('/auth/change-password', { current_password, new_password }));
+}
+export async function deleteAccount(password: string) {
+  return unwrap<any>(await api.post('/users/me/delete', { password, confirm: 'DELETE' }));
+}
+export async function exportMyData() {
+  return unwrap<any>(await api.get('/users/me/export'));
+}
+
+// ---- Report abuse ----
+export async function reportContent(payload: { content_type: string; content_id: string; category: string; details?: string }) {
+  return unwrap<any>(await api.post('/moderation/reports', payload));
+}
+export async function getReports() {
+  return unwrap<any>(await api.get('/moderation/reports'));
+}
+export async function resolveReport(id: string, outcome: 'upheld' | 'overturned', resolution_notes?: string) {
+  return unwrap<any>(await api.put(`/moderation/reports/${id}/resolve`, { outcome, resolution_notes }));
+}
+
+// ---- Statement review (trust ledger moderation) ----
+export async function getPendingStatements() {
+  return unwrap<any>(await api.get('/statements/review-pending'));
 }
 
 // ---- Reactions ----

@@ -93,6 +93,36 @@ export function ChallengeReceiptPage() {
   );
 
   const { challenge, response, recites, response_recites, fact_score, response_fact_score, timeline, audit_chain } = data;
+
+  // schema.org ClaimReview — lets Google's fact-check surfaces index receipts
+  useEffect(() => {
+    if (!challenge) return;
+    const script = document.createElement('script');
+    script.type = 'application/ld+json';
+    script.id = 'claimreview-jsonld';
+    script.textContent = JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'ClaimReview',
+      url: window.location.href,
+      claimReviewed: challenge.claim_text || challenge.challenge_text,
+      itemReviewed: {
+        '@type': 'Claim',
+        author: { '@type': 'Person', name: challenge.target_name },
+        datePublished: challenge.created_at,
+      },
+      author: { '@type': 'Organization', name: 'Political Arena' },
+      reviewRating: {
+        '@type': 'Rating',
+        ratingValue: fact_score?.score ?? 50,
+        bestRating: 100,
+        worstRating: 0,
+        alternateName: fact_score?.label || 'under review',
+      },
+    });
+    document.head.appendChild(script);
+    return () => { document.getElementById('claimreview-jsonld')?.remove(); };
+  }, [challenge?.id]);
+
   const status = challenge.status || "open";
   const cc = partyColor(challenge.challenger_party);
   const tc = partyColor(challenge.target_party);

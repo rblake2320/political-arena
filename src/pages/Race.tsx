@@ -552,6 +552,7 @@ export function Race() {
                         )}
                       </div>
                     )}
+                    {!!ad.ai_disclosure && <div style={{ display: "flex", alignItems: "center", gap: 7, border: "1px solid rgba(239,182,67,.45)", background: "rgba(239,182,67,.08)", borderRadius: 8, padding: "7px 12px" }}><span style={{ font: `700 9.5px ${mono}`, letterSpacing: ".12em", color: "#EFB643" }}>◬ AI-GENERATED OR AI-ALTERED MEDIA — DISCLOSED BY THE CAMPAIGN</span></div>}
                     <div style={{ marginTop: "auto", display: "flex", alignItems: "center", gap: 7, border: "1px solid rgba(255,255,255,.1)", background: "rgba(255,255,255,.025)", borderRadius: 8, padding: "8px 12px" }}><span style={{ font: `500 9.5px ${mono}`, letterSpacing: ".1em", color: "#9B9BAB" }}>ⓘ {ad.disclaimer_text || "PAID FOR BY THE CAMPAIGN · MANDATORY DISCLAIMER"}</span></div>
                     <EvidencePanel contentType="ad" contentId={ad.id} sideLabel="THIS AD" />
                   </div>
@@ -569,6 +570,7 @@ export function Race() {
                           </div>
                           <div style={{ font: `400 12.5px/1.55 'Hanken Grotesk',sans-serif`, color: "#C9C9D4" }}>{r.response_text}</div>
                           {r.media_url && <ContentMedia url={r.media_url} alt="Response media" compact />}
+                          {!!r.ai_disclosure && <span style={{ font: `700 8.5px ${mono}`, letterSpacing: ".1em", color: "#EFB643" }}>◬ AI-ALTERED MEDIA — DISCLOSED</span>}
                           <EvidencePanel contentType="rebuttal" contentId={r.id} sideLabel="THIS REBUTTAL" />
                         </div>
                       ) : (
@@ -858,6 +860,7 @@ function PostAdModal({ raceId, candidateId, onClose }: { raceId: string; candida
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [disclaimer, setDisclaimer] = useState("");
+  const [aiDisclosure, setAiDisclosure] = useState(false);
   const [mediaUrl, setMediaUrl] = useState("");
   const [notice, setNotice] = useState<Notice>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -875,6 +878,7 @@ function PostAdModal({ raceId, candidateId, onClose }: { raceId: string; candida
         disclaimer_text: disclaimer.trim(),
         media_url: mediaUrl.trim() || undefined,
         media_type: inferMediaType(mediaUrl.trim()),
+        ai_disclosure: aiDisclosure,
       });
       onClose(true, "Ad draft created for moderation.");
     } catch (err: any) {
@@ -890,6 +894,10 @@ function PostAdModal({ raceId, candidateId, onClose }: { raceId: string; candida
         <Field label="Ad title" required value={title} onChange={setTitle} />
         <TextAreaField label="Ad text / transcript" required value={content} onChange={setContent} maxLength={5000} rows={6} />
         <Field label="Media URL" value={mediaUrl} onChange={setMediaUrl} type="url" placeholder="https://..." />
+        <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", font: "400 12px/1.5 'Hanken Grotesk',sans-serif", color: "#9B9BAB" }}>
+          <input type="checkbox" checked={aiDisclosure} onChange={e => setAiDisclosure(e.target.checked)} style={{ marginTop: 2 }} />
+          <span>This media contains AI-generated or materially AI-altered content (required by law in many states — it will carry a visible AI-media label).</span>
+        </label>
         <TextAreaField label="FEC disclaimer" required value={disclaimer} onChange={setDisclaimer} maxLength={500} rows={3} placeholder="Paid for by..." />
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <ActionButton onClick={() => onClose()} variant="ghost">Cancel</ActionButton>
@@ -955,6 +963,7 @@ function ClaimRebuttalModal({ ad, raceId, candidateId, onClose }: { ad: any; rac
   const [responseText, setResponseText] = useState("");
   const [disclaimer, setDisclaimer] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
+  const [aiDisclosure, setAiDisclosure] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -970,6 +979,7 @@ function ClaimRebuttalModal({ ad, raceId, candidateId, onClose }: { ad: any; rac
         response_text: responseText.trim(),
         disclaimer_text: disclaimer.trim(),
         media_url: mediaUrl.trim() || undefined,
+        ai_disclosure: aiDisclosure,
       });
       onClose(true, "Rebuttal draft created for moderation.");
     } catch (err: any) {
@@ -984,6 +994,10 @@ function ClaimRebuttalModal({ ad, raceId, candidateId, onClose }: { ad: any; rac
         <FormMessage notice={notice} />
         <TextAreaField label="Rebuttal response" required value={responseText} onChange={setResponseText} maxLength={5000} rows={6} />
         <MediaUploadField label="Response media" candidateId={candidateId} onMediaUrl={setMediaUrl} />
+        <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", font: "400 12px/1.5 'Hanken Grotesk',sans-serif", color: "#9B9BAB" }}>
+          <input type="checkbox" checked={aiDisclosure} onChange={e => setAiDisclosure(e.target.checked)} style={{ marginTop: 2 }} />
+          <span>This media contains AI-generated or materially AI-altered content (it will carry a visible AI-media label).</span>
+        </label>
         <TextAreaField label="FEC disclaimer" required value={disclaimer} onChange={setDisclaimer} maxLength={500} rows={3} />
         <div style={{ font: "400 12px/1.45 'Hanken Grotesk', system-ui, sans-serif", color: "#5C5C6E" }}>
           Use video for a TV-style response, or attach image/audio/text when that better fits the record.
@@ -1003,6 +1017,10 @@ function AskQuestionModal({ raceId, onClose }: { raceId: string; onClose: (refre
   const [mediaUrl, setMediaUrl] = useState("");
   const [notice, setNotice] = useState<Notice>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [isApprovedPress, setIsApprovedPress] = useState(false);
+  useEffect(() => {
+    api.getPressStatus().then((d: any) => setIsApprovedPress(d?.credential?.status === "approved")).catch(() => setIsApprovedPress(false));
+  }, []);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -1027,7 +1045,7 @@ function AskQuestionModal({ raceId, onClose }: { raceId: string; onClose: (refre
         <FormMessage notice={notice} />
         <SelectField label="Question source" value={sourceType} onChange={setSourceType}>
           <option value="voter">Verified voter</option>
-          <option value="press">Approved press</option>
+          {isApprovedPress && <option value="press">Approved press</option>}
         </SelectField>
         <TextAreaField label="Question" required value={questionText} onChange={setQuestionText} maxLength={2000} rows={5} placeholder="What should candidates address on the record?" />
         <Field label="Supporting media URL" value={mediaUrl} onChange={setMediaUrl} type="url" placeholder="https://..." />
