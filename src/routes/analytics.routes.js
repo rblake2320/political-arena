@@ -138,6 +138,9 @@ router.get('/race/:raceId/insights', async (request, env) => {
     ad_stats: adStats.results || [],
     challenge_stats: challengeStats.results || [],
     issue_priorities: priorityStats.results || [],
+    // Honest-metrics flag: nothing increments total_impressions yet, so any
+    // impressions figure here is structural zero, not a measurement.
+    impressions_tracking: 'not_implemented',
   });
 });
 
@@ -180,6 +183,7 @@ router.get('/candidate/:id/performance', async (request, env) => {
     ads: adPerf,
     challenges: challengePerf,
     reactions: reactionPerf.results || [],
+    impressions_tracking: 'not_implemented',
   });
 });
 
