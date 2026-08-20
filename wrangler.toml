@@ -23,6 +23,9 @@ crons = ["*/15 * * * *"]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# These paths must reach the worker even though assets would otherwise
+# swallow them (robots/sitemap generation + crawler OG injection).
+run_worker_first = ["/api/*", "/media/*", "/robots.txt", "/sitemap.xml", "/challenge/*", "/race/*"]
 
 # Configurable platform parameters
 [vars]
