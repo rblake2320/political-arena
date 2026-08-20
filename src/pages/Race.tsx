@@ -6,6 +6,7 @@ import { useArenaStore } from "../store";
 import { useAuth } from "../stores/auth";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ContentMedia, MediaUploadField } from "../components/Media";
+import { EvidencePanel } from "../components/EvidencePanel";
 
 // Mirrors the backend's inferAdMediaType — an image upload must not be stored as 'video'.
 function inferMediaType(url: string): "video" | "image" | "text" {
@@ -552,6 +553,7 @@ export function Race() {
                       </div>
                     )}
                     <div style={{ marginTop: "auto", display: "flex", alignItems: "center", gap: 7, border: "1px solid rgba(255,255,255,.1)", background: "rgba(255,255,255,.025)", borderRadius: 8, padding: "8px 12px" }}><span style={{ font: `500 9.5px ${mono}`, letterSpacing: ".1em", color: "#9B9BAB" }}>ⓘ {ad.disclaimer_text || "PAID FOR BY THE CAMPAIGN · MANDATORY DISCLAIMER"}</span></div>
+                    <EvidencePanel contentType="ad" contentId={ad.id} sideLabel="THIS AD" />
                   </div>
                   <div style={{ padding: 22, background: "rgba(110,110,247,.025)", display: "flex", flexDirection: "column", gap: 10 }}>
                     <span style={{ font: `600 10px ${mono}`, letterSpacing: ".14em", color: "#8F8FF9" }}>◷ {ad.source_type === "external" ? "OPEN RESPONSE SLOT" : "EQUAL TIME · REBUTTAL WINDOW"}</span>
@@ -567,6 +569,7 @@ export function Race() {
                           </div>
                           <div style={{ font: `400 12.5px/1.55 'Hanken Grotesk',sans-serif`, color: "#C9C9D4" }}>{r.response_text}</div>
                           {r.media_url && <ContentMedia url={r.media_url} alt="Response media" compact />}
+                          <EvidencePanel contentType="rebuttal" contentId={r.id} sideLabel="THIS REBUTTAL" />
                         </div>
                       ) : (
                         <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, border: "1px dashed rgba(255,255,255,.16)", borderRadius: 10, padding: "12px 14px" }}>
