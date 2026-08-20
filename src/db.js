@@ -942,6 +942,36 @@ export async function initDatabase(db) {
     )`),
 
     // ========== MODERATION TABLES ==========
+    // ========== SAFETY CASES (threat / abuse tracking) ==========
+    // Moderator-only case files for subjects that need following over time
+    // (threats, harassment, impersonation, coordinated abuse). Cases carry an
+    // append-only event trail; every access is written to the audit log.
+    db.prepare(`CREATE TABLE IF NOT EXISTS safety_cases (
+      id TEXT PRIMARY KEY,
+      subject_type TEXT NOT NULL CHECK(subject_type IN ('user','candidate','challenge','ad','rebuttal','question','recite','statement','other')),
+      subject_id TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'other' CHECK(category IN ('threat','harassment','impersonation','coordinated_abuse','election_integrity','legal','other')),
+      severity TEXT NOT NULL DEFAULT 'medium' CHECK(severity IN ('low','medium','high','critical')),
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','watching','escalated','resolved')),
+      title TEXT NOT NULL,
+      summary TEXT,
+      created_by TEXT NOT NULL REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS safety_case_events (
+      id TEXT PRIMARY KEY,
+      case_id TEXT NOT NULL REFERENCES safety_cases(id),
+      actor_id TEXT NOT NULL REFERENCES users(id),
+      event_type TEXT NOT NULL CHECK(event_type IN ('note','status_change','severity_change','evidence')),
+      before_value TEXT,
+      after_value TEXT,
+      note TEXT,
+      evidence_url TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
     db.prepare(`CREATE TABLE IF NOT EXISTS moderation_queue (
       id TEXT PRIMARY KEY,
       content_type TEXT NOT NULL,
@@ -1235,6 +1265,9 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_users_verification_token ON users(verification_token)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_analytics_agg_period ON analytics_aggregates(period_type, period_start, metric_name)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_mod_queue_status ON moderation_queue(status, priority)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_safety_cases_status ON safety_cases(status, severity, updated_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_safety_cases_subject ON safety_cases(subject_type, subject_id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_safety_case_events_case ON safety_case_events(case_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_status ON correction_requests(status, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_content ON correction_requests(content_type, content_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_corrections_requester ON correction_requests(requester_id, created_at)`),

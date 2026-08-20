@@ -4,7 +4,7 @@ import * as api from "../api";
 
 const mono = "'IBM Plex Mono', ui-monospace, monospace";
 
-type Queue = "candidates" | "press" | "recites" | "ads" | "rebuttals" | "corrections";
+type Queue = "candidates" | "press" | "recites" | "ads" | "rebuttals" | "corrections" | "safety";
 
 const QUEUES: { key: Queue; label: string; blurb: string }[] = [
   { key: "candidates", label: "Candidate claims", blurb: "Campaign profile registrations awaiting verification." },
@@ -13,6 +13,7 @@ const QUEUES: { key: Queue; label: string; blurb: string }[] = [
   { key: "ads", label: "Ads", blurb: "Submitted campaign ads awaiting review before they can run." },
   { key: "rebuttals", label: "Rebuttals", blurb: "Submitted rebuttals awaiting review — the response window is live, review promptly." },
   { key: "corrections", label: "Corrections", blurb: "Correction and appeal requests awaiting a ruling. A ruling needs a resolution note." },
+  { key: "safety", label: "Safety", blurb: "Threat and abuse case files. Open a case on any subject and follow it with an audited event trail." },
 ];
 
 function Btn({ onClick, disabled, tone = "neutral", children }: { onClick: () => void; disabled?: boolean; tone?: "ok" | "no" | "neutral"; children: React.ReactNode }) {
@@ -24,6 +25,100 @@ function Btn({ onClick, disabled, tone = "neutral", children }: { onClick: () =>
 
 function Meta({ children }: { children: React.ReactNode }) {
   return <div style={{ font: `500 10px ${mono}`, color: "#5C5C6E", letterSpacing: ".06em" }}>{children}</div>;
+}
+
+const inputStyle: React.CSSProperties = { background: "#08080C", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "8px 10px", font: `400 12px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" };
+
+const SEVERITY_COLORS: Record<string, string> = { critical: "#E5636A", high: "#EFB643", medium: "#8F8FF9", low: "#9B9BAB" };
+
+function SafetyCaseForm({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ subject_type: "user", subject_id: "", title: "", category: "threat", severity: "medium", summary: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const submit = async () => {
+    setSaving(true);
+    setErr("");
+    try {
+      await api.createSafetyCase(form);
+      setForm({ subject_type: "user", subject_id: "", title: "", category: "threat", severity: "medium", summary: "" });
+      setOpen(false);
+      onCreated();
+    } catch (e: any) { setErr(e?.response?.data?.error || e?.message || "Failed to open case"); }
+    finally { setSaving(false); }
+  };
+  if (!open) {
+    return <div style={{ marginBottom: 14 }}><Btn tone="neutral" onClick={() => setOpen(true)}>+ Open a case</Btn></div>;
+  }
+  return (
+    <div style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 12, background: "#0C0C13", padding: 16, marginBottom: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <select value={form.subject_type} onChange={e => setForm({ ...form, subject_type: e.target.value })} style={inputStyle}>
+          {["user", "candidate", "challenge", "ad", "rebuttal", "question", "recite", "statement", "other"].map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <input value={form.subject_id} onChange={e => setForm({ ...form, subject_id: e.target.value })} placeholder="Subject ID" style={{ ...inputStyle, flex: 1, minWidth: 160 }} />
+        <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} style={inputStyle}>
+          {["threat", "harassment", "impersonation", "coordinated_abuse", "election_integrity", "legal", "other"].map(c => <option key={c} value={c}>{c.replace(/_/g, " ")}</option>)}
+        </select>
+        <select value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })} style={inputStyle}>
+          {["low", "medium", "high", "critical"].map(sv => <option key={sv} value={sv}>{sv}</option>)}
+        </select>
+      </div>
+      <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Case title (what needs following?)" style={inputStyle} />
+      <textarea value={form.summary} onChange={e => setForm({ ...form, summary: e.target.value })} placeholder="Summary / context (optional)" rows={2} style={inputStyle} />
+      {err && <div style={{ font: `500 12px 'Hanken Grotesk',sans-serif`, color: "#E5636A" }}>{err}</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn tone="ok" disabled={saving || form.title.trim().length < 3 || !form.subject_id.trim()} onClick={submit}>Open case</Btn>
+        <Btn onClick={() => setOpen(false)}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+function SafetyCaseCard({ item, noteValue, onNote, onChanged, busy, setBusy }: { item: any; noteValue: string; onNote: (v: string) => void; onChanged: () => void; busy: boolean; setBusy: (v: string | null) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [events, setEvents] = useState<any[] | null>(null);
+  const sevColor = SEVERITY_COLORS[item.severity] || "#9B9BAB";
+  const act = async (payload: any) => {
+    setBusy(item.id);
+    try { await api.addSafetyCaseEvent(item.id, payload); onNote(""); onChanged(); }
+    catch { /* reload handles */ }
+    finally { setBusy(null); }
+  };
+  const loadEvents = () => {
+    if (events) { setExpanded(!expanded); return; }
+    api.getSafetyCase(item.id).then(d => { setEvents(d.events || []); setExpanded(true); }).catch(() => setEvents([]));
+  };
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ font: `600 15px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{item.title}</span>
+        <span style={{ font: `700 9px ${mono}`, letterSpacing: ".12em", color: sevColor, background: `${sevColor}12`, border: `1px solid ${sevColor}44`, padding: "4px 9px", borderRadius: 99 }}>
+          {String(item.severity).toUpperCase()} · {String(item.status).toUpperCase()}
+        </span>
+      </div>
+      <Meta>{[`${item.subject_type}: ${item.subject_id}`, (item.category || "").replace(/_/g, " "), item.created_by_name && `BY ${item.created_by_name}`, item.updated_at && `UPDATED ${String(item.updated_at).slice(0, 10)}`, `${item.event_count || 0} EVENTS`].filter(Boolean).join(" · ").toUpperCase()}</Meta>
+      {item.summary && <div style={{ font: `400 13px/1.55 'Hanken Grotesk',sans-serif`, color: "#C9C9D4" }}>{item.summary}</div>}
+      <input value={noteValue} onChange={e => onNote(e.target.value)} placeholder="Add a case note (kept on the audited trail)" style={inputStyle} />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Btn disabled={busy || !noteValue.trim()} onClick={() => act({ note: noteValue.trim() })}>Add note</Btn>
+        {item.status !== "watching" && <Btn disabled={busy} onClick={() => act({ status: "watching" })}>Watch</Btn>}
+        {item.status !== "escalated" && <Btn tone="no" disabled={busy} onClick={() => act({ status: "escalated" })}>Escalate</Btn>}
+        {item.status !== "resolved" && <Btn tone="ok" disabled={busy} onClick={() => act({ status: "resolved" })}>Resolve</Btn>}
+        <Btn onClick={loadEvents}>{expanded ? "Hide trail" : "View trail"}</Btn>
+      </div>
+      {expanded && events && (
+        <div style={{ borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+          {events.map((ev: any) => (
+            <div key={ev.id} style={{ font: `400 11px ${mono}`, color: "#9B9BAB" }}>
+              {String(ev.created_at).slice(0, 16)} · {ev.actor_name} · {ev.event_type}{ev.after_value ? ` → ${ev.after_value}` : ""}{ev.note ? ` — ${ev.note}` : ""}{ev.evidence_url ? " (evidence)" : ""}
+            </div>
+          ))}
+          {events.length === 0 && <span style={{ font: `400 11px ${mono}`, color: "#5C5C6E" }}>No events.</span>}
+        </div>
+      )}
+    </>
+  );
 }
 
 export function ModerationPage() {
@@ -44,12 +139,13 @@ export function ModerationPage() {
         : queue === "press" ? api.getPendingPress()
           : queue === "recites" ? api.getPendingRecites({ status: "pending" })
             : queue === "corrections" ? api.getPendingCorrections("open")
-              : api.getAdModerationQueue();
+              : queue === "safety" ? api.getSafetyCases()
+                : api.getAdModerationQueue();
     fetcher
       .then((d: any) => {
         if (queue === "ads") return setItems(d?.ads || []);
         if (queue === "rebuttals") return setItems(d?.rebuttals || []);
-        setItems(d?.candidates || d?.applications || d?.credentials || d?.press || d?.recites || d?.corrections || (Array.isArray(d) ? d : []));
+        setItems(d?.candidates || d?.applications || d?.credentials || d?.press || d?.recites || d?.corrections || d?.cases || (Array.isArray(d) ? d : []));
       })
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
@@ -91,6 +187,8 @@ export function ModerationPage() {
         {error && (
           <div style={{ border: "1px solid rgba(229,99,106,.4)", borderRadius: 10, background: "rgba(229,99,106,.08)", padding: "10px 14px", marginBottom: 12, font: `500 12px 'Hanken Grotesk',sans-serif`, color: "#E5636A" }}>{error}</div>
         )}
+
+        {queue === "safety" && <SafetyCaseForm onCreated={load} />}
 
         {loading ? (
           <div style={{ padding: "60px 0", textAlign: "center" }}><span className="arena-pulse" style={{ display: "inline-block", width: 20, height: 20, border: "2px solid rgba(110,110,247,.3)", borderTopColor: "#6E6EF7", borderRadius: "50%" }} /></div>
@@ -153,6 +251,7 @@ export function ModerationPage() {
                     <Btn tone="no" disabled={busy === it.id || !noteFor(it.id)} onClick={() => act(it.id, () => api.reviewRebuttal(it.id, "reject", noteFor(it.id)))}>Reject</Btn>
                   </div>
                 </>}
+                {queue === "safety" && <SafetyCaseCard item={it} noteValue={notes[it.id] || ""} onNote={v => setNotes(prev => ({ ...prev, [it.id]: v }))} onChanged={load} busy={busy === it.id} setBusy={setBusy} />}
                 {queue === "corrections" && <>
                   <div><span style={{ font: `600 15px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{(it.reason || "correction").replace(/_/g, " ")} — {it.content_type}</span></div>
                   <Meta>{[it.candidate_name, it.race_name, it.requester_name && `FROM ${it.requester_name}`, it.created_at && `FILED ${String(it.created_at).slice(0, 10)}`].filter(Boolean).join(" · ").toUpperCase()}</Meta>

@@ -67,6 +67,38 @@ router.post('/events', async (request, env, ctx) => {
     );
   });
 
+  // Impression events additionally feed impression_logs and the per-content
+  // counters — this is the platform's actual view-tracking path. The UPDATE
+  // matches by primary key, so spoofed content ids simply affect zero rows.
+  for (const e of events) {
+    if (e.event_type !== 'ad_impression' && e.event_type !== 'rebuttal_impression') continue;
+    const contentId = typeof e.content_id === 'string' ? e.content_id.slice(0, 120) : null;
+    const raceId = typeof e.race_id === 'string' ? e.race_id.slice(0, 120) : null;
+    const candidateId = typeof e.candidate_id === 'string' ? e.candidate_id.slice(0, 120) : null;
+    if (!contentId || !raceId || !candidateId) continue;
+    if (e.event_type === 'ad_impression') {
+      inserts.push(
+        env.ARENA_DB.prepare(
+          `INSERT INTO impression_logs (id, ad_id, candidate_id, race_id, viewer_ip_hash, impression_type)
+           SELECT ?, id, ?, ?, ?, 'view' FROM ad_flights WHERE id = ? AND status IN ('approved','active','completed')`
+        ).bind(generateId('imp'), candidateId, raceId, ipHash, contentId),
+        env.ARENA_DB.prepare(
+          `UPDATE ad_flights SET total_impressions = total_impressions + 1 WHERE id = ? AND status IN ('approved','active','completed')`
+        ).bind(contentId),
+      );
+    } else {
+      inserts.push(
+        env.ARENA_DB.prepare(
+          `INSERT INTO impression_logs (id, rebuttal_id, candidate_id, race_id, viewer_ip_hash, impression_type)
+           SELECT ?, id, ?, ?, ?, 'view' FROM rebuttal_ads WHERE id = ? AND status IN ('approved','active','completed')`
+        ).bind(generateId('imp'), candidateId, raceId, ipHash, contentId),
+        env.ARENA_DB.prepare(
+          `UPDATE rebuttal_ads SET total_impressions = total_impressions + 1 WHERE id = ? AND status IN ('approved','active','completed')`
+        ).bind(contentId),
+      );
+    }
+  }
+
   // Non-blocking write
   if (inserts.length > 0) {
     ctx.waitUntil(env.ARENA_DB.batch(inserts).catch(err => console.error('Analytics batch failed:', err)));
@@ -138,9 +170,9 @@ router.get('/race/:raceId/insights', async (request, env) => {
     ad_stats: adStats.results || [],
     challenge_stats: challengeStats.results || [],
     issue_priorities: priorityStats.results || [],
-    // Honest-metrics flag: nothing increments total_impressions yet, so any
-    // impressions figure here is structural zero, not a measurement.
-    impressions_tracking: 'not_implemented',
+    // Impression tracking went live 2026-08-20 via ad_impression /
+    // rebuttal_impression analytics events; earlier data is structurally zero.
+    impressions_tracking: 'live',
   });
 });
 
@@ -183,7 +215,7 @@ router.get('/candidate/:id/performance', async (request, env) => {
     ads: adPerf,
     challenges: challengePerf,
     reactions: reactionPerf.results || [],
-    impressions_tracking: 'not_implemented',
+    impressions_tracking: 'live',
   });
 });
 

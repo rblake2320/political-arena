@@ -696,4 +696,36 @@ export async function trackEvents(events: AnalyticsEvent[]) {
   try { await api.post('/analytics/events', { events: normalized }); } catch {}
 }
 
+// ---- Impression tracking (deduped per page load) ----
+const seenImpressions = new Set<string>();
+export function trackImpression(kind: 'ad' | 'rebuttal', contentId: string, raceId: string, candidateId: string) {
+  const key = `${kind}:${contentId}`;
+  if (seenImpressions.has(key)) return;
+  seenImpressions.add(key);
+  void trackEvent({
+    event_type: kind === 'ad' ? 'ad_impression' : 'rebuttal_impression',
+    race_id: raceId,
+    candidate_id: candidateId,
+    content_type: kind,
+    content_id: contentId,
+  });
+}
+
+// ---- Safety cases (moderator/admin) ----
+export async function getSafetyCases(params?: { status?: string; severity?: string; subject_type?: string; subject_id?: string }) {
+  return unwrap<any>(await api.get('/safety/cases', { params }));
+}
+export async function getSafetyCase(id: string) {
+  return unwrap<any>(await api.get(`/safety/cases/${id}`));
+}
+export async function createSafetyCase(payload: { subject_type: string; subject_id: string; title: string; category?: string; severity?: string; summary?: string }) {
+  return unwrap<any>(await api.post('/safety/cases', payload));
+}
+export async function addSafetyCaseEvent(id: string, payload: { note?: string; status?: string; severity?: string; evidence_url?: string }) {
+  return unwrap<any>(await api.post(`/safety/cases/${id}/events`, payload));
+}
+export async function getSafetySubjectActivity(type: 'user' | 'candidate', id: string) {
+  return unwrap<any>(await api.get(`/safety/subjects/${type}/${id}/activity`));
+}
+
 export default api;
