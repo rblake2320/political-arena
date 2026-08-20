@@ -190,12 +190,12 @@ router.post('/', async (request, env, ctx) => {
 
   const adId = generateId('ad');
   await env.ARENA_DB.prepare(
-    `INSERT INTO ad_flights (id, race_id, candidate_id, created_by, title, ad_content_text, disclaimer_text, media_url, media_type, budget_cents, start_date, end_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO ad_flights (id, race_id, candidate_id, created_by, title, ad_content_text, disclaimer_text, media_url, media_type, ai_disclosure, budget_cents, start_date, end_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     adId, data.race_id, data.candidate_id, request.user.id,
     data.title, data.ad_content_text, data.disclaimer_text,
-    data.media_url || null, data.media_type, data.budget_cents,
+    data.media_url || null, data.media_type, data.ai_disclosure ? 1 : 0, data.budget_cents,
     data.start_date || null, data.end_date || null,
   ).run();
 
@@ -457,8 +457,8 @@ router.post('/rebuttals', async (request, env, ctx) => {
   const rebuttalStatus = 'submitted';
   await env.ARENA_DB.batch([
     env.ARENA_DB.prepare(
-      `INSERT INTO rebuttal_ads (id, parent_ad_id, race_id, candidate_id, created_by, response_text, disclaimer_text, media_url, status, slot_claimed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-    ).bind(rebuttalId, data.parent_ad_id, ad.race_id, data.candidate_id, request.user.id, data.response_text, data.disclaimer_text, data.media_url || null, rebuttalStatus),
+      `INSERT INTO rebuttal_ads (id, parent_ad_id, race_id, candidate_id, created_by, response_text, disclaimer_text, media_url, ai_disclosure, status, slot_claimed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    ).bind(rebuttalId, data.parent_ad_id, ad.race_id, data.candidate_id, request.user.id, data.response_text, data.disclaimer_text, data.media_url || null, data.ai_disclosure ? 1 : 0, rebuttalStatus),
     env.ARENA_DB.prepare(
       `INSERT INTO moderation_queue (id, content_type, content_id, reason, reported_by, status) VALUES (?, 'rebuttal_ad', ?, 'policy_review', ?, 'flagged')`
     ).bind(generateId('mod'), rebuttalId, request.user.id),

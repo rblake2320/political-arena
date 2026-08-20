@@ -63,3 +63,9 @@ body {
 @keyframes arena-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 .arena-marquee { animation: arena-marquee 40s linear infinite; }
 .arena-pulse { animation: arena-pulse 2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .arena-marquee, .arena-pulse {
+    animation: none !important;
+  }
+}

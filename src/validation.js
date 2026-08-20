@@ -100,6 +100,8 @@ export const createAdSchema = z.object({
   disclaimer_text: z.string().min(1).max(500),
   media_url: mediaUrlValue.optional(),
   media_type: z.enum(['image', 'video', 'text']).optional().default('text'),
+  // State political-media laws: uploader attests to AI-generated/altered media
+  ai_disclosure: z.boolean().optional().default(false),
   budget_cents: z.number().int().min(0).optional().default(0),
   start_date: z.string().optional(),
   end_date: z.string().optional(),
@@ -129,6 +131,17 @@ export const createRebuttalSchema = z.object({
   response_text: z.string().min(1).max(5000),
   disclaimer_text: z.string().min(1).max(500),
   media_url: mediaUrlValue.optional(),
+  ai_disclosure: z.boolean().optional().default(false),
+});
+
+export const changePasswordSchema = z.object({
+  current_password: z.string().min(1).max(128),
+  new_password: passwordPolicy,
+});
+
+export const deleteAccountSchema = z.object({
+  password: z.string().min(1).max(128),
+  confirm: z.literal('DELETE'),
 });
 
 export const createExternalAdResponseSchema = z.object({

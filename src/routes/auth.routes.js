@@ -9,7 +9,7 @@ import { generateId } from '../db.js';
 import { auditLog } from '../audit.js';
 import { checkRateLimit, clearRateLimit } from '../ratelimit.js';
 import { json, errorResponse, successResponse, parseBody, getClientIP } from '../middleware.js';
-import { validate, registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../validation.js';
+import { validate, registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema, changePasswordSchema } from '../validation.js';
 import { authenticate } from '../auth.js';
 import { isTransactionalEmailConfigured, sendAndRecordTransactionalEmail } from '../email.js';
 
@@ -514,6 +514,39 @@ router.post('/verify-email', async (request, env, ctx) => {
   });
 
   return successResponse({ message: 'Email verified successfully' });
+});
+
+// POST /api/auth/change-password — logged-in rotation; other sessions revoked
+router.post('/change-password', async (request, env, ctx) => {
+  const user = await authenticate(request, env);
+  if (!user) return errorResponse('Not authenticated', 401);
+
+  const body = await parseBody(request);
+  const { valid, errors, data } = validate(changePasswordSchema, body);
+  if (!valid) return errorResponse(errors.join('; '));
+
+  const row = await env.ARENA_DB.prepare(`SELECT password_hash FROM users WHERE id = ?`).bind(user.id).first();
+  const ok = await verifyPassword(data.current_password, row.password_hash);
+  if (!ok) return errorResponse('Current password is incorrect', 403);
+
+  const newHash = await hashPassword(data.new_password);
+  const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+  const tokenH = token ? await hashToken(token) : null;
+  await env.ARENA_DB.batch([
+    env.ARENA_DB.prepare(`UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?`).bind(newHash, user.id),
+    // revoke every session except the one making this request
+    env.ARENA_DB.prepare(`UPDATE sessions SET is_active = 0 WHERE user_id = ? AND token_hash != ?`).bind(user.id, tokenH || ''),
+  ]);
+
+  auditLog(env.ARENA_DB, ctx, {
+    actorId: user.id,
+    action: 'user.change_password',
+    entityType: 'user',
+    entityId: user.id,
+    ipAddress: getClientIP(request),
+  });
+
+  return successResponse({ message: 'Password changed. Other sessions were signed out.' });
 });
 
 // GET /api/auth/me

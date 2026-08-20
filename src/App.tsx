@@ -19,7 +19,10 @@ const CandidateProfilePage = lazy(() => import("./pages/CandidateProfilePage").t
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword").then((m) => ({ default: m.ForgotPassword })));
 const ResetPassword = lazy(() => import("./pages/ResetPassword").then((m) => ({ default: m.ResetPassword })));
 const VerifyEmail = lazy(() => import("./pages/VerifyEmail").then((m) => ({ default: m.VerifyEmail })));
+const LegalPage = lazy(() => import("./pages/LegalPage").then((m) => ({ default: m.LegalPage })));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 import { LiveWire } from "./components/LiveWire";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useAuth } from "./stores/auth";
 import { useArenaStore } from "./store";
 import * as api from "./api";
@@ -162,6 +165,11 @@ function Navigation() {
             <HelpCircle className="w-3.5 h-3.5" />
             Help
           </Link>
+          {user && (
+            <Link to="/settings" className="text-zinc-400 hover:text-white transition-colors">
+              Settings
+            </Link>
+          )}
           {activeCandidateId && (
             <Link to={`/candidate/${activeCandidateId}`} className="text-zinc-400 hover:text-white transition-colors">
               Candidate Portal
@@ -363,6 +371,32 @@ function AppContent() {
     fetchRaces();
   }, [userId]);
 
+  // Per-route titles — every page was sharing one static <title>
+  useEffect(() => {
+    const path = location.pathname;
+    const titles: [RegExp, string][] = [
+      [/^\/$/, 'Political Arena — The Public Record'],
+      [/^\/race\//, 'Race — Political Arena'],
+      [/^\/challenge\//, 'Public Callout Receipt — Political Arena'],
+      [/^\/profile\/candidate\//, 'Candidate Trust Profile — Political Arena'],
+      [/^\/candidate\//, 'Candidate Portal — Political Arena'],
+      [/^\/what-matters/, 'What Matters — Political Arena'],
+      [/^\/my-priorities/, 'My Priorities — Political Arena'],
+      [/^\/notifications/, 'Notifications — Political Arena'],
+      [/^\/moderation/, 'Moderation — Political Arena'],
+      [/^\/settings/, 'Account Settings — Political Arena'],
+      [/^\/press\//, 'Press — Political Arena'],
+      [/^\/help/, 'Help — Political Arena'],
+      [/^\/login/, 'Sign In — Political Arena'],
+      [/^\/register/, 'Create Account — Political Arena'],
+      [/^\/terms/, 'Terms of Service — Political Arena'],
+      [/^\/privacy/, 'Privacy Policy — Political Arena'],
+      [/^\/moderation-policy/, 'Moderation & Content Policy — Political Arena'],
+      [/^\/dmca/, 'Copyright & DMCA — Political Arena'],
+    ];
+    document.title = titles.find(([re]) => re.test(path))?.[1] || 'Political Arena';
+  }, [location.pathname]);
+
   // Build the portal candidate list from the user's staff-linked races only —
   // fetching every race detail here was up to ~600 requests per app mount.
   useEffect(() => {
@@ -411,6 +445,7 @@ function AppContent() {
   return (
     <CandidateContext.Provider value={{ candidates: portalCandidates, activeCandidateId, setActiveCandidateId }}>
       <div className="min-h-screen text-zinc-50 font-sans selection:bg-indigo-500/30" style={{ background: '#08080C' }}>
+        <a href="#main-content" style={{ position: 'absolute', left: -9999, top: 0, zIndex: 100, background: '#6E6EF7', color: '#fff', padding: '10px 16px', borderRadius: 8 }} onFocus={e => { e.currentTarget.style.left = '12px'; e.currentTarget.style.top = '12px'; }} onBlur={e => { e.currentTarget.style.left = '-9999px'; }}>Skip to content</a>
         <LiveWire />
         <Navigation />
         {user && !user.email_verified && (
@@ -421,7 +456,8 @@ function AppContent() {
             </span>
           </div>
         )}
-        <main>
+        <main id="main-content">
+          <ErrorBoundary>
           <Suspense
             fallback={
               <div className="min-h-[40vh] flex items-center justify-center">
@@ -447,11 +483,24 @@ function AppContent() {
             <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPassword />} />
             <Route path="/reset-password" element={user ? <Navigate to="/" replace /> : <ResetPassword />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
+            <Route path="/settings" element={user ? <SettingsPage /> : <Navigate to="/login" replace />} />
+            <Route path="/terms" element={<LegalPage />} />
+            <Route path="/privacy" element={<LegalPage />} />
+            <Route path="/moderation-policy" element={<LegalPage />} />
+            <Route path="/dmca" element={<LegalPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
           </Suspense>
+          </ErrorBoundary>
         </main>
-        <footer style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 40, padding: '22px 40px', textAlign: 'center' }}>
+        <footer style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 40, padding: '22px 40px', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
+          <nav aria-label="Legal and policy" style={{ display: 'flex', gap: 18, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <Link to="/terms" style={{ font: "500 10px 'IBM Plex Mono', ui-monospace, monospace", letterSpacing: '.14em', color: '#9B9BAB', textDecoration: 'none' }}>TERMS</Link>
+            <Link to="/privacy" style={{ font: "500 10px 'IBM Plex Mono', ui-monospace, monospace", letterSpacing: '.14em', color: '#9B9BAB', textDecoration: 'none' }}>PRIVACY</Link>
+            <Link to="/moderation-policy" style={{ font: "500 10px 'IBM Plex Mono', ui-monospace, monospace", letterSpacing: '.14em', color: '#9B9BAB', textDecoration: 'none' }}>MODERATION &amp; APPEALS</Link>
+            <Link to="/dmca" style={{ font: "500 10px 'IBM Plex Mono', ui-monospace, monospace", letterSpacing: '.14em', color: '#9B9BAB', textDecoration: 'none' }}>COPYRIGHT / DMCA</Link>
+            <Link to="/help" style={{ font: "500 10px 'IBM Plex Mono', ui-monospace, monospace", letterSpacing: '.14em', color: '#9B9BAB', textDecoration: 'none' }}>HELP</Link>
+          </nav>
           <span style={{ font: "500 10px 'IBM Plex Mono', ui-monospace, monospace", letterSpacing: '.18em', color: '#5C5C6E' }}>
             ARENA · THE PUBLIC RECORD · EVERY CLAIM ON THE RECORD{user ? ` · SIGNED IN AS ${String(user.display_name || user.username || '').toUpperCase()}` : ''}
           </span>

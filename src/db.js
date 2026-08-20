@@ -76,7 +76,18 @@ export async function runRuntimeMigrations(db) {
   if (!adColumns.has('posted_for_rebuttal_by')) {
     adColumnMigrations.push(db.prepare(`ALTER TABLE ad_flights ADD COLUMN posted_for_rebuttal_by TEXT REFERENCES candidates(id)`));
   }
+  if (!adColumns.has('ai_disclosure')) {
+    adColumnMigrations.push(db.prepare(`ALTER TABLE ad_flights ADD COLUMN ai_disclosure INTEGER NOT NULL DEFAULT 0`));
+  }
   if (adColumnMigrations.length > 0) await db.batch(adColumnMigrations);
+
+  const rebuttalColumnsResult = await db.prepare(`PRAGMA table_info(rebuttal_ads)`).all();
+  const rebuttalColumns = new Set((rebuttalColumnsResult.results || []).map(c => c.name));
+  if (rebuttalColumns.size > 0 && !rebuttalColumns.has('ai_disclosure')) {
+    await db.batch([
+      db.prepare(`ALTER TABLE rebuttal_ads ADD COLUMN ai_disclosure INTEGER NOT NULL DEFAULT 0`),
+    ]);
+  }
 
   const challengeColumnsResult = await db.prepare(`PRAGMA table_info(challenges)`).all();
   const challengeColumns = new Set((challengeColumnsResult.results || []).map(c => c.name));
@@ -623,6 +634,7 @@ export async function initDatabase(db) {
       title TEXT,
       media_url TEXT,
       media_type TEXT DEFAULT 'text' CHECK(media_type IN ('image','video','text')),
+      ai_disclosure INTEGER NOT NULL DEFAULT 0,
       ad_content_text TEXT,
       disclaimer_text TEXT NOT NULL,
       source_type TEXT NOT NULL DEFAULT 'platform' CHECK(source_type IN ('platform','external')),
@@ -654,6 +666,7 @@ export async function initDatabase(db) {
       candidate_id TEXT NOT NULL REFERENCES candidates(id),
       created_by TEXT NOT NULL REFERENCES users(id),
       media_url TEXT,
+      ai_disclosure INTEGER NOT NULL DEFAULT 0,
       response_text TEXT,
       disclaimer_text TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','in_review','approved','rejected','active','paused','completed')),

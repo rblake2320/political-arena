@@ -4,7 +4,7 @@ import * as api from "../api";
 
 const mono = "'IBM Plex Mono', ui-monospace, monospace";
 
-type Queue = "candidates" | "press" | "recites" | "ads" | "rebuttals" | "corrections" | "safety";
+type Queue = "candidates" | "press" | "recites" | "ads" | "rebuttals" | "corrections" | "reports" | "statements" | "safety";
 
 const QUEUES: { key: Queue; label: string; blurb: string }[] = [
   { key: "candidates", label: "Candidate claims", blurb: "Campaign profile registrations awaiting verification." },
@@ -13,6 +13,8 @@ const QUEUES: { key: Queue; label: string; blurb: string }[] = [
   { key: "ads", label: "Ads", blurb: "Submitted campaign ads awaiting review before they can run." },
   { key: "rebuttals", label: "Rebuttals", blurb: "Submitted rebuttals awaiting review — the response window is live, review promptly." },
   { key: "corrections", label: "Corrections", blurb: "Correction and appeal requests awaiting a ruling. A ruling needs a resolution note." },
+  { key: "reports", label: "Reports", blurb: "User-flagged content — defamation, threats, impersonation, undisclosed AI media, copyright, spam. Highest priority first." },
+  { key: "statements", label: "Statements", blurb: "Public statements awaiting truth/answer scoring against the published rubric. High-stakes designations need a second reviewer." },
   { key: "safety", label: "Safety", blurb: "Threat and abuse case files. Open a case on any subject and follow it with an audited event trail." },
 ];
 
@@ -139,13 +141,15 @@ export function ModerationPage() {
         : queue === "press" ? api.getPendingPress()
           : queue === "recites" ? api.getPendingRecites({ status: "pending" })
             : queue === "corrections" ? api.getPendingCorrections("open")
-              : queue === "safety" ? api.getSafetyCases()
-                : api.getAdModerationQueue();
+              : queue === "reports" ? api.getReports()
+                : queue === "statements" ? api.getPendingStatements()
+                  : queue === "safety" ? api.getSafetyCases()
+                    : api.getAdModerationQueue();
     fetcher
       .then((d: any) => {
         if (queue === "ads") return setItems(d?.ads || []);
         if (queue === "rebuttals") return setItems(d?.rebuttals || []);
-        setItems(d?.candidates || d?.applications || d?.credentials || d?.press || d?.recites || d?.corrections || d?.cases || (Array.isArray(d) ? d : []));
+        setItems(d?.candidates || d?.applications || d?.credentials || d?.press || d?.recites || d?.corrections || d?.cases || d?.reports || d?.statements || (Array.isArray(d) ? d : []));
       })
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
@@ -249,6 +253,30 @@ export function ModerationPage() {
                   <div style={{ display: "flex", gap: 8 }}>
                     <Btn tone="ok" disabled={busy === it.id} onClick={() => act(it.id, () => api.reviewRebuttal(it.id, "approve"))}>Approve &amp; run</Btn>
                     <Btn tone="no" disabled={busy === it.id || !noteFor(it.id)} onClick={() => act(it.id, () => api.reviewRebuttal(it.id, "reject", noteFor(it.id)))}>Reject</Btn>
+                  </div>
+                </>}
+                {queue === "reports" && <>
+                  <div><span style={{ font: `600 15px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{(it.notes || "").split("]")[0].replace("[", "").replace(/_/g, " ") || "report"}</span> <span style={{ font: `500 10px ${mono}`, color: "#9B9BAB", letterSpacing: ".1em" }}>{String(it.content_type || "").toUpperCase()} · {it.content_id}</span></div>
+                  <Meta>{[it.reporter_name && `REPORTED BY ${it.reporter_name}`, it.created_at && `FILED ${String(it.created_at).slice(0, 10)}`, it.priority > 1 && "HIGH PRIORITY"].filter(Boolean).join(" · ").toUpperCase()}</Meta>
+                  {it.notes && <div style={{ font: `400 13px/1.55 'Hanken Grotesk',sans-serif`, color: "#C9C9D4", borderLeft: "2px solid rgba(255,255,255,.14)", paddingLeft: 12 }}>{it.notes}</div>}
+                  <input value={notes[it.id] || ""} onChange={e => setNotes(prev => ({ ...prev, [it.id]: e.target.value }))} placeholder="Resolution note (recorded on the audit trail)" style={{ background: "#08080C", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "8px 10px", font: `400 12px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }} />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn tone="no" disabled={busy === it.id} onClick={() => act(it.id, () => api.resolveReport(it.id, "upheld", noteFor(it.id) || undefined))}>Uphold report</Btn>
+                    <Btn disabled={busy === it.id} onClick={() => act(it.id, () => api.resolveReport(it.id, "overturned", noteFor(it.id) || undefined))}>Dismiss</Btn>
+                  </div>
+                </>}
+                {queue === "statements" && <>
+                  <div><span style={{ font: `600 14px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{(it.statement_text || "").slice(0, 180)}</span></div>
+                  <Meta>{[it.candidate_name, it.topic, it.source_type, it.created_at && `LOGGED ${String(it.created_at).slice(0, 10)}`].filter(Boolean).join(" · ").toUpperCase()}</Meta>
+                  {it.source_url && <a href={it.source_url} target="_blank" rel="noreferrer" style={{ font: `500 11px ${mono}`, color: "#8F8FF9" }}>Source ↗</a>}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <select value={notes[`${it.id}-truth`] || "unreviewed"} onChange={e => setNotes(prev => ({ ...prev, [`${it.id}-truth`]: e.target.value }))} style={{ background: "#08080C", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "7px 9px", font: `400 12px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }} aria-label="Truth status">
+                      {["unreviewed", "supported", "disputed", "false", "mixed", "context_needed"].map(v => <option key={v} value={v}>truth: {v}</option>)}
+                    </select>
+                    <select value={notes[`${it.id}-answer`] || "answered"} onChange={e => setNotes(prev => ({ ...prev, [`${it.id}-answer`]: e.target.value }))} style={{ background: "#08080C", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "7px 9px", font: `400 12px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }} aria-label="Answer status">
+                      {["answered", "partial", "dodged", "not_applicable", "unclear"].map(v => <option key={v} value={v}>answer: {v}</option>)}
+                    </select>
+                    <Btn tone="ok" disabled={busy === it.id} onClick={() => act(it.id, () => api.reviewStatement(it.id, { truth_status: (notes[`${it.id}-truth`] || "unreviewed") as any, answer_status: (notes[`${it.id}-answer`] || "answered") as any }))}>Record review</Btn>
                   </div>
                 </>}
                 {queue === "safety" && <SafetyCaseCard item={it} noteValue={notes[it.id] || ""} onNote={v => setNotes(prev => ({ ...prev, [it.id]: v }))} onChanged={load} busy={busy === it.id} setBusy={setBusy} />}

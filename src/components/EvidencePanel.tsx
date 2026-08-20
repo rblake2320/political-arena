@@ -46,6 +46,8 @@ export function EvidencePanel({ contentType, contentId, sideLabel }: { contentTy
   const [msg, setMsg] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [showCorrection, setShowCorrection] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [report, setReport] = useState({ category: "defamation", details: "" });
   const [form, setForm] = useState({ url: "", title: "", stance: "refutes", quote: "" });
   const [correction, setCorrection] = useState("");
 
@@ -128,6 +130,21 @@ export function EvidencePanel({ contentType, contentId, sideLabel }: { contentTy
     }
   };
 
+  const submitReport = async () => {
+    setBusy(true);
+    setMsg("");
+    try {
+      await api.reportContent({ content_type: contentType, content_id: contentId, category: report.category, details: report.details.trim() || undefined });
+      setReport({ category: "defamation", details: "" });
+      setShowReport(false);
+      setMsg("Report filed. A moderator will review it; the outcome is recorded on the audit trail.");
+    } catch (err: any) {
+      setMsg(err?.response?.data?.error || "Could not file the report.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const verified = recites.filter(r => r.status === "verified").length;
   const inputStyle: React.CSSProperties = { background: "#08080C", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "8px 10px", font: "400 12px 'Hanken Grotesk',sans-serif", color: "#F2F2F7", width: "100%" };
 
@@ -186,8 +203,11 @@ export function EvidencePanel({ contentType, contentId, sideLabel }: { contentTy
             <button onClick={() => { setShowAdd(a => !a); setShowCorrection(false); }} style={{ cursor: "pointer", background: "none", border: "none", font: `600 11px 'Hanken Grotesk',sans-serif`, color: "#8F8FF9", padding: 0 }}>
               {showAdd ? "− Cancel" : "+ Add a fact-check source"}
             </button>
-            <button onClick={() => { setShowCorrection(c => !c); setShowAdd(false); }} style={{ cursor: "pointer", background: "none", border: "none", font: `600 11px 'Hanken Grotesk',sans-serif`, color: "#EFB643", padding: 0 }}>
+            <button onClick={() => { setShowCorrection(c => !c); setShowAdd(false); setShowReport(false); }} style={{ cursor: "pointer", background: "none", border: "none", font: `600 11px 'Hanken Grotesk',sans-serif`, color: "#EFB643", padding: 0 }}>
               {showCorrection ? "− Cancel" : "⚑ Request a correction"}
+            </button>
+            <button onClick={() => { setShowReport(r => !r); setShowAdd(false); setShowCorrection(false); }} style={{ cursor: "pointer", background: "none", border: "none", font: `600 11px 'Hanken Grotesk',sans-serif`, color: "#E5636A", padding: 0 }}>
+              {showReport ? "− Cancel" : "⚠ Report"}
             </button>
           </div>
 
@@ -216,6 +236,27 @@ export function EvidencePanel({ contentType, contentId, sideLabel }: { contentTy
               <button disabled={busy || correction.trim().length < 10} onClick={submitCorrection}
                 style={{ cursor: "pointer", opacity: busy || correction.trim().length < 10 ? 0.5 : 1, font: "700 11px 'Hanken Grotesk',sans-serif", color: "#08080C", background: "#EFB643", border: "none", padding: "9px 14px", borderRadius: 8, alignSelf: "flex-start" }}>
                 File correction request
+              </button>
+            </div>
+          )}
+
+          {showReport && (
+            !user ? <div style={{ font: "400 12px 'Hanken Grotesk',sans-serif", color: "#9B9BAB" }}>Sign in to report content.</div> :
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, border: "1px solid rgba(229,99,106,.3)", borderRadius: 10, padding: 12, background: "rgba(229,99,106,.04)" }}>
+              <select value={report.category} onChange={e => setReport({ ...report, category: e.target.value })} style={inputStyle} aria-label="Report category">
+                <option value="defamation">Defamation / false statement of fact</option>
+                <option value="threat_or_harassment">Threat or harassment</option>
+                <option value="impersonation">Impersonation</option>
+                <option value="undisclosed_ai_media">AI-manipulated media without disclosure</option>
+                <option value="election_misinformation">False voting procedures / election misinformation</option>
+                <option value="copyright">Copyright infringement</option>
+                <option value="spam">Spam or coordinated manipulation</option>
+                <option value="other">Other</option>
+              </select>
+              <textarea value={report.details} onChange={e => setReport({ ...report, details: e.target.value })} rows={2} placeholder="Details (optional but helpful)" style={inputStyle} />
+              <button disabled={busy} onClick={submitReport}
+                style={{ cursor: "pointer", opacity: busy ? 0.5 : 1, font: "700 11px 'Hanken Grotesk',sans-serif", color: "#08080C", background: "#E5636A", border: "none", padding: "9px 14px", borderRadius: 8, alignSelf: "flex-start" }}>
+                File report
               </button>
             </div>
           )}
