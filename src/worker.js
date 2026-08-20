@@ -249,6 +249,12 @@ export default {
             const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
             const rewritten = new HTMLRewriter()
               .on('title', { element(el) { el.setInnerContent(title); } })
+              // strip the shell's generic tags so crawlers see only the
+              // page-specific ones (they take the first occurrence)
+              .on('meta[property="og:title"]', { element(el) { el.remove(); } })
+              .on('meta[property="og:description"]', { element(el) { el.remove(); } })
+              .on('meta[name="description"]', { element(el) { el.remove(); } })
+              .on('meta[name="twitter:card"]', { element(el) { el.remove(); } })
               .on('head', { element(el) {
                 el.append(`<meta name="description" content="${esc(description)}">` +
                   `<meta property="og:title" content="${esc(title)}">` +
