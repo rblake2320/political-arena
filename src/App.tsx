@@ -18,6 +18,7 @@ const ModerationPage = lazy(() => import("./pages/ModerationPage").then((m) => (
 const CandidateProfilePage = lazy(() => import("./pages/CandidateProfilePage").then((m) => ({ default: m.CandidateProfilePage })));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword").then((m) => ({ default: m.ForgotPassword })));
 const ResetPassword = lazy(() => import("./pages/ResetPassword").then((m) => ({ default: m.ResetPassword })));
+const VerifyEmail = lazy(() => import("./pages/VerifyEmail").then((m) => ({ default: m.VerifyEmail })));
 import { LiveWire } from "./components/LiveWire";
 import { useAuth } from "./stores/auth";
 import { useArenaStore } from "./store";
@@ -140,6 +141,11 @@ function Navigation() {
             <BarChart3 className="w-3.5 h-3.5" />
             What Matters
           </Link>
+          {user && (
+            <Link to="/my-priorities" className="text-zinc-400 hover:text-white transition-colors">
+              My Priorities
+            </Link>
+          )}
           {user && (
             <Link to="/press/register" className="text-zinc-400 hover:text-white transition-colors flex items-center gap-1">
               <Newspaper className="w-3.5 h-3.5" />
@@ -357,14 +363,16 @@ function AppContent() {
     fetchRaces();
   }, [userId]);
 
-  // Fetch all race details for candidate list (bug #1 fix: use allSettled)
+  // Build the portal candidate list from the user's staff-linked races only —
+  // fetching every race detail here was up to ~600 requests per app mount.
   useEffect(() => {
-    if (races.length > 0) {
-      Promise.allSettled(races.map(r => fetchRace(r.id))).then(() => {
-        fetchAllCandidates();
-      });
-    }
-  }, [races.length, userId]);
+    const links = (user?.staff_links || []) as any[];
+    if (links.length === 0) return;
+    const raceIds = [...new Set(links.map(l => l.race_id).filter(Boolean))];
+    Promise.allSettled(raceIds.map(rid => fetchRace(rid))).then(() => {
+      fetchAllCandidates();
+    });
+  }, [userId, races.length]);
 
   // Set default active candidate
   useEffect(() => {
@@ -405,6 +413,14 @@ function AppContent() {
       <div className="min-h-screen text-zinc-50 font-sans selection:bg-indigo-500/30" style={{ background: '#08080C' }}>
         <LiveWire />
         <Navigation />
+        {user && !user.email_verified && (
+          <div style={{ background: 'rgba(110,110,247,.12)', borderBottom: '1px solid rgba(110,110,247,.3)', padding: '8px 16px', textAlign: 'center' }}>
+            <span style={{ font: "500 12px 'Hanken Grotesk',sans-serif", color: '#C9C9F4' }}>
+              Verify your email to unlock voter actions.{' '}
+              <Link to="/verify-email" style={{ color: '#8F8FF9', textDecoration: 'underline' }}>Verify now</Link>
+            </span>
+          </div>
+        )}
         <main>
           <Suspense
             fallback={
@@ -430,6 +446,7 @@ function AppContent() {
             <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
             <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPassword />} />
             <Route path="/reset-password" element={user ? <Navigate to="/" replace /> : <ResetPassword />} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
           </Suspense>

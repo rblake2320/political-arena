@@ -16,7 +16,6 @@ function daysToElection(): number {
 interface CandSummary { name: string; party: string }
 interface OpenCallout { target_name: string; claim_text: string; response_deadline: string }
 interface CycleStats { races_live: number; open_callouts: number; response_rate: number; election_date?: string }
-interface FeedItem { time?: string; race_label?: string; kind?: string; text?: string }
 
 const partyColor = (p?: string) => {
   const k = (p || '').toUpperCase();
@@ -154,16 +153,28 @@ export function Home() {
   const [loaded, setLoaded] = useState(races.length > 0);
   const [sort, setSort] = useState<SortMode>('trending');
   const [stats, setStats] = useState<CycleStats | null>(null);
-  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [query, setQuery] = useState('');
   const days = daysToElection();
 
   useEffect(() => { fetchRaces(sort).finally(() => setLoaded(true)); }, [sort]);
 
   useEffect(() => {
-    // Endpoints Codex is building — consume when present, fall back gracefully.
+    // Live event feed is rendered by <LiveWire /> in the app shell.
     fetch('/api/stats/cycle').then(r => r.ok ? r.json() : null).then(d => setStats(d?.data ?? d ?? null)).catch(() => {});
-    fetch('/api/feed/live').then(r => r.ok ? r.json() : null).then(d => setFeed((d?.data?.events ?? d?.events ?? []) as FeedItem[])).catch(() => {});
   }, []);
+
+  const q = query.trim().toLowerCase();
+  const visibleRaces = q
+    ? races.filter((race: any) => {
+      const haystack = [
+        race.name, race.state, race.office, race.district,
+        ...(race.candidates_summary || []).map((c: any) => c.name),
+        race.open_callout?.claim_text,
+        race.open_callout?.target_name,
+      ].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(q);
+    })
+    : races;
 
   const racesLive = stats?.races_live ?? (races.filter(r => r.status === 'active').length || races.length);
   const openCallouts = stats?.open_callouts;
@@ -200,7 +211,7 @@ export function Home() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ font: `600 20px ${display}`, color: '#F2F2F7' }}>2026 race directory</span>
-            <span style={{ font: `500 10px ${mono}`, letterSpacing: '.1em', color: '#5C5C6E' }}>SHOWING {races.length} OF {raceTotal || races.length} RACES</span>
+            <span style={{ font: `500 10px ${mono}`, letterSpacing: '.1em', color: '#5C5C6E' }}>SHOWING {visibleRaces.length} OF {raceTotal || races.length} RACES</span>
           </span>
           <div style={{ display: 'flex', gap: 6 }}>
             {([['trending', 'Trending'], ['newest', 'Newest'], ['name', 'A–Z']] as [SortMode, string][]).map(([key, label]) => {
@@ -219,10 +230,16 @@ export function Home() {
             })}
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, border: '1px solid rgba(255,255,255,.1)', borderRadius: 9, padding: '8px 14px', width: 280, background: 'rgba(255,255,255,.02)' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 9, border: '1px solid rgba(255,255,255,.1)', borderRadius: 9, padding: '8px 14px', width: 280, background: 'rgba(255,255,255,.02)' }}>
           <Search size={13} color="#5C5C6E" />
-          <span style={{ font: `400 11px ${mono}`, color: '#5C5C6E', letterSpacing: '.04em' }}>Search races, candidates, claims…</span>
-        </div>
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search races, candidates, claims…"
+            aria-label="Search races"
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', font: `400 11px ${mono}`, color: '#F2F2F7', letterSpacing: '.04em' }}
+          />
+        </label>
       </div>
 
       {/* race grid */}
@@ -231,14 +248,14 @@ export function Home() {
           <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}>
             <div style={{ width: 24, height: 24, border: '2px solid rgba(110,110,247,.3)', borderTopColor: '#6E6EF7', borderRadius: '50%', animation: 'arena-marquee 0s' }} className="arena-pulse" />
           </div>
-        ) : races.length === 0 ? (
+        ) : visibleRaces.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', border: '1px solid rgba(255,255,255,.09)', borderRadius: 16, background: '#0C0C13' }}>
-            <div style={{ color: '#9B9BAB', marginBottom: 6 }}>No races loaded yet</div>
-            <div style={{ font: `400 12px ${mono}`, color: '#5C5C6E' }}>Load the race directory or adjust filters.</div>
+            <div style={{ color: '#9B9BAB', marginBottom: 6 }}>{q ? 'No races match your search' : 'No races loaded yet'}</div>
+            <div style={{ font: `400 12px ${mono}`, color: '#5C5C6E' }}>{q ? 'Try a state, candidate name, or office.' : 'Load the race directory or adjust filters.'}</div>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 18 }}>
-            {races.map(race => <RaceCard key={race.id} race={race} days={days} />)}
+            {visibleRaces.map(race => <RaceCard key={race.id} race={race} days={days} />)}
           </div>
         )}
       </div>

@@ -397,9 +397,61 @@ export async function getPendingPress() {
   return unwrap<any>(await api.get('/press/pending'));
 }
 export async function reviewPress(id: string, status: 'approved' | 'rejected', review_note?: string) {
-  const result = unwrap<any>(await api.put(`/press/${id}/review`, { status, review_note }));
+  // Backend contract is { action: 'approve' | 'reject' }
+  const action = status === 'approved' ? 'approve' : 'reject';
+  const result = unwrap<any>(await api.put(`/press/${id}/review`, { action, review_note }));
   void trackEvent({ event_type: 'press_reviewed', metadata: { press_id: id, status } });
   return result;
+}
+
+// ---- Ad lifecycle (submit → moderation review → activate) ----
+export async function submitAd(id: string) {
+  return unwrap<any>(await api.post(`/ads/${id}/submit`, {}));
+}
+export async function reviewAd(id: string, action: 'approve' | 'reject', rejection_reason?: string) {
+  return unwrap<any>(await api.post(`/ads/${id}/review`, { action, rejection_reason }));
+}
+export async function activateAd(id: string) {
+  return unwrap<any>(await api.post(`/ads/${id}/activate`, {}));
+}
+export async function getMyAds(candidateId: string) {
+  return unwrap<any>(await api.get(`/ads/candidates/${candidateId}`));
+}
+export async function getAdModerationQueue() {
+  return unwrap<any>(await api.get('/ads/moderation-queue'));
+}
+export async function reviewRebuttal(id: string, action: 'approve' | 'reject', rejection_reason?: string) {
+  return unwrap<any>(await api.put(`/ads/rebuttals/${id}/review`, { action, rejection_reason }));
+}
+export async function getRebuttalEligibility(adId: string, candidateId: string) {
+  return unwrap<any>(await api.get(`/ads/${adId}/rebuttal-eligibility`, { params: { candidate_id: candidateId } }));
+}
+
+// ---- Email verification ----
+export async function verifyEmail(token: string) {
+  return unwrap<any>(await api.post('/auth/verify-email', { token }));
+}
+export async function resendVerification() {
+  return unwrap<any>(await api.post('/auth/resend-verification', {}));
+}
+
+// ---- Platform config (rules panel) ----
+export async function getPlatformConfig() {
+  return unwrap<any>(await api.get('/stats/config'));
+}
+
+// ---- Corrections / appeals ----
+export async function getPendingCorrections(status: string = 'open') {
+  return unwrap<any>(await api.get('/corrections/pending', { params: { status } }));
+}
+export async function reviewCorrection(id: string, status: 'under_review' | 'upheld' | 'revised' | 'rejected', resolution_note: string, public_note?: string) {
+  return unwrap<any>(await api.put(`/corrections/${id}/review`, { status, resolution_note, public_note }));
+}
+export async function getPublicCorrections(content_type: string, content_id: string) {
+  return unwrap<any>(await api.get('/corrections/public', { params: { content_type, content_id } }));
+}
+export async function submitCorrection(payload: { content_type: string; content_id: string; requested_change: string; reason?: string; candidate_id?: string; evidence_url?: string }) {
+  return unwrap<any>(await api.post('/corrections', payload));
 }
 
 export async function getChallengeReceipt(id: string) {
@@ -493,6 +545,14 @@ export async function getCrossPartyOverlap(params?: { state?: string; race_id?: 
 // ---- Notifications ----
 export async function subscribe(data: { subscription_type: 'race' | 'candidate' | 'challenge'; target_id: string; channel?: string; notify_on?: string[] }) {
   return unwrap<any>(await api.post('/notifications/subscribe', data));
+}
+
+export async function unsubscribe(subscriptionId: string) {
+  return unwrap<any>(await api.delete(`/notifications/subscribe/${subscriptionId}`));
+}
+
+export async function getMySubscriptions() {
+  return unwrap<any>(await api.get('/notifications/my-subscriptions'));
 }
 
 export async function getNotifications(page?: number) {

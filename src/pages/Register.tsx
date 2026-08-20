@@ -32,8 +32,13 @@ export function Register() {
       setError('Passwords do not match');
       return;
     }
+    // Mirror the backend password policy so the failure is explained up front
     if (form.password.length < 8) {
       setError('Password must be at least 8 characters');
+      return;
+    }
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{}|;:,.<>?])/.test(form.password)) {
+      setError('Password must include uppercase, lowercase, number, and special character');
       return;
     }
 
@@ -46,7 +51,7 @@ export function Register() {
         party_affiliation: form.party_affiliation || undefined,
         jurisdiction_state: form.jurisdiction_state || undefined,
       });
-      navigate('/');
+      navigate('/verify-email');
     } catch (err: any) {
       setError(err.message);
     }

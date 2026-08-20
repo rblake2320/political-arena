@@ -16,7 +16,15 @@ export function CandidateDashboard() {
   const [candidateStatements, setCandidateStatements] = useState<any[]>([]);
   const [statementsLoading, setStatementsLoading] = useState(false);
   const [statementsError, setStatementsError] = useState("");
+  const [myAds, setMyAds] = useState<any[] | null>(null);
+  const [adActionBusy, setAdActionBusy] = useState<string | null>(null);
+  const [adActionError, setAdActionError] = useState("");
   const { user } = useAuth();
+
+  const refreshMyAds = React.useCallback(() => {
+    if (!id) return;
+    api.getMyAds(id).then(data => setMyAds(data.ads || [])).catch(() => setMyAds(null));
+  }, [id]);
 
   const { raceDetails, fetchRace, allCandidates, loading } = useArenaStore();
 
@@ -33,8 +41,9 @@ export function CandidateDashboard() {
   useEffect(() => {
     if (id && user) {
       api.getCreditBalance(id).then(data => setCreditBalance(data.credit_balance)).catch(() => {});
+      refreshMyAds();
     }
-  }, [id, user]);
+  }, [id, user, refreshMyAds]);
 
   useEffect(() => {
     if (!id) return;
@@ -79,7 +88,11 @@ export function CandidateDashboard() {
   }
   if (!raceData) return <div className="p-12 text-center text-zinc-500">Race data not found.</div>;
 
-  const candidateAds = raceData.ads.filter(ad => ad.candidate_id === candidate.id && ad.source_type !== 'external');
+  // Staff view must include drafts/submitted/rejected — the public race payload
+  // only carries approved/active ads, which hid every unpublished ad here.
+  const candidateAds = myAds !== null
+    ? myAds.filter(ad => ad.source_type !== 'external')
+    : raceData.ads.filter(ad => ad.candidate_id === candidate.id && ad.source_type !== 'external');
   const candidateChallenges = raceData.challenges.filter(
     c => c.challenger_candidate_id === candidate.id || c.target_candidate_id === candidate.id,
   );
@@ -222,11 +235,26 @@ export function CandidateDashboard() {
               {candidateAds.length === 0 ? (
                 <EmptyState title="No Ad Flights" description="You haven't created any ad flights yet." />
               ) : (
-                candidateAds.map(ad => (
+                candidateAds.map(ad => {
+                  const chip = ad.status === 'active' || ad.status === 'approved'
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                    : ad.status === 'rejected'
+                      ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                      : ad.status === 'submitted' || ad.status === 'in_review'
+                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                        : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20';
+                  const adAct = async (fn: () => Promise<any>) => {
+                    setAdActionBusy(ad.id);
+                    setAdActionError('');
+                    try { await fn(); refreshMyAds(); }
+                    catch (err: any) { setAdActionError(err.response?.data?.error || err.message || 'Action failed'); }
+                    finally { setAdActionBusy(null); }
+                  };
+                  return (
                   <div key={ad.id} className="p-4 md:p-6 rounded-2xl border border-zinc-800 bg-zinc-900/50">
                     <div className="flex items-center justify-between mb-3">
                       <div className="text-sm font-medium text-white">{ad.title || 'Ad Flight'}</div>
-                      <span className="px-2 py-1 rounded text-[10px] font-medium uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      <span className={`px-2 py-1 rounded text-[10px] font-medium uppercase tracking-wider border ${chip}`}>
                         {ad.status}
                       </span>
                     </div>
@@ -242,8 +270,36 @@ export function CandidateDashboard() {
                     <div className="text-[10px] text-zinc-500 uppercase tracking-wider border border-zinc-800 p-2 rounded bg-zinc-950/50">
                       {ad.disclaimer_text}
                     </div>
+                    {ad.status === 'rejected' && ad.rejection_reason && (
+                      <div className="mt-3 text-xs text-red-400">Rejected: {ad.rejection_reason}</div>
+                    )}
+                    {(ad.status === 'draft' || ad.status === 'rejected' || ad.status === 'approved' || ad.status === 'submitted') && (
+                      <div className="mt-3 flex items-center gap-2">
+                        {(ad.status === 'draft' || ad.status === 'rejected') && (
+                          <button
+                            onClick={() => adAct(() => api.submitAd(ad.id))}
+                            disabled={adActionBusy === ad.id}
+                            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-xs font-medium text-white transition-colors"
+                          >Submit for review</button>
+                        )}
+                        {ad.status === 'approved' && (
+                          <button
+                            onClick={() => adAct(() => api.activateAd(ad.id))}
+                            disabled={adActionBusy === ad.id}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-medium text-white transition-colors"
+                          >Activate now</button>
+                        )}
+                        {ad.status === 'submitted' && (
+                          <span className="text-xs text-amber-400">Awaiting moderator review</span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                ))
+                  );
+                })
+              )}
+              {adActionError && (
+                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">{adActionError}</div>
               )}
             </div>
           )}
@@ -385,7 +441,7 @@ export function CandidateDashboard() {
         <CreateAdModal
           onClose={(refresh) => {
             setIsCreateAdModalOpen(false);
-            if (refresh) refreshRace();
+            if (refresh) { refreshRace(); refreshMyAds(); }
           }}
           candidateId={candidate.id}
           raceId={candidate.race_id}
@@ -506,9 +562,14 @@ function CreateAdModal({ onClose, candidateId, raceId }: { onClose: (refresh?: b
     setSubmitting(true);
     setError('');
     try {
+      const mediaUrl = formData.media_url || '';
+      const media_type = !mediaUrl ? 'text'
+        : /\.(jpg|jpeg|png|gif|webp|avif|heic|heif)(\?|#|$)/i.test(mediaUrl) ? 'image'
+          : 'video';
       await api.createAd({
         ...formData,
         media_url: formData.media_url || undefined,
+        media_type,
         candidate_id: candidateId,
         race_id: raceId,
       });
