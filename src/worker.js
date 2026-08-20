@@ -8,6 +8,7 @@
 
 import { Router } from 'itty-router';
 import { initDatabase, seedIssueCategories, seedPressFeedItems, seedOutsideAdExamples, seedDemoData } from './db.js';
+import { ingestPressFeeds } from './press-ingest.js';
 import { corsHeaders, json } from './middleware.js';
 import { r2MediaResponse } from './media.js';
 
@@ -316,6 +317,12 @@ export default {
       await env.ARENA_DB.prepare(
         `DELETE FROM sessions WHERE is_active = 0 AND expires_at < datetime('now', '-30 days')`
       ).run();
+
+      // 10. Refresh the public press feed from configured RSS sources
+      const pressResult = await ingestPressFeeds(env);
+      if (pressResult.sources > 0) {
+        console.log(`Press feed: ${pressResult.ingested} items across ${pressResult.sources} sources`);
+      }
 
     } catch (err) {
       console.error('Cron error:', err);
