@@ -130,10 +130,15 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3000',
 ];
 
-export function corsHeaders(request) {
+export function corsHeaders(request, env) {
   const origin = request?.headers?.get('Origin');
+  // Extra origins (e.g. a custom domain) come from CORS_ALLOWED_ORIGINS,
+  // comma-separated, without redeploying code.
+  const extraOrigins = (env?.CORS_ALLOWED_ORIGINS || '')
+    .split(',').map(o => o.trim()).filter(Boolean);
+  const allowlist = extraOrigins.length ? [...ALLOWED_ORIGINS, ...extraOrigins] : ALLOWED_ORIGINS;
   // Only reflect origin if it's on the allowlist
-  const allowedOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  const allowedOrigin = origin && allowlist.includes(origin) ? origin : allowlist[0];
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
@@ -143,9 +148,9 @@ export function corsHeaders(request) {
   };
 }
 
-export function handleCORS(request) {
+export function handleCORS(request, env) {
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders(request) });
+    return new Response(null, { status: 204, headers: corsHeaders(request, env) });
   }
   return null;
 }

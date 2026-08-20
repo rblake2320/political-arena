@@ -105,9 +105,9 @@ function withSecurityHeaders(response, { isHtml = false } = {}) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-function withApiHeaders(response, request) {
+function withApiHeaders(response, request, env) {
   const headers = new Headers(response.headers);
-  Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+  Object.entries(corsHeaders(request, env)).forEach(([k, v]) => headers.set(k, v));
   Object.entries(SECURITY_HEADERS).forEach(([k, v]) => headers.set(k, v));
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
@@ -146,7 +146,7 @@ export default {
 
     // CORS preflight
     if (request.method === 'OPTIONS') {
-      return withApiHeaders(new Response(null, { status: 204 }), request);
+      return withApiHeaders(new Response(null, { status: 204 }), request, env);
     }
 
     // Initialize database once per isolate
@@ -164,32 +164,32 @@ export default {
         database: bootstrapError ? 'error' : 'ok',
         version: '1.0.0',
         timestamp: new Date().toISOString(),
-      }, bootstrapError ? 503 : 200), request);
+      }, bootstrapError ? 503 : 200), request, env);
     }
 
     // API routes
     if (url.pathname.startsWith('/api/')) {
       if (bootstrapError) {
-        return withApiHeaders(json({ success: false, error: 'Service unavailable' }, 503), request);
+        return withApiHeaders(json({ success: false, error: 'Service unavailable' }, 503), request, env);
       }
 
       try {
         const response = await api.fetch(request, env, ctx);
-        return withApiHeaders(response, request);
+        return withApiHeaders(response, request, env);
       } catch (err) {
         console.error('API error:', err);
-        return withApiHeaders(json({ success: false, error: 'Internal server error' }, 500), request);
+        return withApiHeaders(json({ success: false, error: 'Internal server error' }, 500), request, env);
       }
     }
 
     // Serve media files from R2
     if (url.pathname.startsWith('/media/')) {
       if (!env.ARENA_MEDIA) {
-        return json({ success: false, error: 'Media storage not available' }, 503);
+        return withApiHeaders(json({ success: false, error: 'Media storage not available' }, 503), request, env);
       }
       const key = url.pathname.slice(7); // strip leading "/media/"
       if (!key || !key.startsWith('uploads/')) {
-        return json({ success: false, error: 'Invalid media path' }, 403);
+        return withApiHeaders(json({ success: false, error: 'Invalid media path' }, 403), request, env);
       }
       const response = await r2MediaResponse(env.ARENA_MEDIA, key, request);
       if (!response) {
@@ -199,7 +199,7 @@ export default {
       headers.set('Content-Security-Policy', "default-src 'none'");
       Object.entries(SECURITY_HEADERS).forEach(([k, v]) => headers.set(k, v));
       // Add CORS headers (same allowlist as API)
-      Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+      Object.entries(corsHeaders(request, env)).forEach(([k, v]) => headers.set(k, v));
       return new Response(response.body, { status: response.status, headers });
     }
 

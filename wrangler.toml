@@ -27,9 +27,7 @@ not_found_handling = "single-page-application"
 # Configurable platform parameters
 [vars]
 ENVIRONMENT = "production"
-CHALLENGE_SLA_HOURS = "72"
 REBUTTAL_WINDOW_HOURS = "48"
-REBUTTAL_RESERVATION_HOURS = "12"
 MAX_REBUTTALS_PER_AD = "3"
 CHALLENGE_COOLDOWN_HOURS = "24"
 IMPRESSION_LOG_RETENTION_DAYS = "30"

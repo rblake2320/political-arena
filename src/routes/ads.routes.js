@@ -400,12 +400,12 @@ router.get('/:adId/rebuttal-eligibility', async (request, env) => {
   const rebuttalCount = await env.ARENA_DB.prepare(
     `SELECT COUNT(*) as count FROM rebuttal_ads WHERE parent_ad_id = ?`
   ).bind(adId).first();
-  if (rebuttalCount.count >= (ad.max_rebuttals || 3)) issues.push('Maximum rebuttals reached for this ad');
+  if (rebuttalCount.count >= (ad.max_rebuttals || parseInt(env.MAX_REBUTTALS_PER_AD || '3'))) issues.push('Maximum rebuttals reached for this ad');
 
   return successResponse({
     eligible: issues.length === 0,
     issues,
-    slots_remaining: Math.max(0, (ad.max_rebuttals || 3) - rebuttalCount.count),
+    slots_remaining: Math.max(0, (ad.max_rebuttals || parseInt(env.MAX_REBUTTALS_PER_AD || '3')) - rebuttalCount.count),
     window_expires: ad.rebuttal_window_expires,
   });
 });
@@ -448,7 +448,7 @@ router.post('/rebuttals', async (request, env, ctx) => {
   const rebuttalCount = await env.ARENA_DB.prepare(
     `SELECT COUNT(*) as count FROM rebuttal_ads WHERE parent_ad_id = ?`
   ).bind(data.parent_ad_id).first();
-  if (rebuttalCount.count >= (ad.max_rebuttals || 3)) return errorResponse('Max rebuttals reached');
+  if (rebuttalCount.count >= (ad.max_rebuttals || parseInt(env.MAX_REBUTTALS_PER_AD || '3'))) return errorResponse('Max rebuttals reached');
 
   // Rebuttals carry their full text + disclaimer at creation and have no edit
   // endpoint, so they submit straight into the moderation queue — a 'draft'

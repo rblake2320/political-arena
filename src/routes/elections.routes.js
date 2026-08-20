@@ -134,7 +134,9 @@ router.get('/voter-resources', request => {
     state,
     resources: RESOURCES,
     source_note: 'Arena links voters to official or state-election-official selectors; it does not collect voter registration data.',
-    updated_at: '2026-07-06',
+    // Date the RESOURCES list above was last editorially reviewed — bump when
+    // links change; never report "now" as freshness.
+    resources_reviewed_at: '2026-08-20',
   });
 });
 

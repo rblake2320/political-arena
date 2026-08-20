@@ -456,4 +456,27 @@ router.post('/:id/respond', async (request, env) => {
   return successResponse({ submitted: inserts.length });
 });
 
+// PUT /api/surveys/:id/status — Admin moves a survey through its lifecycle.
+// Without this, every survey stays 'draft' forever: invisible and unanswerable.
+router.put('/:id/status', async (request, env) => {
+  const authError = await requireRole('admin', 'super_admin')(request, env);
+  if (authError) return authError;
+
+  const { id } = request.params;
+  const body = await parseBody(request);
+  const status = body?.status;
+  if (!['draft', 'active', 'closed'].includes(status)) {
+    return errorResponse('status must be draft, active, or closed');
+  }
+
+  const survey = await env.ARENA_DB.prepare(`SELECT id, status FROM surveys WHERE id = ?`).bind(id).first();
+  if (!survey) return errorResponse('Survey not found', 404);
+
+  await env.ARENA_DB.prepare(
+    `UPDATE surveys SET status = ? WHERE id = ?`
+  ).bind(status, id).run();
+
+  return successResponse({ id, status });
+});
+
 export default router;

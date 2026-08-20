@@ -32,6 +32,20 @@ function sourceBreakdown(rows) {
   return Object.fromEntries((rows || []).map(row => [row.source_status || 'unknown', Number(row.count || 0)]));
 }
 
+// GET /api/stats/config — public platform parameters, so the frontend rules
+// panel reflects the deployed configuration instead of hardcoded literals.
+router.get('/stats/config', async (request, env) => {
+  return successResponse({
+    rebuttal_window_hours: parseInt(env.REBUTTAL_WINDOW_HOURS || '48'),
+    max_rebuttals_per_ad: parseInt(env.MAX_REBUTTALS_PER_AD || '3'),
+    challenge_cooldown_hours: parseInt(env.CHALLENGE_COOLDOWN_HOURS || '24'),
+    max_challenges_per_day: parseInt(env.MAX_CHALLENGES_PER_DAY || '3'),
+    max_challenges_per_week: parseInt(env.MAX_CHALLENGES_PER_WEEK || '10'),
+    default_deadline_business_days: 3,
+    max_deadline_business_days: 10,
+  });
+});
+
 // GET /api/stats/readiness - admin launch-readiness checklist
 router.get('/stats/readiness', async (request, env) => {
   const authError = await requireRole('admin', 'super_admin')(request, env);
