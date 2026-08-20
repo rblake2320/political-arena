@@ -384,6 +384,10 @@ export type ReciteContentType = 'ad' | 'rebuttal' | 'challenge' | 'challenge_res
 export type ReciteSourceType = 'official_record' | 'public_document' | 'court_record' | 'research' | 'news' | 'campaign_material' | 'other';
 export type ReciteStance = 'supports' | 'refutes' | 'context';
 
+export async function removeReaction(id: string) {
+  return unwrap<any>(await api.delete(`/reactions/${id}`));
+}
+
 export async function getRecites(contentType: ReciteContentType, contentId: string) {
   return unwrap<any>(await api.get('/recites', { params: { content_type: contentType, content_id: contentId } }));
 }
