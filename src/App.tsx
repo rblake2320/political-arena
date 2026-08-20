@@ -1,20 +1,23 @@
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation, Navigate } from "react-router";
-import React, { useEffect, useState, createContext, useContext, useMemo, useRef } from "react";
+import React, { useEffect, useState, createContext, useContext, useMemo, useRef, lazy, Suspense } from "react";
 import { Home } from "./pages/Home";
-import { Race } from "./pages/Race";
-import { CandidateDashboard } from "./pages/CandidateDashboard";
-import { WhatMattersPage } from "./pages/WhatMattersPage";
-import { MyPrioritiesPage } from "./pages/MyPrioritiesPage";
-import { NotificationsPage } from "./pages/NotificationsPage";
-import { PressRegistrationPage } from "./pages/PressRegistrationPage";
-import { Help } from "./pages/Help";
-import { ChallengeReceiptPage } from "./pages/ChallengeReceiptPage";
-import { ModerationPage } from "./pages/ModerationPage";
-import { CandidateProfilePage } from "./pages/CandidateProfilePage";
 import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
-import { ForgotPassword } from "./pages/ForgotPassword";
-import { ResetPassword } from "./pages/ResetPassword";
+
+// Route-level code splitting: heavy pages load on demand so the entry chunk
+// stays small for the voter landing path (Home/Login/Register stay eager).
+const Race = lazy(() => import("./pages/Race").then((m) => ({ default: m.Race })));
+const CandidateDashboard = lazy(() => import("./pages/CandidateDashboard").then((m) => ({ default: m.CandidateDashboard })));
+const WhatMattersPage = lazy(() => import("./pages/WhatMattersPage").then((m) => ({ default: m.WhatMattersPage })));
+const MyPrioritiesPage = lazy(() => import("./pages/MyPrioritiesPage").then((m) => ({ default: m.MyPrioritiesPage })));
+const NotificationsPage = lazy(() => import("./pages/NotificationsPage").then((m) => ({ default: m.NotificationsPage })));
+const PressRegistrationPage = lazy(() => import("./pages/PressRegistrationPage").then((m) => ({ default: m.PressRegistrationPage })));
+const Help = lazy(() => import("./pages/Help").then((m) => ({ default: m.Help })));
+const ChallengeReceiptPage = lazy(() => import("./pages/ChallengeReceiptPage").then((m) => ({ default: m.ChallengeReceiptPage })));
+const ModerationPage = lazy(() => import("./pages/ModerationPage").then((m) => ({ default: m.ModerationPage })));
+const CandidateProfilePage = lazy(() => import("./pages/CandidateProfilePage").then((m) => ({ default: m.CandidateProfilePage })));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword").then((m) => ({ default: m.ForgotPassword })));
+const ResetPassword = lazy(() => import("./pages/ResetPassword").then((m) => ({ default: m.ResetPassword })));
 import { LiveWire } from "./components/LiveWire";
 import { useAuth } from "./stores/auth";
 import { useArenaStore } from "./store";
