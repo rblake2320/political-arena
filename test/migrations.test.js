@@ -371,6 +371,8 @@ describe('runtime migrations', () => {
     expect(db.challengeColumns.has('notice_status')).toBe(true);
     expect(db.challengeColumns.has('notice_served_at')).toBe(true);
     expect(db.challengeColumns.has('notice_channels')).toBe(true);
+    expect(db.challengeColumns.has('media_start_seconds')).toBe(true);
+    expect(db.challengeColumns.has('media_end_seconds')).toBe(true);
     expect(db.reciteColumns.has('archive_url')).toBe(true);
     expect(db.reciteColumns.has('review_note')).toBe(true);
     expect(db.issueCategoryColumns.has('parent_category_id')).toBe(true);
@@ -414,6 +416,8 @@ describe('runtime migrations', () => {
       "ALTER TABLE challenges ADD COLUMN notice_status TEXT NOT NULL DEFAULT 'unserved' CHECK(notice_status IN ('unserved','in_app','email','both'))",
       'ALTER TABLE challenges ADD COLUMN notice_served_at TEXT',
       'ALTER TABLE challenges ADD COLUMN notice_channels TEXT',
+      'ALTER TABLE challenges ADD COLUMN media_start_seconds REAL',
+      'ALTER TABLE challenges ADD COLUMN media_end_seconds REAL',
       'ALTER TABLE recites ADD COLUMN source_published_at TEXT',
       'ALTER TABLE recites ADD COLUMN accessed_at TEXT',
       'ALTER TABLE recites ADD COLUMN archive_url TEXT',

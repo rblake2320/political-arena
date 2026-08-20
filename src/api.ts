@@ -226,7 +226,8 @@ export async function createChallenge(data: {
   race_id: string; challenger_candidate_id: string; target_candidate_id: string;
   challenge_text: string; challenge_type?: string;
   claim_text?: string; dispute_summary?: string; requested_response?: string;
-  media_url?: string; deadline_business_days?: number;
+  media_url?: string; media_start_seconds?: number; media_end_seconds?: number;
+  deadline_business_days?: number;
   initial_recites?: {
     url: string;
     title: string;
@@ -291,7 +292,48 @@ export async function withdrawChallenge(challengeId: string) {
 }
 
 // ---- Media Uploads ----
+// Files above the single-request ceiling upload in chunks (no size limit).
+const DIRECT_UPLOAD_MAX = 90 * 1024 * 1024;
+const CHUNK_BYTES = 50 * 1024 * 1024;
+
+async function uploadMediaMultipart(file: File, candidateId?: string) {
+  const created = unwrap<{ key: string; upload_id: string; file_id: string; max_part_bytes: number; public_url: string; content_type: string; media_kind: string }>(
+    await api.post('/uploads/multipart/create', { filename: file.name, content_type: file.type, candidate_id: candidateId })
+  );
+  const parts: { part_number: number; etag: string }[] = [];
+  let partNumber = 1;
+  try {
+    for (let offset = 0; offset < file.size; offset += CHUNK_BYTES) {
+      const chunk = file.slice(offset, Math.min(offset + CHUNK_BYTES, file.size));
+      const res = unwrap<{ part_number: number; etag: string }>(
+        await api.put(`/uploads/multipart/part?key=${encodeURIComponent(created.key)}&upload_id=${encodeURIComponent(created.upload_id)}&part_number=${partNumber}`, chunk, {
+          headers: { 'Content-Type': 'application/octet-stream' },
+        })
+      );
+      parts.push(res);
+      partNumber++;
+    }
+    const done = unwrap<{ key: string; public_url: string; size: number }>(
+      await api.post('/uploads/multipart/complete', { key: created.key, upload_id: created.upload_id, parts, original_name: file.name })
+    );
+    void trackEvent({
+      event_type: 'media_uploaded',
+      candidate_id: candidateId,
+      content_type: 'media',
+      content_id: created.file_id,
+      metadata: { media_kind: created.media_kind, content_type: created.content_type, size: done.size, multipart: true },
+    });
+    return { key: done.key, url: done.public_url, type: created.content_type, media_kind: created.media_kind, size: done.size };
+  } catch (err) {
+    void api.post('/uploads/multipart/abort', { key: created.key, upload_id: created.upload_id }).catch(() => {});
+    throw err;
+  }
+}
+
 export async function uploadMedia(file: File, candidateId?: string) {
+  if (file.size > DIRECT_UPLOAD_MAX) {
+    return uploadMediaMultipart(file, candidateId);
+  }
   // First get a presigned key
   const presign = unwrap<{ key: string; upload_url: string; public_url: string; file_id: string; content_type: string; media_kind: string }>(
     await api.post('/uploads/presign', { filename: file.name, content_type: file.type, candidate_id: candidateId })

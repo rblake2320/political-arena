@@ -303,6 +303,97 @@ describe('uploaded media paths', () => {
   });
 });
 
+describe('clip highlights on callouts', () => {
+  it('stores a media clip range and returns it on the receipt; rejects invalid ranges', async () => {
+    const owner = await registerUser('clipowner');
+    await env.ARENA_DB.batch([
+      env.ARENA_DB.prepare(`INSERT OR IGNORE INTO candidate_staff_links (id, user_id, candidate_id, role, is_active) VALUES (?, ?, 'cand-1', 'primary', 1)`).bind(`pw-clip-${owner.id}`, owner.id),
+      env.ARENA_DB.prepare(`UPDATE candidates SET verification_status = 'verified', credit_balance = credit_balance + 5 WHERE id = 'cand-1'`),
+    ]);
+
+    const bad = await post('/api/challenges', {
+      race_id: 'race-1', challenger_candidate_id: 'cand-1', target_candidate_id: 'cand-2',
+      challenge_type: 'open', challenge_text: 'Clip range must be validated end after start.',
+      media_url: '/media/uploads/cand-1/spot.mp4', media_start_seconds: 20, media_end_seconds: 5,
+    }, owner.token);
+    expect(bad.status).toBe(400);
+
+    const noMedia = await post('/api/challenges', {
+      race_id: 'race-1', challenger_candidate_id: 'cand-1', target_candidate_id: 'cand-2',
+      challenge_type: 'open', challenge_text: 'Clip range requires a media url to clip.',
+      media_start_seconds: 5,
+    }, owner.token);
+    expect(noMedia.status).toBe(400);
+
+    const ok = await post('/api/challenges', {
+      race_id: 'race-1', challenger_candidate_id: 'cand-1', target_candidate_id: 'cand-2',
+      challenge_type: 'open', challenge_text: 'Highlighting seconds 12 through 19 of the spot.',
+      media_url: '/media/uploads/cand-1/spot.mp4', media_start_seconds: 12, media_end_seconds: 19,
+    }, owner.token);
+    expect(ok.status).toBe(200);
+
+    const receipt = await get(`/api/challenges/${ok.body.data.id}/receipt`);
+    expect(receipt.status).toBe(200);
+    expect(receipt.body.data.challenge.media_start_seconds).toBe(12);
+    expect(receipt.body.data.challenge.media_end_seconds).toBe(19);
+  });
+});
+
+describe('multipart uploads (no size limit path)', () => {
+  it('create -> parts -> complete stores a byte-exact object and registers it', async () => {
+    const user = await registerUser('multipart');
+    const created = await post('/api/uploads/multipart/create', { filename: 'big-video.mp4', content_type: 'video/mp4' }, user.token);
+    expect(created.status).toBe(200);
+    const { key, upload_id } = created.body.data;
+    expect(key.startsWith(`uploads/${user.id}/`)).toBe(true);
+
+    // Two parts — R2 requires every part except the last to be >=5MiB
+    const partA = new Uint8Array(5 * 1024 * 1024).fill(7);
+    const partB = new Uint8Array(1024 * 32).fill(9);
+    const parts = [];
+    for (const [i, buf] of [partA, partB].entries()) {
+      const res = await SELF.fetch(`${BASE}/api/uploads/multipart/part?key=${encodeURIComponent(key)}&upload_id=${encodeURIComponent(upload_id)}&part_number=${i + 1}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${user.token}`, 'Content-Type': 'application/octet-stream' },
+        body: buf,
+      });
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      parts.push(body.data);
+    }
+
+    const done = await post('/api/uploads/multipart/complete', { key, upload_id, parts, original_name: 'big-video.mp4' }, user.token);
+    expect(done.status).toBe(200);
+    expect(done.body.data.size).toBe(partA.length + partB.length);
+
+    const obj = await env.ARENA_MEDIA.get(key);
+    expect(obj).toBeTruthy();
+    const stored = new Uint8Array(await obj.arrayBuffer());
+    expect(stored.length).toBe(partA.length + partB.length);
+    expect(stored[0]).toBe(7);
+    expect(stored[stored.length - 1]).toBe(9);
+
+    const row = await env.ARENA_DB.prepare(`SELECT * FROM media_uploads WHERE key = ?`).bind(key).first();
+    expect(row?.uploaded_by).toBe(user.id);
+    expect(row?.size_bytes).toBe(partA.length + partB.length);
+  });
+
+  it('rejects parts against keys the user does not own', async () => {
+    const owner = await registerUser('mpowner');
+    const attacker = await registerUser('mpattacker');
+    const created = await post('/api/uploads/multipart/create', { filename: 'mine.mp4', content_type: 'video/mp4' }, owner.token);
+    const { key, upload_id } = created.body.data;
+    const res = await SELF.fetch(`${BASE}/api/uploads/multipart/part?key=${encodeURIComponent(key)}&upload_id=${encodeURIComponent(upload_id)}&part_number=1`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${attacker.token}`, 'Content-Type': 'application/octet-stream' },
+      body: new Uint8Array(64),
+    });
+    expect(res.status).toBe(403);
+    const complete = await post('/api/uploads/multipart/complete', { key, upload_id, parts: [{ part_number: 1, etag: 'x' }] }, attacker.token);
+    expect(complete.status).toBe(403);
+  });
+});
+
 describe('rate limits', () => {
   it('forgot-password is limited per email', async () => {
     const user = await registerUser('forgotlimit');

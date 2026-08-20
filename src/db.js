@@ -102,6 +102,10 @@ export async function runRuntimeMigrations(db) {
   if (!challengeColumns.has('notice_channels')) {
     challengeColumnMigrations.push(db.prepare(`ALTER TABLE challenges ADD COLUMN notice_channels TEXT`));
   }
+  if (!challengeColumns.has('media_start_seconds')) {
+    challengeColumnMigrations.push(db.prepare(`ALTER TABLE challenges ADD COLUMN media_start_seconds REAL`));
+    challengeColumnMigrations.push(db.prepare(`ALTER TABLE challenges ADD COLUMN media_end_seconds REAL`));
+  }
   if (challengeColumnMigrations.length > 0) await db.batch(challengeColumnMigrations);
 
   const missingReceiptSlug = await db.prepare(
@@ -674,6 +678,8 @@ export async function initDatabase(db) {
       dispute_summary TEXT,
       requested_response TEXT,
       media_url TEXT,
+      media_start_seconds REAL,
+      media_end_seconds REAL,
       challenge_type TEXT NOT NULL DEFAULT 'open' CHECK(challenge_type IN ('open','debate_request','fact_check','policy_question')),
       status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','responded','expired','refused','withdrawn')),
       deadline_business_days INTEGER NOT NULL DEFAULT 3,
