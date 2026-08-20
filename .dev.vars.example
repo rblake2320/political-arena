@@ -14,6 +14,19 @@ PASSWORD_RESET_BASE_URL=http://127.0.0.1:8787
 # Non-production can expose a reset token/link in the API response for local QA.
 PASSWORD_RESET_EXPOSE_DEV_TOKEN=true
 
+# --- Transactional email (launch gate — see docs/launch-readiness.md) ---
+# Production requires ONE provider. Provider is inferred from which secret is
+# set; EMAIL_PROVIDER only needs setting to override the inference.
+# RESEND_API_KEY=re_your_key_here
+# POSTMARK_SERVER_TOKEN=your-postmark-server-token
+# EMAIL_FROM=Arena <noreply@your-verified-domain.example>
+# EMAIL_PROVIDER=resend            # optional: resend | postmark | webhook
+# EMAIL_REPLY_TO=support@example.com
+# POSTMARK_MESSAGE_STREAM=outbound
+
+# Platform tunables (CHALLENGE_SLA_HOURS etc.) load from wrangler.toml [vars]
+# automatically under `wrangler dev`; override them here only when needed.
+
 # Optional production delivery hook. The worker POSTs a JSON payload with:
 # { type, to, reset_url, expires_in_minutes }
 # PASSWORD_RESET_WEBHOOK_URL=https://email-service.example.com/password-reset

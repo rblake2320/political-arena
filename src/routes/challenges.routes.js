@@ -168,7 +168,7 @@ function enqueueChallengeNoticeEmails({ request, env, ctx, challenge, race, chal
 }
 
 // GET /api/challenges/races/:raceId — Public
-router.get('/races/:raceId', async (request, env) => {
+router.get('/races/:raceId', async (request, env, ctx) => {
   const { raceId } = request.params;
   const url = new URL(request.url);
   const { limit, offset } = parsePagination(url);
@@ -191,17 +191,24 @@ router.get('/races/:raceId', async (request, env) => {
 
   // Lazy expiration check
   const now = new Date().toISOString();
+  const expirationWrites = [];
   const challenges = (result.results || []).map(c => {
     if (c.status === 'open' && hasServedNotice(c) && c.response_deadline < now) {
       c.status = 'expired';
       c.expired_at = now;
-      // Fire async update
-      env.ARENA_DB.prepare(
-        `UPDATE challenges SET status = 'expired', expired_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'open'`
-      ).bind(c.id).run();
+      expirationWrites.push(
+        env.ARENA_DB.prepare(
+          `UPDATE challenges SET status = 'expired', expired_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'open'`
+        ).bind(c.id).run()
+      );
     }
     return c;
   });
+  if (expirationWrites.length > 0) {
+    // Without waitUntil the runtime may cancel these writes once the
+    // response is returned; the cron sweep would then be the only writer.
+    ctx.waitUntil(Promise.all(expirationWrites).catch(err => console.error('Lazy challenge expiration failed:', err)));
+  }
 
   // Fetch responses for responded challenges
   const respondedIds = challenges.filter(c => c.status === 'responded').map(c => c.id);

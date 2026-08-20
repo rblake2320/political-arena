@@ -11,3 +11,8 @@ data/generated/
 
 .env
 .env.*
+
+# One-off curl output artifacts (see scripts/seed/ for the scripts that produce them)
+/cand*.json
+/race*.json
+/chal*.json

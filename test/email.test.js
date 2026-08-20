@@ -87,6 +87,31 @@ describe('transactional email provider adapter', () => {
     });
   });
 
+  it('bounds every provider call with an abort signal so outages cannot hang the worker', async () => {
+    const providers = [
+      { EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 're_test', EMAIL_FROM: 'Arena <noreply@example.com>' },
+      { EMAIL_PROVIDER: 'postmark', POSTMARK_SERVER_TOKEN: 'postmark-token', EMAIL_FROM: 'Arena <noreply@example.com>' },
+      { EMAIL_PROVIDER: 'webhook', PASSWORD_RESET_WEBHOOK_URL: 'https://hooks.example.com/email' },
+    ];
+
+    for (const providerEnv of providers) {
+      let request;
+      await sendTransactionalEmail(providerEnv, {
+        to: 'recipient@example.com',
+        subject: 'Timeout test',
+        text: 'Plain text',
+      }, async (url, init) => {
+        request = { url, init };
+        return new Response(JSON.stringify({ id: 'ok', MessageID: 'ok' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      });
+
+      expect(request.init.signal, `${providerEnv.EMAIL_PROVIDER} must pass an abort signal`).toBeInstanceOf(AbortSignal);
+    }
+  });
+
   it('records sent and skipped delivery outcomes', async () => {
     const suffix = Date.now().toString(36);
     const sentSubject = `Sent email ${suffix}`;

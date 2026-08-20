@@ -60,6 +60,8 @@ Important route modules:
 - Update `CREATE TABLE IF NOT EXISTS` schemas and migration tests together.
 - Add integration tests for behavior, not just unit tests.
 - Avoid broad refactors while adding product features.
+- Every outbound `fetch` to an external service must set `signal: AbortSignal.timeout(...)` — a hung provider must never pin a Worker invocation.
+- Never fire-and-forget a D1 write in a request handler; either `await` it or register it with `ctx.waitUntil()`, otherwise the runtime may cancel it after the response returns.
 
 ## Frontend Rules
 
