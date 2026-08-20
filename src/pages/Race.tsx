@@ -349,6 +349,14 @@ export function Race() {
     }
   }, [id]);
 
+  // Record ad/rebuttal impressions when the paired units are on screen
+  // (deduped per page load inside trackImpression).
+  useEffect(() => {
+    if (!race || (tab !== "wire" && tab !== "ads")) return;
+    for (const ad of race.ads || []) api.trackImpression("ad", ad.id, ad.race_id, ad.candidate_id);
+    for (const r of race.rebuttals || []) api.trackImpression("rebuttal", r.id, r.race_id, r.candidate_id);
+  }, [tab, race]);
+
   if (!race) return <div style={{ padding: 80, textAlign: "center", font: `400 13px ${mono}`, color: "#5C5C6E" }}>Loading race...</div>;
 
   const cands = race.candidates || [];

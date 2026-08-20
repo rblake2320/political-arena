@@ -9,6 +9,7 @@
 import { Router } from 'itty-router';
 import { initDatabase, seedIssueCategories, seedPressFeedItems, seedOutsideAdExamples, seedDemoData } from './db.js';
 import { ingestPressFeeds } from './press-ingest.js';
+import { archiveAndPurge } from './archive.js';
 import { corsHeaders, json } from './middleware.js';
 import { r2MediaResponse } from './media.js';
 
@@ -34,6 +35,7 @@ import statsRoutes from './routes/stats.routes.js';
 import correctionsRoutes from './routes/corrections.routes.js';
 import electionsRoutes from './routes/elections.routes.js';
 import favoritesRoutes from './routes/favorites.routes.js';
+import safetyRoutes from './routes/safety.routes.js';
 
 // Main API router
 const api = Router({ base: '/api' });
@@ -61,6 +63,7 @@ api.all('/feed/*', statsRoutes.fetch);
 api.all('/corrections/*', correctionsRoutes.fetch);
 api.all('/elections/*', electionsRoutes.fetch);
 api.all('/favorites/*', favoritesRoutes.fetch);
+api.all('/safety/*', safetyRoutes.fetch);
 
 // Health check fallback; fetch() handles /api/health directly so bootstrap
 // failures can return degraded health before route dispatch.
@@ -290,18 +293,19 @@ export default {
         `UPDATE sessions SET is_active = 0 WHERE is_active = 1 AND expires_at < datetime('now')`
       ).run();
 
-      // 5. Purge old analytics events (default 30-day retention)
+      // 5+6. Archive-then-purge aged analytics events and impression logs.
+      // Rows are exported to R2 (archives/<table>/...ndjson) BEFORE deletion;
+      // if archiving fails, nothing is deleted — data is never destroyed.
       const parsedRetention = Number.parseInt(env.IMPRESSION_LOG_RETENTION_DAYS || '30', 10);
       const retentionDays = Number.isFinite(parsedRetention) && parsedRetention >= 1 ? parsedRetention : 30;
       const retentionModifier = `-${retentionDays} days`;
-      await env.ARENA_DB.prepare(
-        `DELETE FROM analytics_events WHERE created_at < datetime('now', ?)`
-      ).bind(retentionModifier).run();
-
-      // 6. Purge old impression logs
-      await env.ARENA_DB.prepare(
-        `DELETE FROM impression_logs WHERE created_at < datetime('now', ?)`
-      ).bind(retentionModifier).run();
+      for (const table of ['analytics_events', 'impression_logs']) {
+        const result = await archiveAndPurge(env, { table, cutoffModifier: retentionModifier })
+          .catch(err => { console.error(`Archive of ${table} failed (rows retained):`, err); return null; });
+        if (result?.archived > 0) {
+          console.log(`Archived ${result.archived} ${table} rows to R2 before purge`);
+        }
+      }
 
       // 7. Clean expired cooldowns
       await env.ARENA_DB.prepare(
