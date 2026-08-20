@@ -30,6 +30,7 @@ interface AuthState {
   register: (data: { email: string; username: string; password: string; display_name?: string; party_affiliation?: string; jurisdiction_state?: string }) => Promise<void>;
   logout: () => Promise<void>;
   init: () => Promise<void>;
+  refresh: () => Promise<void>;
   setUser: (user: User) => void;
 }
 
@@ -57,6 +58,18 @@ export const useAuth = create<AuthState>((set, get) => ({
       api.clearStoredToken();
       set({ user: null, token: null, initialized: true, loading: false });
     }
+  },
+
+  // Re-fetch the session user unconditionally (init() dedupes and will not).
+  // Needed when server-side user state changes mid-session, e.g. after
+  // email verification.
+  refresh: async () => {
+    const token = api.getStoredToken();
+    if (!token) return;
+    try {
+      const data = await api.getMe();
+      set({ user: data, token, initialized: true });
+    } catch { /* keep current state; 401 interceptor handles expiry */ }
   },
 
   login: async (email, password) => {

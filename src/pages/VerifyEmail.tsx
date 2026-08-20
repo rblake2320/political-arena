@@ -7,7 +7,7 @@ import { useAuth } from '../stores/auth';
 export function VerifyEmail() {
   const [params] = useSearchParams();
   const token = params.get('token') || '';
-  const { user, init } = useAuth();
+  const { user, refresh } = useAuth();
   const [state, setState] = useState<'verifying' | 'done' | 'error' | 'idle'>(token ? 'verifying' : 'idle');
   const [error, setError] = useState('');
   const [resent, setResent] = useState(false);
@@ -21,13 +21,13 @@ export function VerifyEmail() {
       .then(() => {
         setState('done');
         // Refresh the session user so verification_status updates everywhere
-        void init();
+        void refresh();
       })
       .catch((err: any) => {
         setError(err.response?.data?.error || err.message || 'Verification failed');
         setState('error');
       });
-  }, [token, init]);
+  }, [token, refresh]);
 
   const resend = async () => {
     setResending(true);
