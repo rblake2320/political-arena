@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 
 const mono = "'IBM Plex Mono', ui-monospace, monospace";
 
@@ -42,12 +43,12 @@ function Item({ e }: { e: FeedEvent }) {
   const cfg = EVENT[e.event_type];
   const actor = e.event_type === "issued" ? e.challenger_name : e.target_name;
   return (
-    <span style={{ display: "inline-flex", gap: 6, whiteSpace: "nowrap" }}>
+    <Link to={`/challenge/${encodeURIComponent(e.public_receipt_slug || e.challenge_id)}`} style={{ display: "inline-flex", gap: 6, whiteSpace: "nowrap", textDecoration: 'none' }}>
       <span style={{ color: "#5C5C6E" }}>{[timeET(e.event_at), raceTag(e)].filter(Boolean).join(" · ")}</span>
       <span style={{ color: "#5C5C6E" }}>—</span>
       <span style={{ color: cfg.color }}>{(actor || "").toUpperCase()} {cfg.verb}</span>
       {e.event_type === "issued" && e.target_name && <span style={{ color: "#9B9BAB" }}>{e.target_name.toUpperCase()}</span>}
-    </span>
+    </Link>
   );
 }
 

@@ -351,8 +351,14 @@ function AppContent() {
   const userId = user?.id;
   const portalCandidates = useMemo(() => {
     if (!user) return [];
-    const linkedCandidateIds = new Set((user.staff_links || []).map((link: any) => link.candidate_id));
-    return allCandidates.filter(candidate => linkedCandidateIds.has(candidate.id));
+    // A pending campaign is intentionally absent from public race results.
+    // Its authorized staff must still be able to reach their private portal.
+    return (user.staff_links || []).map((link: any) =>
+      allCandidates.find(candidate => candidate.id === link.candidate_id) || {
+        id: link.candidate_id, name: link.candidate_name, party: link.candidate_party,
+        race_id: link.race_id, biography: '', issue_positions: [],
+        race_name: '', race_state: '',
+      });
   }, [allCandidates, user]);
 
   useEffect(() => {

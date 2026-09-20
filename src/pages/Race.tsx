@@ -224,14 +224,15 @@ function FormMessage({ notice }: { notice: Notice }) {
   );
 }
 
-function ReciteChip({ r }: { r: any }) {
+export function ReciteChip({ r }: { r: any }) {
   const stance = (r.stance || r.status || "").toLowerCase();
   const c = stance.includes("support") ? "#34C384" : stance.includes("context") ? "#EFB643" : "#E5636A";
   const lbl = stance.includes("support") ? "SUPPORTS" : stance.includes("context") ? "CONTEXT" : "REFUTES";
+  const href = /^https?:\/\//i.test(r.url || '') ? r.url : undefined;
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, font: `500 10px ${mono}`, color: "#9B9BAB", border: "1px solid rgba(255,255,255,.1)", background: "rgba(255,255,255,.02)", padding: "5px 10px", borderRadius: 7 }}>
+    <a href={href} target={href ? '_blank' : undefined} rel="noopener noreferrer" title={href ? 'Open supporting source' : 'Source URL unavailable'} style={{ display: "inline-flex", alignItems: "center", gap: 6, font: `500 10px ${mono}`, color: "#9B9BAB", border: "1px solid rgba(255,255,255,.1)", background: "rgba(255,255,255,.02)", padding: "5px 10px", borderRadius: 7 }}>
       ↗ RECITE · {(r.title || r.source_type || "SOURCE").toUpperCase().slice(0, 42)} · <span style={{ color: c }}>{lbl}</span>
-    </span>
+    </a>
   );
 }
 
@@ -331,6 +332,7 @@ export function Race() {
   const [activeChallenge, setActiveChallenge] = useState<any | null>(null);
   const [activeAd, setActiveAd] = useState<any | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const race = id ? raceDetails[id] : null;
 
   const fetchQuestions = () => {
@@ -339,13 +341,15 @@ export function Race() {
   };
 
   const refresh = () => {
-    if (id) fetchRace(id);
+    setLoadFailed(false);
+    if (id) void fetchRace(id).then(result => setLoadFailed(!result));
     fetchQuestions();
   };
 
   useEffect(() => {
     if (id) {
-      fetchRace(id);
+      setLoadFailed(false);
+      void fetchRace(id).then(result => setLoadFailed(!result));
       fetchQuestions();
     }
   }, [id]);
@@ -358,12 +362,14 @@ export function Race() {
     for (const r of race.rebuttals || []) api.trackImpression("rebuttal", r.id, r.race_id, r.candidate_id);
   }, [tab, race]);
 
+  if (!race && loadFailed) return <div role="alert" style={{ padding: 80, textAlign: 'center' }}>Race unavailable. Check the address or try again. <button onClick={refresh}>Retry</button> <Link to="/">Back to races</Link></div>;
   if (!race) return <div style={{ padding: 80, textAlign: "center", font: `400 13px ${mono}`, color: "#5C5C6E" }}>Loading race...</div>;
 
   const cands = race.candidates || [];
   const dem = cands.find(c => isDem(c.party)) || cands[0];
   const rep = cands.find(c => isRep(c.party)) || cands.find(c => c.id !== dem?.id);
-  const activeCandidate = activeCandidateId ? cands.find((c: any) => c.id === activeCandidateId) : null;
+  const activeStaffLink = (user?.staff_links || []).find((link: any) => link.candidate_id === activeCandidateId && link.race_id === id);
+  const activeCandidate = activeStaffLink ? (cands.find((c: any) => c.id === activeCandidateId) || { id: activeStaffLink.candidate_id, name: activeStaffLink.candidate_name }) : null;
   const isCandidateInRace = Boolean(user && activeCandidate);
   const challenges = race.challenges || [];
   const responses = race.challengeResponses || [];
@@ -475,7 +481,7 @@ export function Race() {
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={{ font: `700 9.5px ${mono}`, letterSpacing: ".14em", color: "#8F8FF9" }}>STAFF ACTIONS</span>
             <span style={{ font: "400 12.5px/1.5 'Hanken Grotesk', system-ui, sans-serif", color: "#9B9BAB" }}>
-              {isCandidateInRace ? `Acting as ${activeCandidate?.name}. Public actions are server-gated by campaign staff link.` : "Claim/register a campaign profile before issuing campaign speech or callouts."}
+              {isCandidateInRace ? `Acting as ${activeCandidate?.name}. Public actions are server-gated by campaign staff link.` : user ? "Claim/register a campaign profile before issuing campaign speech or callouts." : <>Campaign posting requires sign-in and a linked campaign profile. <Link to="/login">Sign in</Link> or <Link to="/register">create an account</Link>.</>}
             </span>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -893,7 +899,7 @@ function PostAdModal({ raceId, candidateId, onClose }: { raceId: string; candida
         <FormMessage notice={notice} />
         <Field label="Ad title" required value={title} onChange={setTitle} />
         <TextAreaField label="Ad text / transcript" required value={content} onChange={setContent} maxLength={5000} rows={6} />
-        <Field label="Media URL" value={mediaUrl} onChange={setMediaUrl} type="url" placeholder="https://..." />
+        <MediaUploadField label="Ad video, audio, image, or media link" candidateId={candidateId} onMediaUrl={setMediaUrl} />
         <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", font: "400 12px/1.5 'Hanken Grotesk',sans-serif", color: "#9B9BAB" }}>
           <input type="checkbox" checked={aiDisclosure} onChange={e => setAiDisclosure(e.target.checked)} style={{ marginTop: 2 }} />
           <span>This media contains AI-generated or materially AI-altered content (required by law in many states — it will carry a visible AI-media label).</span>
@@ -1012,6 +1018,7 @@ function ClaimRebuttalModal({ ad, raceId, candidateId, onClose }: { ad: any; rac
 }
 
 function AskQuestionModal({ raceId, onClose }: { raceId: string; onClose: (refresh?: boolean, success?: string) => void }) {
+  const { user } = useAuth();
   const [sourceType, setSourceType] = useState("voter");
   const [questionText, setQuestionText] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
@@ -1019,8 +1026,8 @@ function AskQuestionModal({ raceId, onClose }: { raceId: string; onClose: (refre
   const [submitting, setSubmitting] = useState(false);
   const [isApprovedPress, setIsApprovedPress] = useState(false);
   useEffect(() => {
-    api.getPressStatus().then((d: any) => setIsApprovedPress(d?.credential?.status === "approved")).catch(() => setIsApprovedPress(false));
-  }, []);
+    if (user) api.getPressStatus().then((d: any) => setIsApprovedPress(d?.credential?.status === "approved")).catch(() => setIsApprovedPress(false));
+  }, [user?.id]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -1041,6 +1048,8 @@ function AskQuestionModal({ raceId, onClose }: { raceId: string; onClose: (refre
 
   return (
     <ModalFrame title="Ask a question" kicker="Email-confirmed participant or approved press" onClose={() => onClose()}>
+      {!user && <p><Link to="/login">Sign in to submit a question</Link>. You can browse the public record without signing in.</p>}
+      {user && !user.email_verified && <p>Confirm your email before submitting. <Link to="/settings">Open account settings</Link>.</p>}
       <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
         <FormMessage notice={notice} />
         <SelectField label="Question source" value={sourceType} onChange={setSourceType}>
@@ -1051,7 +1060,7 @@ function AskQuestionModal({ raceId, onClose }: { raceId: string; onClose: (refre
         <Field label="Supporting media URL" value={mediaUrl} onChange={setMediaUrl} type="url" placeholder="https://..." />
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <ActionButton onClick={() => onClose()} variant="ghost">Cancel</ActionButton>
-          <ActionButton type="submit" disabled={submitting || questionText.trim().length < 10}>{submitting ? "Submitting" : "Submit question"}</ActionButton>
+          <ActionButton type="submit" disabled={!user || (!user.email_verified && !isApprovedPress) || submitting || questionText.trim().length < 10}>{submitting ? "Submitting" : "Submit question"}</ActionButton>
         </div>
       </form>
     </ModalFrame>
