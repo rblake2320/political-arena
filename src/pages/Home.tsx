@@ -148,15 +148,22 @@ function LedgerRow({ label, value, color, last }: { label: string; value: React.
 }
 
 export function Home() {
-  const { races, raceTotal, fetchRaces } = useArenaStore();
+  const { races, raceTotal, raceError, fetchRaces } = useArenaStore();
   const isMobile = useIsMobile();
   const [loaded, setLoaded] = useState(races.length > 0);
   const [sort, setSort] = useState<SortMode>('trending');
   const [stats, setStats] = useState<CycleStats | null>(null);
   const [query, setQuery] = useState('');
+  const [stateFilter, setStateFilter] = useState('');
+  const [retry, setRetry] = useState(0);
   const days = daysToElection();
 
-  useEffect(() => { fetchRaces(sort).finally(() => setLoaded(true)); }, [sort]);
+  useEffect(() => {
+    let current = true;
+    setLoaded(false);
+    fetchRaces(sort).finally(() => { if (current) setLoaded(true); });
+    return () => { current = false; };
+  }, [sort, retry, fetchRaces]);
 
   useEffect(() => {
     // Live event feed is rendered by <LiveWire /> in the app shell.
@@ -164,7 +171,7 @@ export function Home() {
   }, []);
 
   const q = query.trim().toLowerCase();
-  const visibleRaces = q
+  const searchedRaces = q
     ? races.filter((race: any) => {
       const haystack = [
         race.name, race.state, race.office, race.district,
@@ -175,6 +182,8 @@ export function Home() {
       return haystack.includes(q);
     })
     : races;
+  const visibleRaces = searchedRaces.filter(race => !stateFilter || race.state === stateFilter);
+  const states = [...new Set(races.map(race => race.state).filter(Boolean))].sort();
 
   const racesLive = stats?.races_live ?? (races.filter(r => r.status === 'active').length || races.length);
   const openCallouts = stats?.open_callouts;
@@ -190,12 +199,13 @@ export function Home() {
             <span className="arena-pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: '#34C384', boxShadow: '0 0 10px rgba(52,195,132,.8)' }} />
             <span style={{ font: `600 10.5px ${mono}`, letterSpacing: '.2em', color: '#34C384' }}>{racesLive} ARENA{racesLive === 1 ? '' : 'S'} IN SESSION</span>
           </div>
-          <div style={{ font: `400 ${isMobile ? 46 : 84}px/1.02 ${serif}`, letterSpacing: '-.01em', color: '#F2F2F7' }}>
+          <h1 style={{ margin: 0, font: `400 ${isMobile ? 46 : 84}px/1.02 ${serif}`, letterSpacing: '-.01em', color: '#F2F2F7' }}>
             Every claim goes <em style={{ color: '#8F8FF9' }}>on the record.</em>
-          </div>
+          </h1>
           <div style={{ font: `400 17px/1.6 'Hanken Grotesk',sans-serif`, color: '#9B9BAB', maxWidth: 560 }}>
             Candidates campaign, challenge each other, and answer to voters inside a structured public arena — deadlines, receipts, and audit trails built into the platform itself.
           </div>
+          <a href="#race-directory" className="arena-directory-cta">Explore the race directory <ChevronRight size={16} aria-hidden="true" /></a>
         </div>
         <div style={{ border: '1px solid rgba(255,255,255,.1)', borderRadius: 14, background: 'rgba(255,255,255,.02)', overflow: 'hidden' }}>
           <div style={{ padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,.08)', font: `600 9.5px ${mono}`, letterSpacing: '.18em', color: '#5C5C6E' }}>CYCLE LEDGER · 2026 MIDTERMS</div>
@@ -207,19 +217,20 @@ export function Home() {
       </div>
 
       {/* section head + sort + search */}
+      <section id="race-directory" aria-labelledby="race-directory-title" style={{ scrollMarginTop: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, padding: isMobile ? '6px 20px 18px' : '6px 40px 22px', maxWidth: 1440, margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ font: `600 20px ${display}`, color: '#F2F2F7' }}>2026 race directory</span>
-            <span style={{ font: `500 10px ${mono}`, letterSpacing: '.1em', color: '#5C5C6E' }}>SHOWING {visibleRaces.length} OF {raceTotal || races.length} RACES</span>
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <h2 id="race-directory-title" style={{ margin: 0, font: `600 20px ${display}`, color: '#F2F2F7' }}>2026 race directory</h2>
+            <span role="status" style={{ font: `500 11px ${mono}`, letterSpacing: '.06em', color: '#9B9BAB' }}>{loaded ? `${visibleRaces.length} matching · ${races.length} loaded of ${raceTotal || races.length} races` : 'Loading race directory…'}</span>
+          </div>
           <div style={{ display: 'flex', gap: 6 }}>
             {([['trending', 'Trending'], ['newest', 'Newest'], ['name', 'A–Z']] as [SortMode, string][]).map(([key, label]) => {
               const active = sort === key;
               return (
-                <button key={key} onClick={() => { setSort(key); setLoaded(false); }} style={{
+                <button key={key} aria-pressed={active} onClick={() => setSort(key)} style={{
                   display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', whiteSpace: 'nowrap',
-                  font: `600 12px 'Hanken Grotesk',sans-serif`, padding: '7px 14px', borderRadius: 99,
+                  font: `600 12px 'Hanken Grotesk',sans-serif`, minHeight: 44, padding: '7px 14px', borderRadius: 99,
                   color: active ? '#C7C7F9' : '#9B9BAB',
                   background: active ? 'rgba(110,110,247,.14)' : 'rgba(255,255,255,.03)',
                   border: active ? '1px solid rgba(110,110,247,.4)' : '1px solid rgba(255,255,255,.1)',
@@ -230,28 +241,41 @@ export function Home() {
             })}
           </div>
         </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 9, border: '1px solid rgba(255,255,255,.1)', borderRadius: 9, padding: '8px 14px', width: 280, background: 'rgba(255,255,255,.02)' }}>
+        <div className="arena-directory-filters">
+        <label className="arena-state-filter">State
+          <select aria-label="Filter races by state" value={stateFilter} onChange={e => setStateFilter(e.target.value)}>
+            <option value="">All states</option>
+            {states.map(state => <option key={state} value={state}>{state}</option>)}
+          </select>
+        </label>
+        <label className="arena-race-search" style={{ display: 'flex', alignItems: 'center', gap: 9, border: '1px solid rgba(255,255,255,.1)', borderRadius: 9, padding: '8px 14px', background: 'rgba(255,255,255,.02)' }}>
           <Search size={13} color="#5C5C6E" />
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Search races, candidates, claims…"
             aria-label="Search races"
-            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', font: `400 11px ${mono}`, color: '#F2F2F7', letterSpacing: '.04em' }}
+            style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', font: `400 13px ${mono}`, color: '#F2F2F7', letterSpacing: '.04em' }}
           />
         </label>
+        {(q || stateFilter) && <button className="arena-directory-button" onClick={() => { setQuery(''); setStateFilter(''); }}>Clear filters</button>}
+        </div>
       </div>
 
       {/* race grid */}
       <div style={{ maxWidth: 1440, margin: '0 auto', padding: isMobile ? '0 20px 40px' : '0 40px 56px' }}>
+        {raceError && <div role="alert" className="arena-directory-error">
+          <span>{raceError}{races.length > 0 ? ' Previously loaded races remain visible.' : ''}</span>
+          <button className="arena-directory-button" onClick={() => setRetry(value => value + 1)} disabled={!loaded}>Retry directory</button>
+        </div>}
         {!loaded ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}>
             <div style={{ width: 24, height: 24, border: '2px solid rgba(110,110,247,.3)', borderTopColor: '#6E6EF7', borderRadius: '50%', animation: 'arena-marquee 0s' }} className="arena-pulse" />
           </div>
         ) : visibleRaces.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', border: '1px solid rgba(255,255,255,.09)', borderRadius: 16, background: '#0C0C13' }}>
-            <div style={{ color: '#9B9BAB', marginBottom: 6 }}>{q ? 'No races match your search' : 'No races loaded yet'}</div>
-            <div style={{ font: `400 12px ${mono}`, color: '#5C5C6E' }}>{q ? 'Try a state, candidate name, or office.' : 'Load the race directory or adjust filters.'}</div>
+            <div style={{ color: '#9B9BAB', marginBottom: 6 }}>{q || stateFilter ? 'No races match these filters' : raceError ? 'Race directory unavailable' : 'No races listed yet'}</div>
+            <div style={{ font: `400 12px ${mono}`, color: '#9B9BAB' }}>{q || stateFilter ? 'Clear filters or try a candidate name or office.' : raceError ? 'Use Retry directory above to reconnect.' : 'Check back as races are added to the public record.'}</div>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 18 }}>
@@ -259,6 +283,7 @@ export function Home() {
           </div>
         )}
       </div>
+      </section>
     </div>
   );
 }
