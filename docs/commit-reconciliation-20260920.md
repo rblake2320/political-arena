@@ -17,10 +17,14 @@ Archiving commits alone was insufficient: several features were absent from mast
 ## Acceptance evidence
 
 - Before restoration: five of six targeted press/watchlist tests fail against the original route/worker implementations. After restoration: six pass.
-- Full real workerd/D1 suite: 141 tests pass across 17 files.
+- Final combined checks: 141 real workerd/D1 tests across 17 files, plus 3 client-state tests, all pass (144 total).
 - TypeScript and production Vite build pass, including the recovered portable source.
 - npm audit --audit-level=low: zero vulnerabilities after compatible lockfile refresh and sharp 0.35.4 patch override. The Cloudflare pool pins an older Miniflare; the override avoids npm's suggested breaking pool downgrade.
 - Browser, built app at loopback port 8794 with isolated local D1 and a synthetic account: tracked source create/persist/remove; candidate watch/persist in My Arena/unsubscribe all worked.
 - Notification integration checks cover preferences, inactive subscriptions, cron repeat runs, unserved-callout preservation, and withholding submitted rebuttal text until moderation approves it.
 
 These checks close the commit backlog. They do not authorize a production deployment or turn the separate product roadmap into a completed release.
+
+## Concurrent UI PR #29
+
+The UI session completed and committed fe63199 while reconciliation was underway. Its draft PR was blocked by the development dependency advisories. Integrated its directory filters, accessibility and stale-request fixes after resolving the audit. The combined test script, build and zero-vulnerability audit all passed.
