@@ -23,6 +23,7 @@ const VerifyEmail = lazy(() => import("./pages/VerifyEmail").then((m) => ({ defa
 const LegalPage = lazy(() => import("./pages/LegalPage").then((m) => ({ default: m.LegalPage })));
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 import { LiveWire } from "./components/LiveWire";
+import { SampleNotice } from "./components/SampleNotice";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useAuth } from "./stores/auth";
 import { useArenaStore } from "./store";
@@ -466,6 +467,7 @@ function AppContent() {
     <CandidateContext.Provider value={{ candidates: portalCandidates, activeCandidateId, setActiveCandidateId }}>
       <div className="min-h-screen text-zinc-50 font-sans selection:bg-indigo-500/30" style={{ background: '#08080C' }}>
         <a href="#main-content" style={{ position: 'absolute', left: -9999, top: 0, zIndex: 100, background: '#6E6EF7', color: '#fff', padding: '10px 16px', borderRadius: 8 }} onFocus={e => { e.currentTarget.style.left = '12px'; e.currentTarget.style.top = '12px'; }} onBlur={e => { e.currentTarget.style.left = '-9999px'; }}>Skip to content</a>
+        <SampleNotice />
         <LiveWire />
         <Navigation />
         {user && !user.email_verified && (

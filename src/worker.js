@@ -152,6 +152,7 @@ export default {
       return withApiHeaders(json({
         status: bootstrapError ? 'degraded' : 'ok',
         database: bootstrapError ? 'error' : 'ok',
+        sample_data: env.ENVIRONMENT !== 'production' || env.SEED_DEMO_DATA === 'true',
         version: '1.0.0',
         timestamp: new Date().toISOString(),
       }, bootstrapError ? 503 : 200), request, env);
