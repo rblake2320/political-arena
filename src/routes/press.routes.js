@@ -9,9 +9,22 @@ import { auditLog } from '../audit.js';
 import {
   requireAuth, requireRole, successResponse, errorResponse, parseBody, getClientIP,
 } from '../middleware.js';
-import { validate, registerPressSchema } from '../validation.js';
+import { validate, registerPressSchema, pressNewsSourceSchema } from '../validation.js';
 
 const router = Router({ base: '/api/press' });
+
+function normalizeSourceUrl(value) {
+  const parsed = new URL(value.trim());
+  parsed.hash = '';
+  return parsed.toString();
+}
+
+function presentSource(source) {
+  return {
+    ...source,
+    is_default: source.source_scope === 'default',
+  };
+}
 
 /**
  * GET /api/press/feed — Public source-link feed for press/public updates
@@ -117,6 +130,92 @@ router.get('/my-status', async (request, env) => {
   ).bind(request.user.id).first();
 
   return successResponse({ credential: cred || null });
+});
+
+/**
+ * GET /api/press/sources — Preloaded + user-tracked news sources
+ */
+router.get('/sources', async (request, env) => {
+  const authErr = await requireAuth(request, env);
+  if (authErr) return authErr;
+
+  const sources = await env.ARENA_DB.prepare(
+    `SELECT id, user_id, name, url, description, source_scope, created_at, updated_at
+     FROM press_news_sources
+     WHERE is_active = 1
+       AND (source_scope = 'default' OR user_id = ?)
+     ORDER BY
+       CASE source_scope WHEN 'default' THEN 0 ELSE 1 END,
+       name ASC`
+  ).bind(request.user.id).all();
+
+  return successResponse({ sources: (sources.results || []).map(presentSource) });
+});
+
+/**
+ * POST /api/press/sources — Add a user-tracked news source
+ */
+router.post('/sources', async (request, env) => {
+  const authErr = await requireAuth(request, env);
+  if (authErr) return authErr;
+
+  const body = await parseBody(request);
+  if (!body) return errorResponse('Invalid JSON body');
+
+  const { valid, errors, data } = validate(pressNewsSourceSchema, body);
+  if (!valid) return errorResponse(errors.join(', '));
+
+  const normalizedUrl = normalizeSourceUrl(data.url);
+  const defaultSource = await env.ARENA_DB.prepare(
+    `SELECT id, user_id, name, url, description, source_scope, created_at, updated_at
+     FROM press_news_sources
+     WHERE source_scope = 'default' AND url = ? AND is_active = 1`
+  ).bind(normalizedUrl).first();
+
+  if (defaultSource) {
+    return successResponse({ source: presentSource(defaultSource), already_preloaded: true });
+  }
+
+  const id = generateId('psrc');
+  await env.ARENA_DB.prepare(
+    `INSERT INTO press_news_sources (id, user_id, name, url, description, source_scope, is_active)
+     VALUES (?, ?, ?, ?, ?, 'user', 1)
+     ON CONFLICT(user_id, url) DO UPDATE SET
+       name = excluded.name,
+       description = excluded.description,
+       is_active = 1,
+       updated_at = datetime('now')`
+  ).bind(id, request.user.id, data.name, normalizedUrl, data.description || null).run();
+
+  const source = await env.ARENA_DB.prepare(
+    `SELECT id, user_id, name, url, description, source_scope, created_at, updated_at
+     FROM press_news_sources
+     WHERE user_id = ? AND url = ? AND is_active = 1`
+  ).bind(request.user.id, normalizedUrl).first();
+
+  return successResponse({ source: presentSource(source) });
+});
+
+/**
+ * DELETE /api/press/sources/:id — Remove one user-tracked source
+ */
+router.delete('/sources/:id', async (request, env) => {
+  const authErr = await requireAuth(request, env);
+  if (authErr) return authErr;
+
+  const source = await env.ARENA_DB.prepare(
+    `SELECT id, source_scope, user_id FROM press_news_sources WHERE id = ? AND is_active = 1`
+  ).bind(request.params.id).first();
+
+  if (!source) return errorResponse('Source not found', 404);
+  if (source.source_scope === 'default') return errorResponse('Preloaded sources cannot be removed', 403);
+  if (source.user_id !== request.user.id) return errorResponse('Source not found', 404);
+
+  await env.ARENA_DB.prepare(
+    `UPDATE press_news_sources SET is_active = 0, updated_at = datetime('now') WHERE id = ?`
+  ).bind(source.id).run();
+
+  return successResponse({ id: source.id, removed: true });
 });
 
 /**

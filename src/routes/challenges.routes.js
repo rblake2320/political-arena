@@ -11,6 +11,7 @@ import { requireAuth, requireRole, errorResponse, successResponse, parseBody, pa
 import { validate, createChallengeSchema, respondToChallengeSchema, refuseChallengeSchema } from '../validation.js';
 import { computeFactScore, getRecitesForContent } from './recites.routes.js';
 import { isTransactionalEmailConfigured, sendAndRecordTransactionalEmail } from '../email.js';
+import { notifySubscribers } from '../notifications.js';
 
 const router = Router({ base: '/api/challenges' });
 
@@ -267,6 +268,15 @@ router.get('/:id/receipt', async (request, env) => {
         beforeState: { status: 'open' },
         afterState: { status: 'expired', expired_at: expiredAt, response_deadline: challenge.response_deadline },
       });
+      await notifySubscribers(env.ARENA_DB, {
+        raceId: challenge.race_id,
+        candidateIds: [challenge.challenger_candidate_id, challenge.target_candidate_id],
+        challengeId: challenge.id,
+        notificationType: 'challenge_expired',
+        title: 'Callout deadline expired',
+        body: challenge.claim_text || challenge.challenge_text,
+        linkUrl: `/challenge/${challenge.public_receipt_slug || challenge.id}`,
+      });
     }
   }
 
@@ -337,6 +347,15 @@ router.get('/:id', async (request, env) => {
         entityId: id,
         beforeState: { status: 'open' },
         afterState: { status: 'expired', expired_at: expiredAt, response_deadline: challenge.response_deadline },
+      });
+      await notifySubscribers(env.ARENA_DB, {
+        raceId: challenge.race_id,
+        candidateIds: [challenge.challenger_candidate_id, challenge.target_candidate_id],
+        challengeId: challenge.id,
+        notificationType: 'challenge_expired',
+        title: 'Callout deadline expired',
+        body: challenge.claim_text || challenge.challenge_text,
+        linkUrl: `/challenge/${challenge.public_receipt_slug || challenge.id}`,
       });
     }
   }
@@ -572,27 +591,15 @@ router.post('/', async (request, env, ctx) => {
     ]);
   }
 
-  // Create notifications for subscribers
-  const subs = await env.ARENA_DB.prepare(
-    `SELECT * FROM notification_subscriptions
-     WHERE ((subscription_type = 'race' AND target_id = ?) OR (subscription_type = 'candidate' AND target_id = ?))
-     AND is_active = 1
-     LIMIT 500`
-  ).bind(data.race_id, data.target_candidate_id).all();
-
-  if (subs.results && subs.results.length > 0) {
-    const notifBatch = subs.results.map(sub => {
-      const notifId = generateId('notif');
-      const bodyText = data.challenge_text.length > 100 ? data.challenge_text.substring(0, 100) + '...' : data.challenge_text;
-      return env.ARENA_DB.prepare(
-        `INSERT INTO notifications (id, user_id, subscription_id, notification_type, title, body, link_url) VALUES (?, ?, ?, 'challenge_issued', ?, ?, ?)`
-      ).bind(notifId, sub.user_id, sub.id, 'New Challenge Issued', bodyText, `/challenge/${receiptSlug}`);
-    });
-    // Chunk into batches of 50 so large subscriber lists are never dropped
-    for (let i = 0; i < notifBatch.length; i += 50) {
-      await env.ARENA_DB.batch(notifBatch.slice(i, i + 50));
-    }
-  }
+  await notifySubscribers(env.ARENA_DB, {
+    raceId: data.race_id,
+    candidateIds: [data.challenger_candidate_id, data.target_candidate_id],
+    challengeId,
+    notificationType: 'challenge_issued',
+    title: 'New callout issued',
+    body: data.claim_text || data.challenge_text,
+    linkUrl: `/challenge/${receiptSlug}`,
+  });
 
   const emailSubscribers = isTransactionalEmailConfigured(env)
     ? await env.ARENA_DB.prepare(
@@ -696,6 +703,15 @@ router.post('/:id/respond', async (request, env, ctx) => {
         beforeState: { status: 'open' },
         afterState: { status: 'expired', expired_at: expiredAt, response_deadline: challenge.response_deadline },
       });
+      await notifySubscribers(env.ARENA_DB, {
+        raceId: challenge.race_id,
+        candidateIds: [challenge.challenger_candidate_id, challenge.target_candidate_id],
+        challengeId: challenge.id,
+        notificationType: 'challenge_expired',
+        title: 'Callout deadline expired',
+        body: challenge.claim_text || challenge.challenge_text,
+        linkUrl: `/challenge/${challenge.public_receipt_slug || challenge.id}`,
+      });
     }
     return errorResponse('Challenge has expired');
   }
@@ -723,6 +739,16 @@ router.post('/:id/respond', async (request, env, ctx) => {
     beforeState: { status: 'open' },
     afterState: { status: 'responded' },
     ipAddress: getClientIP(request),
+  });
+
+  await notifySubscribers(env.ARENA_DB, {
+    raceId: challenge.race_id,
+    candidateIds: [challenge.challenger_candidate_id, challenge.target_candidate_id],
+    challengeId: id,
+    notificationType: 'challenge_responded',
+    title: 'Callout received a response',
+    body: data.response_text,
+    linkUrl: `/challenge/${challenge.public_receipt_slug || id}`,
   });
 
   return successResponse({ challenge_id: id, response_id: responseId, status: 'responded' });
@@ -762,6 +788,16 @@ router.post('/:id/refuse', async (request, env, ctx) => {
     beforeState: { status: 'open' },
     afterState: { status: 'refused', refusal_reason: refusalReason },
     ipAddress: getClientIP(request),
+  });
+
+  await notifySubscribers(env.ARENA_DB, {
+    raceId: challenge.race_id,
+    candidateIds: [challenge.challenger_candidate_id, challenge.target_candidate_id],
+    challengeId: id,
+    notificationType: 'challenge_refused',
+    title: 'Callout was refused',
+    body: refusalReason || challenge.claim_text || challenge.challenge_text,
+    linkUrl: `/challenge/${challenge.public_receipt_slug || id}`,
   });
 
   return successResponse({ id, status: 'refused' });
@@ -808,6 +844,16 @@ router.post('/:id/withdraw', async (request, env, ctx) => {
     entityId: id,
     afterState: { credit_refunded: true },
     ipAddress: getClientIP(request),
+  });
+
+  await notifySubscribers(env.ARENA_DB, {
+    raceId: challenge.race_id,
+    candidateIds: [challenge.challenger_candidate_id, challenge.target_candidate_id],
+    challengeId: id,
+    notificationType: 'challenge_withdrawn',
+    title: 'Callout was withdrawn',
+    body: challenge.claim_text || challenge.challenge_text,
+    linkUrl: `/challenge/${challenge.public_receipt_slug || id}`,
   });
 
   return successResponse({ id, status: 'withdrawn', credit_refunded: true, credits_remaining: updatedCandidate?.credit_balance ?? 0 });

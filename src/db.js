@@ -1192,6 +1192,19 @@ export async function initDatabase(db) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
 
+    db.prepare(`CREATE TABLE IF NOT EXISTS press_news_sources (
+      id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id),
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      description TEXT,
+      source_scope TEXT NOT NULL DEFAULT 'user' CHECK(source_scope IN ('default','user')),
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, url)
+    )`),
+
     // ========== RATE LIMITING ==========
     db.prepare(`CREATE TABLE IF NOT EXISTS auth_rate_limits (
       key TEXT PRIMARY KEY,
@@ -1320,6 +1333,11 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_creds_user ON press_credentials(user_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_feed_active_published ON press_feed_items(is_active, published_at DESC, first_seen_at DESC)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_feed_source ON press_feed_items(source, section)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_news_sources_user ON press_news_sources(user_id, is_active)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_news_sources_scope ON press_news_sources(source_scope, is_active)`),
+    db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_press_news_sources_default_url
+      ON press_news_sources(url)
+      WHERE source_scope = 'default'`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_credit_tx_candidate ON credit_transactions(candidate_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_challenges_candidate_created ON challenges(challenger_candidate_id, created_at)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_users_password_reset ON users(password_reset_token_hash, password_reset_expires_at)`),
@@ -1699,6 +1717,55 @@ export async function seedOutsideAdExamples(db) {
       recite.id,
     )
   ));
+}
+
+export async function seedPressNewsSources(db) {
+  const sources = [
+    {
+      id: 'press-src-newser-politics',
+      name: 'Newser Politics',
+      url: 'https://www.newser.com/section/4/politics-news-headlines.html',
+      description: 'Politics headline roundup',
+    },
+    {
+      id: 'press-src-san-politics',
+      name: 'Straight Arrow News Politics',
+      url: 'https://san.com/politics/',
+      description: 'Politics coverage',
+    },
+    {
+      id: 'press-src-san-oversight',
+      name: 'Straight Arrow News Government Oversight',
+      url: 'https://san.com/government-oversight/',
+      description: 'Government oversight coverage',
+    },
+    {
+      id: 'press-src-bbc-politics',
+      name: 'BBC Politics',
+      url: 'https://www.bbc.com/news/politics',
+      description: 'BBC politics coverage',
+    },
+    {
+      id: 'press-src-aljazeera',
+      name: 'Al Jazeera',
+      url: 'https://www.aljazeera.com/',
+      description: 'International news and politics coverage',
+    },
+  ];
+
+  for (const source of sources) {
+    await db.prepare(
+      `INSERT INTO press_news_sources (id, name, url, description, source_scope, is_active)
+       VALUES (?, ?, ?, ?, 'default', 1)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         url = excluded.url,
+         description = excluded.description,
+         source_scope = 'default',
+         is_active = 1,
+         updated_at = datetime('now')`
+    ).bind(source.id, source.name, source.url, source.description).run();
+  }
 }
 
 async function repairDemoMediaData(db) {

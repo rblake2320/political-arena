@@ -9,6 +9,7 @@ const publicAccountabilityFiles = [
   'src/routes/ads.routes.js',
   'src/routes/candidates.routes.js',
   'src/routes/challenges.routes.js',
+  'src/routes/corrections.routes.js',
   'src/routes/questions.routes.js',
   'src/routes/races.routes.js',
   'src/routes/recites.routes.js',

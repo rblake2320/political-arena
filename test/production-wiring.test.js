@@ -225,6 +225,12 @@ describe('ad and rebuttal lifecycle', () => {
     }, staffA.token);
     expect(created.status).toBe(200);
     const adId = created.body.data.id;
+    const watcher = await registerUser('adwatcher');
+    expect((await post('/api/notifications/subscribe', {
+      subscription_type: 'race', target_id: 'race-1',
+    }, watcher.token)).status).toBe(200);
+    const readNotices = async () => (await get('/api/notifications', watcher.token)).body.data.notifications;
+
 
     const submitted = await post(`/api/ads/${adId}/submit`, {}, staffA.token);
     expect(submitted.status).toBe(200);
@@ -255,6 +261,11 @@ describe('ad and rebuttal lifecycle', () => {
     expect(rebuttal.status).toBe(200);
     expect(rebuttal.body.data.status).toBe('submitted');
     const rebId = rebuttal.body.data.id;
+    const noticesBeforeReview = await readNotices();
+    expect(noticesBeforeReview.some(n => n.notification_type === 'ad_approved')).toBe(true);
+    expect(noticesBeforeReview.some(n => n.notification_type === 'ad_activated')).toBe(true);
+    expect(noticesBeforeReview.some(n => n.notification_type === 'rebuttal_created')).toBe(false);
+
 
     const queue2 = await get('/api/ads/moderation-queue', moderator.token);
     expect(queue2.body.data.rebuttals.some(r => r.id === rebId)).toBe(true);
@@ -262,6 +273,10 @@ describe('ad and rebuttal lifecycle', () => {
     const rebApproved = await put(`/api/ads/rebuttals/${rebId}/review`, { action: 'approve' }, moderator.token);
     expect(rebApproved.status).toBe(200);
     expect(rebApproved.body.data.status).toBe('active');
+    expect((await readNotices()).filter(n => n.notification_type === 'rebuttal_created')).toEqual([
+      expect.objectContaining({ body: 'Our answer to this ad, on the record.' }),
+    ]);
+
 
     // Publicly visible, paired with the parent ad
     const publicAds = await get('/api/ads/races/race-1');

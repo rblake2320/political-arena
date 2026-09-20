@@ -7,7 +7,8 @@
  */
 
 import { Router } from 'itty-router';
-import { initDatabase, seedIssueCategories, seedPressFeedItems, seedOutsideAdExamples, seedDemoData } from './db.js';
+import { initDatabase, seedIssueCategories, seedPressNewsSources, seedPressFeedItems, seedOutsideAdExamples, seedDemoData } from './db.js';
+import { notifySubscribers } from './notifications.js';
 import { ingestPressFeeds } from './press-ingest.js';
 import { archiveAndPurge } from './archive.js';
 import { corsHeaders, json } from './middleware.js';
@@ -108,6 +109,7 @@ async function bootstrap(env) {
   if (bootstrappedDbs.has(env.ARENA_DB)) return;
   await initDatabase(env.ARENA_DB);
   await seedIssueCategories(env.ARENA_DB);
+  await seedPressNewsSources(env.ARENA_DB);
   if (env.ENVIRONMENT !== 'production' || env.SEED_DEMO_DATA === 'true') {
     await seedPressFeedItems(env.ARENA_DB);
     await seedOutsideAdExamples(env.ARENA_DB);
@@ -294,12 +296,20 @@ export default {
       // 1. Expire open challenges past deadline
       const expired = await env.ARENA_DB.prepare(
         `UPDATE challenges SET status = 'expired', expired_at = datetime('now'), updated_at = datetime('now')
-         WHERE status = 'open'
-           AND notice_status != 'unserved'
-           AND response_deadline < datetime('now')`
-      ).run();
-      if (expired.meta?.changes > 0) {
-        console.log(`Expired ${expired.meta.changes} challenges`);
+         WHERE id IN (SELECT id FROM challenges WHERE status = 'open'
+           AND notice_status != 'unserved' AND response_deadline < datetime('now') LIMIT 500)
+         RETURNING id, race_id, challenger_candidate_id, target_candidate_id, claim_text, challenge_text, public_receipt_slug`
+      ).all();
+      for (const challenge of expired.results || []) {
+        await notifySubscribers(env.ARENA_DB, {
+          raceId: challenge.race_id,
+          candidateIds: [challenge.challenger_candidate_id, challenge.target_candidate_id],
+          challengeId: challenge.id,
+          notificationType: 'challenge_expired',
+          title: 'Callout deadline expired',
+          body: challenge.claim_text || challenge.challenge_text,
+          linkUrl: `/challenge/${challenge.public_receipt_slug || challenge.id}`,
+        });
       }
 
       // 1b. Close out unserved challenges 7 days past deadline. The target
@@ -338,10 +348,22 @@ export default {
       }
 
       // 2. Activate approved ads whose start_date has arrived
-      await env.ARENA_DB.prepare(
+      const activated = await env.ARENA_DB.prepare(
         `UPDATE ad_flights SET status = 'active', activated_at = datetime('now'), updated_at = datetime('now')
-         WHERE status = 'approved' AND start_date IS NOT NULL AND start_date <= datetime('now')`
-      ).run();
+         WHERE id IN (SELECT id FROM ad_flights WHERE status = 'approved'
+           AND start_date IS NOT NULL AND start_date <= datetime('now') LIMIT 500)
+         RETURNING id, race_id, candidate_id, title, ad_content_text`
+      ).all();
+      for (const ad of activated.results || []) {
+        await notifySubscribers(env.ARENA_DB, {
+          raceId: ad.race_id,
+          candidateIds: [ad.candidate_id],
+          notificationType: 'ad_activated',
+          title: 'Campaign ad went live',
+          body: ad.title || ad.ad_content_text || 'A campaign ad is now active in a watched race.',
+          linkUrl: `/race/${ad.race_id}`,
+        });
+      }
 
       // 3. Complete active ads whose end_date has passed
       await env.ARENA_DB.prepare(
