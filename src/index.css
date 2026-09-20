@@ -53,6 +53,20 @@ body {
 
 ::selection { background: rgba(110, 110, 247, 0.3); }
 
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid #C7C7F9;
+  outline-offset: 4px;
+}
+.arena-directory-cta { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; padding: 12px 16px; border: 1px solid #6E6EF7; border-radius: 8px; background: #20203d; color: #F2F2F7; text-decoration: none; font-weight: 600; }
+.arena-directory-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; max-width: 100%; }
+.arena-state-filter { display: flex; align-items: center; gap: 8px; color: #9B9BAB; font-size: 13px; }
+.arena-state-filter select { min-height: 44px; padding: 8px; border: 1px solid #34343f; border-radius: 8px; background: #101018; color: #F2F2F7; }
+.arena-race-search { width: 300px; max-width: 100%; min-height: 44px; box-sizing: border-box; }
+.arena-directory-button { min-height: 44px; padding: 8px 14px; border: 1px solid #444459; border-radius: 8px; color: #C7C7F9; background: #161622; cursor: pointer; }
+.arena-directory-button:disabled { opacity: .5; cursor: wait; }
+.arena-directory-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; padding: 16px; border: 1px solid #E5A54D; border-radius: 10px; color: #F2D6AE; background: #231c14; }
+@media (max-width: 600px) { .arena-directory-filters, .arena-race-search { width: 100%; } }
+
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #23232c; border-radius: 3px; }

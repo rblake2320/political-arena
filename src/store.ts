@@ -126,6 +126,8 @@ interface ArenaStore {
   // Cached data
   races: (Race & { candidate_count: number })[];
   raceTotal: number;
+  raceError: string | null;
+  _raceRequest: number;
   raceDetails: Record<string, RaceDetail>;
   allCandidates: (Candidate & { race_name: string; race_state: string })[];
   loading: boolean;
@@ -146,16 +148,25 @@ interface ArenaStore {
 export const useArenaStore = create<ArenaStore>((set, get) => ({
   races: [],
   raceTotal: 0,
+  raceError: null,
+  _raceRequest: 0,
   raceDetails: {},
   allCandidates: [],
   loading: false,
   _loadCount: 0,
 
   fetchRaces: async (sort?: string) => {
+    const request = get()._raceRequest + 1;
+    set({ _raceRequest: request, raceError: null });
     try {
       const { races, total } = await api.getRaces(sort);
-      set({ races: races as any[], raceTotal: total ?? races.length });
+      if (get()._raceRequest === request) {
+        set({ races: races as any[], raceTotal: total ?? races.length });
+      }
     } catch (err) {
+      if (get()._raceRequest === request) {
+        set({ raceError: 'The race directory could not be refreshed. Please try again.' });
+      }
       console.error('Failed to fetch races:', err);
     }
   },
