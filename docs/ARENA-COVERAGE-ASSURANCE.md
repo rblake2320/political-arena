@@ -59,8 +59,6 @@ The first receipts name the pre-commit base and dirty tracked-diff hash, plus th
 runner hash; preserve them as historical runs. Later committed-head receipts are
 separate artifacts, not retroactive attribution of the initial execution.
 
-## Provider and owner decisions
-
 ## Master reconciliation
 
 PR #29 was merged externally during this work. Synced master cd4286c into this
@@ -69,6 +67,12 @@ work. The sole conflict was duplicate sharp overrides and tooling versions;
 retained one sharp 0.35.4 override and the tested newer Vitest/Wrangler versions.
 Combined acceptance: 144 integration tests + 8 client tests = 152 passing;
 build/typecheck passed and npm audit reported 0 vulnerabilities.
+
+First reconciled HTTP run retained as `arena-wiring-reconciled-20260920.json`:
+14/15, because accumulated verification attempts returned 429 for token replay,
+not the expected token-invalid 400. The runner now supplies a distinct simulated
+local client address per run, keeping rate limits enabled. This is an isolated
+local test change, not a production bypass or a relabeling of the failed result.
 
 ## Provider and owner decisions (unchanged)
 

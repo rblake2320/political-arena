@@ -11,9 +11,13 @@ if (useJev && !process.env.TYPESAFE_API_KEY) throw new Error('TYPESAFE_API_KEY r
 const output = process.argv.find(a => a.startsWith('--output='))?.slice(9);
 if (!output) throw new Error('Use --output=<new receipt path>');
 const cases = [];
+// Local-only independent client per run: keep rate limits active without
+// earlier test attempts preempting the token-replay handler being measured.
+const clientBytes = crypto.getRandomValues(new Uint8Array(2));
+const clientIP = `198.18.${clientBytes[0]}.${clientBytes[1]}`;
 const check = (id, requirement, expected, observed) => cases.push({ id, requirement, expected, observed, origin: 'local_http' });
 async function req(method,path,body,token) {
-  const r = await fetch(base+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
+  const r = await fetch(base+path,{method,headers:{'Content-Type':'application/json','CF-Connecting-IP':clientIP,...(token?{Authorization:`Bearer ${token}`}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
   return {status:r.status,body:await r.json()};
 }
 const start=performance.now();

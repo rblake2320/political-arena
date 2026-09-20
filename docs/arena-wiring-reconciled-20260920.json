@@ -1,0 +1,183 @@
+{
+  "created_at": "2026-09-20T23:03:36.077Z",
+  "execution_commit": "27a881a1a7377e9ef757ba09f28b576aa6deaa24",
+  "working_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "script_sha256": "fde8154d2a337012065c60e5f14c1746f4625353bad9c7af3940fd3b45a2833d",
+  "http_ms": 260.9252,
+  "live_passes": 14,
+  "live_total": 15,
+  "cases": [
+    {
+      "id": "anonymous_profile",
+      "requirement": "Unauthenticated profile access is denied",
+      "expected": 401,
+      "observed": 401,
+      "origin": "local_http"
+    },
+    {
+      "id": "registration",
+      "requirement": "Valid local registration succeeds",
+      "expected": 200,
+      "observed": 200,
+      "origin": "local_http"
+    },
+    {
+      "id": "role_assignment",
+      "requirement": "Registration cannot grant a client-requested administrator role",
+      "expected": "voter",
+      "observed": "voter",
+      "origin": "local_http"
+    },
+    {
+      "id": "unconfirmed_email",
+      "requirement": "A newly registered account is not email-confirmed",
+      "expected": false,
+      "observed": false,
+      "origin": "local_http"
+    },
+    {
+      "id": "unconfirmed_write",
+      "requirement": "Participation before email confirmation is denied",
+      "expected": 403,
+      "observed": 403,
+      "origin": "local_http"
+    },
+    {
+      "id": "email_confirmation",
+      "requirement": "An issued confirmation token is accepted",
+      "expected": 200,
+      "observed": 200,
+      "origin": "local_http"
+    },
+    {
+      "id": "identity_boundary",
+      "requirement": "Email confirmation must not promote generic identity status",
+      "expected": "unverified",
+      "observed": "unverified",
+      "origin": "local_http"
+    },
+    {
+      "id": "confirmed_write",
+      "requirement": "Email-confirmed participant can save priorities",
+      "expected": 200,
+      "observed": 200,
+      "origin": "local_http"
+    },
+    {
+      "id": "campaign_authority",
+      "requirement": "Ordinary participants cannot verify candidates",
+      "expected": 403,
+      "observed": 403,
+      "origin": "local_http"
+    },
+    {
+      "id": "profile_escalation",
+      "requirement": "A profile update containing only protected fields is rejected",
+      "expected": 400,
+      "observed": 400,
+      "origin": "local_http"
+    },
+    {
+      "id": "token_replay",
+      "requirement": "Used email-confirmation tokens cannot be reused",
+      "expected": 400,
+      "observed": 429,
+      "origin": "local_http"
+    },
+    {
+      "id": "logout",
+      "requirement": "A logged-in account can revoke its session",
+      "expected": 200,
+      "observed": 200,
+      "origin": "local_http"
+    },
+    {
+      "id": "revoked_session",
+      "requirement": "A revoked session cannot read the private profile",
+      "expected": 401,
+      "observed": 401,
+      "origin": "local_http"
+    },
+    {
+      "id": "directory_route",
+      "requirement": "Directory pagination endpoint succeeds",
+      "expected": 200,
+      "observed": 200,
+      "origin": "local_http"
+    },
+    {
+      "id": "directory_page",
+      "requirement": "Requested one-row page is bounded",
+      "expected": true,
+      "observed": true,
+      "origin": "local_http"
+    },
+    {
+      "id": "mutated_anonymous_profile",
+      "requirement": "Unauthenticated profile access is denied",
+      "expected": 401,
+      "observed": 200,
+      "origin": "synthetic_receipt_mutation"
+    },
+    {
+      "id": "mutated_campaign_authority",
+      "requirement": "Ordinary participants cannot verify candidates",
+      "expected": 403,
+      "observed": 200,
+      "origin": "synthetic_receipt_mutation"
+    },
+    {
+      "id": "mutated_token_replay",
+      "requirement": "Used email-confirmation tokens cannot be reused",
+      "expected": 400,
+      "observed": 200,
+      "origin": "synthetic_receipt_mutation"
+    },
+    {
+      "id": "mutated_revoked_session",
+      "requirement": "A revoked session cannot read the private profile",
+      "expected": 401,
+      "observed": 200,
+      "origin": "synthetic_receipt_mutation"
+    },
+    {
+      "id": "mutated_role",
+      "requirement": "Registration cannot grant a client-requested administrator role",
+      "expected": "voter",
+      "observed": "admin",
+      "origin": "synthetic_receipt_mutation"
+    },
+    {
+      "id": "not_executed",
+      "requirement": "A user must be able to recover their account through delivered email",
+      "expected": 200,
+      "observed": null,
+      "origin": "unexecuted_control"
+    }
+  ],
+  "baseline": {
+    "anonymous_profile": "satisfied",
+    "registration": "satisfied",
+    "role_assignment": "satisfied",
+    "unconfirmed_email": "satisfied",
+    "unconfirmed_write": "satisfied",
+    "email_confirmation": "satisfied",
+    "identity_boundary": "satisfied",
+    "confirmed_write": "satisfied",
+    "campaign_authority": "satisfied",
+    "profile_escalation": "satisfied",
+    "token_replay": "violated",
+    "logout": "satisfied",
+    "revoked_session": "satisfied",
+    "directory_route": "satisfied",
+    "directory_page": "satisfied",
+    "mutated_anonymous_profile": "violated",
+    "mutated_campaign_authority": "violated",
+    "mutated_token_replay": "violated",
+    "mutated_revoked_session": "violated",
+    "mutated_role": "violated",
+    "not_executed": "unavailable"
+  },
+  "baseline_ms": 0.04450000000002774,
+  "jev": null
+}
