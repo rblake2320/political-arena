@@ -588,7 +588,7 @@ export function Race() {
             );
           })}
           {tab === "questions" && questions.length === 0 && (
-            <EmptyPanel title="No questions yet" detail="Verified voters and approved press can ask questions. Top unanswered questions can later feed formal callout suggestions." action={<ActionButton onClick={() => setAction("question")}>Ask question</ActionButton>} />
+            <EmptyPanel title="No questions yet" detail="Email-confirmed participants and approved press can ask questions. Top unanswered questions can later feed formal callout suggestions." action={<ActionButton onClick={() => setAction("question")}>Ask question</ActionButton>} />
           )}
           {(tab === "wire" || tab === "questions") && (
             <div style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 16, background: "#0C0C13", overflow: "hidden" }}>
@@ -1040,11 +1040,11 @@ function AskQuestionModal({ raceId, onClose }: { raceId: string; onClose: (refre
   };
 
   return (
-    <ModalFrame title="Ask a question" kicker="Verified voter or approved press" onClose={() => onClose()}>
+    <ModalFrame title="Ask a question" kicker="Email-confirmed participant or approved press" onClose={() => onClose()}>
       <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
         <FormMessage notice={notice} />
         <SelectField label="Question source" value={sourceType} onChange={setSourceType}>
-          <option value="voter">Verified voter</option>
+          <option value="voter">Email-confirmed participant</option>
           {isApprovedPress && <option value="press">Approved press</option>}
         </SelectField>
         <TextAreaField label="Question" required value={questionText} onChange={setQuestionText} maxLength={2000} rows={5} placeholder="What should candidates address on the record?" />
