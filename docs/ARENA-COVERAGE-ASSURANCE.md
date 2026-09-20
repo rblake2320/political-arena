@@ -29,6 +29,12 @@
   replay and revoked-session rejection.
 - Browser: 52 select options (All states plus 50 states and DC); Alaska selected
   with zero local records shows no-match state, and Clear filters restores 3.
+- Browser: actual local sign-in followed by Settings displayed the account
+  verification panel, unconfirmed email state, confirmation link and explicit
+  self-reported identity/location and separate campaign-authorization explanations.
+- Committed implementation 8740759: 15/15 HTTP checks rerun in
+  `arena-wiring-committed-20260920.json`; no Jev call on this rerun.
+- Exact Jev credential scan found no match in tracked files or built assets.
 - More-than-600 recovery uses a 601-record client fixture; server pagination uses
   real D1 equal-rank fixtures. Neither is a populated nationwide election database.
 
