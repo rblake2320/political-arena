@@ -73,6 +73,8 @@ First reconciled HTTP run retained as `arena-wiring-reconciled-20260920.json`:
 not the expected token-invalid 400. The runner now supplies a distinct simulated
 local client address per run, keeping rate limits enabled. This is an isolated
 local test change, not a production bypass or a relabeling of the failed result.
+The isolated rerun at committed head 8b03c96 passed 15/15, including the exact
+400 token-replay result; see `arena-wiring-isolated-20260920.json`.
 
 ## Provider and owner decisions (unchanged)
 
