@@ -3,6 +3,7 @@ import { useParams } from "react-router";
 import * as api from "../api";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ContentMedia } from "../components/Media";
+import { WatchButton } from "../components/WatchButton";
 
 const mono = "'IBM Plex Mono', ui-monospace, monospace";
 const display = "'Space Grotesk', system-ui, sans-serif";
@@ -142,6 +143,7 @@ export function ChallengeReceiptPage() {
 
   return (
     <div style={{ background: "#08080C", color: "#F2F2F7", fontFamily: "'Hanken Grotesk', system-ui, sans-serif" }}>
+      <div className="mb-4 flex justify-end"><WatchButton targetType="challenge" targetId={challenge.id} /></div>
       <div style={{ padding: isMobile ? 16 : 40, background: "radial-gradient(900px 400px at 50% -20%, rgba(110,110,247,.1), transparent 65%)" }}>
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0,1fr) 340px", gap: isMobile ? 16 : 26, maxWidth: 1240, margin: "0 auto", alignItems: "start" }}>
 

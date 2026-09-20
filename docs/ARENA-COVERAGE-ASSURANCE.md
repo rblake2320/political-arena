@@ -61,6 +61,17 @@ separate artifacts, not retroactive attribution of the initial execution.
 
 ## Provider and owner decisions
 
+## Master reconciliation
+
+PR #29 was merged externally during this work. Synced master cd4286c into this
+branch, preserving its press sources, watchlist, notification and paired-media
+work. The sole conflict was duplicate sharp overrides and tooling versions;
+retained one sharp 0.35.4 override and the tested newer Vitest/Wrangler versions.
+Combined acceptance: 144 integration tests + 8 client tests = 152 passing;
+build/typecheck passed and npm audit reported 0 vulnerabilities.
+
+## Provider and owner decisions (unchanged)
+
 Independent person/address/voter verification, campaign evidence requirements,
 MFA enrollment and nationwide state/local election feeds require a separately
 specified provider and policy. No ID-document collection, production deployment,

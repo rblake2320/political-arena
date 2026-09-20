@@ -53,3 +53,7 @@ Further useful Beast work: screenshot-based mobile review once capture works;
 race-detail source/receipt navigation; larger-directory server-side search and
 pagination; visible provenance for generated versus captured media. These are
 opportunities, not delivered features in this branch.
+
+## Reconciliation follow-up - 2026-09-20
+
+The audit blocker above is resolved by the pending-commit reconciliation: Vitest 4.1.11 and sharp 0.35.4, with the latter constrained by an override because the Cloudflare test pool pins its transitive tooling. The combined branch passed 141 worker integration tests, all 3 client-state tests, TypeScript, the production build, and npm audit (zero vulnerabilities). PR #29 is integrated; its original review remains above as historical evidence.

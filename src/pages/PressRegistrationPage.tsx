@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
-import { Check, Newspaper, AlertCircle, Clock, ExternalLink, Search } from "lucide-react";
+import { Check, Newspaper, AlertCircle, Clock, ExternalLink, Search, Plus, Trash2 } from "lucide-react";
 import * as api from "../api";
 import { useAuth } from "../stores/auth";
 
@@ -43,10 +43,18 @@ export function PressRegistrationPage() {
   const [lookupTarget, setLookupTarget] = useState(lookupTargets[0].id);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [sources, setSources] = useState<any[]>([]);
+  const [sourceError, setSourceError] = useState("");
+  const [sourceSubmitting, setSourceSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     outlet_name: "",
     outlet_type: "digital" as string,
     proof_url: "",
+  });
+  const [sourceForm, setSourceForm] = useState({
+    name: "",
+    url: "",
+    description: "",
   });
 
   useEffect(() => {
@@ -93,6 +101,51 @@ export function PressRegistrationPage() {
       setError(err.response?.data?.error || err.message || "Failed to submit");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const reloadSources = async () => {
+    const data = await api.getPressSources();
+    setSources(data.sources || []);
+  };
+
+  useEffect(() => {
+    setSources([]);
+    setSourceError("");
+    if (!user) return;
+    let active = true;
+    api.getPressSources()
+      .then(data => { if (active) setSources(data.sources || []); })
+      .catch(() => { if (active) setSourceError("Failed to load tracked sources. Please reload to retry."); });
+    return () => { active = false; };
+  }, [user]);
+
+  const handleSourceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSourceSubmitting(true);
+    setSourceError("");
+    try {
+      await api.addPressSource({
+        name: sourceForm.name,
+        url: sourceForm.url,
+        description: sourceForm.description || undefined,
+      });
+      setSourceForm({ name: "", url: "", description: "" });
+      await reloadSources();
+    } catch (err: any) {
+      setSourceError(err.response?.data?.error || err.message || "Failed to add source");
+    } finally {
+      setSourceSubmitting(false);
+    }
+  };
+
+  const handleRemoveSource = async (id: string) => {
+    setSourceError("");
+    try {
+      await api.removePressSource(id);
+      await reloadSources();
+    } catch (err: any) {
+      setSourceError(err.response?.data?.error || err.message || "Failed to remove source");
     }
   };
 
@@ -333,6 +386,116 @@ export function PressRegistrationPage() {
         </>
       )}
       </div>
+      {user && (
+
+      <section className="mt-12 pt-8 border-t border-zinc-800">
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <h2 className="text-xl font-semibold text-white">Tracked News Sources</h2>
+            <p className="text-sm text-zinc-500 mt-1">Preloaded politics links plus your own source list.</p>
+          </div>
+          <Newspaper className="w-5 h-5 text-indigo-400 mt-1" />
+        </div>
+
+        {sourceError && (
+          <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+            {sourceError}
+          </div>
+        )}
+
+        <div className="space-y-3 mb-6">
+          {sources.map(source => (
+            <div key={source.id} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="font-medium text-white truncate">{source.name}</div>
+                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      source.is_default
+                        ? "border-indigo-500/30 bg-indigo-500/10 text-indigo-300"
+                        : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                    }`}>
+                      {source.is_default ? "Preloaded" : "Yours"}
+                    </span>
+                  </div>
+                  {source.description && (
+                    <div className="text-sm text-zinc-400 mb-2">{source.description}</div>
+                  )}
+                  <a
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex max-w-full items-center gap-1 text-sm text-indigo-300 hover:text-indigo-200"
+                  >
+                    <span className="truncate">{source.url}</span>
+                    <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                  </a>
+                </div>
+                {!source.is_default && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveSource(source.id)}
+                    className="shrink-0 rounded-lg border border-zinc-800 p-2 text-zinc-500 hover:border-red-500/40 hover:text-red-400 transition-colors"
+                    aria-label={`Remove ${source.name}`}
+                    title={`Remove ${source.name}`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <form onSubmit={handleSourceSubmit} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4 space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="source-name" className="block text-sm font-medium text-zinc-400 mb-1.5">Source Name</label>
+              <input id="source-name"
+                required
+                type="text"
+                maxLength={200}
+                placeholder="Local politics desk"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                value={sourceForm.name}
+                onChange={e => setSourceForm({ ...sourceForm, name: e.target.value })}
+              />
+            </div>
+            <div>
+              <label htmlFor="source-url" className="block text-sm font-medium text-zinc-400 mb-1.5">Source URL</label>
+              <input id="source-url"
+                required
+                type="url"
+                maxLength={1000}
+                placeholder="https://newsroom.example/politics"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                value={sourceForm.url}
+                onChange={e => setSourceForm({ ...sourceForm, url: e.target.value })}
+              />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="source-note" className="block text-sm font-medium text-zinc-400 mb-1.5">Note</label>
+            <input id="source-note"
+              type="text"
+              maxLength={500}
+              placeholder="Statehouse, local races, campaign finance"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+              value={sourceForm.description}
+              onChange={e => setSourceForm({ ...sourceForm, description: e.target.value })}
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={sourceSubmitting || !sourceForm.name || !sourceForm.url}
+            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:bg-indigo-600/50 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            {sourceSubmitting ? "Adding..." : "Add Source"}
+          </button>
+        </form>
+      </section>
+      )}
     </div>
   );
 }

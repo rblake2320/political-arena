@@ -642,8 +642,12 @@ export async function unsubscribe(subscriptionId: string) {
   return unwrap<any>(await api.delete(`/notifications/subscribe/${subscriptionId}`));
 }
 
+export async function getWatchlist() {
+  return unwrap<{ subscriptions: any[] }>(await api.get('/notifications/watchlist'));
+}
+
 export async function getMySubscriptions() {
-  return unwrap<any>(await api.get('/notifications/my-subscriptions'));
+  return unwrap<{ subscriptions: any[] }>(await api.get('/notifications/my-subscriptions'));
 }
 
 export async function getNotifications(page?: number) {
@@ -741,6 +745,31 @@ export async function getPressFeed(params?: { source?: string; section?: string;
   return unwrap<{ items: PressFeedItem[]; sources: any[]; limit: number }>(
     await api.get(`/press/feed${query ? `?${query}` : ''}`)
   );
+}
+
+export async function getPressSources() {
+  return unwrap<{ sources: any[] }>(await api.get('/press/sources'));
+}
+
+export async function addPressSource(data: { name: string; url: string; description?: string }) {
+  const result = unwrap<any>(await api.post('/press/sources', data));
+  void trackEvent({
+    event_type: result.already_preloaded ? 'press_source_existing_default' : 'press_source_added',
+    content_type: 'press_source',
+    content_id: result.source?.id,
+    metadata: { url: result.source?.url, is_default: Boolean(result.source?.is_default) },
+  });
+  return result;
+}
+
+export async function removePressSource(id: string) {
+  const result = unwrap<any>(await api.delete(`/press/sources/${id}`));
+  void trackEvent({
+    event_type: 'press_source_removed',
+    content_type: 'press_source',
+    content_id: id,
+  });
+  return result;
 }
 
 // ---- Credits ----
