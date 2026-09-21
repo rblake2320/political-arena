@@ -2,6 +2,10 @@
 
 Updated 2026-09-21 UTC. Read this before resuming. This is a handoff, not a release approval.
 
+## Latest completed follow-through
+
+The inference comparison has now run, not merely been planned. See `INFERENCE-COMPARISON-RESULTS.md`: original 36/48 contract pass (retained failure); schema-constrained follow-up 48/48 pass; speculative median paired group reduction 61.84%; serial-to-two-concurrent reduction 21.31%. Runtime is isolated llama.cpp/Vulkan, not TensorRT or Jev. All owned benchmark servers stopped. The numbered plan below records the earlier staging plan; its text-inference experiment is now completed by these receipts, while multimodal/disaggregated deployments are separate opportunities, not implicitly authorized product changes.
+
 ## Active work and preservation
 
 - Repo: `D:\projects\political-arena-beast-ui`; branch `codex/arena-coverage-assurance-20260920`; draft PR #30. Implementation checkpoint: `902444b` (sample labels), preceding `e0e0db6` (restored media and UI wiring).
