@@ -1,0 +1,43 @@
+
+> political-arena@1.0.0 build
+> tsc --noEmit && vite build
+
+vite v8.1.5 building client environment for production...
+[2Ktransforming...✓ 2220 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                  1.56 kB │ gzip:   0.70 kB
+dist/assets/index-CGyZB1Ue.css                  49.16 kB │ gzip:   9.04 kB
+dist/assets/check-C-LvvlCa.js                    0.12 kB │ gzip:   0.14 kB
+dist/assets/plus-dD0f1o7c.js                     0.15 kB │ gzip:   0.15 kB
+dist/assets/circle-check-DDoWBiyB.js             0.17 kB │ gzip:   0.16 kB
+dist/assets/vote-CnNgcZk2.js                     0.23 kB │ gzip:   0.19 kB
+dist/assets/external-link-D-Fp1eYR.js            0.25 kB │ gzip:   0.20 kB
+dist/assets/users-BVEoNv67.js                    0.30 kB │ gzip:   0.22 kB
+dist/assets/swords-D3nGygfb.js                   0.55 kB │ gzip:   0.28 kB
+dist/assets/video-SGLvM0jd.js                    0.58 kB │ gzip:   0.35 kB
+dist/assets/createLucideIcon-DN0J77WO.js         1.38 kB │ gzip:   0.77 kB
+dist/assets/WatchButton-C0AmlSN9.js              2.10 kB │ gzip:   1.14 kB
+dist/assets/NotificationsPage-BEXGZKD1.js        2.86 kB │ gzip:   1.25 kB
+dist/assets/ForgotPassword-BXNXl-9R.js           3.30 kB │ gzip:   1.40 kB
+dist/assets/VerifyEmail-CPaivE0x.js              3.43 kB │ gzip:   1.38 kB
+dist/assets/ResetPassword-dUPXhMIR.js            4.18 kB │ gzip:   1.59 kB
+dist/assets/MyArenaPage-Bh3U2kHS.js              5.71 kB │ gzip:   2.07 kB
+dist/assets/SettingsPage-DTAPl3AI.js             6.81 kB │ gzip:   2.48 kB
+dist/assets/WhatMattersPage-BPvdgKZL.js          6.97 kB │ gzip:   2.40 kB
+dist/assets/CandidateProfilePage-_Tr0jfQa.js     7.54 kB │ gzip:   2.31 kB
+dist/assets/jsx-runtime-n5LQ9ujS.js              8.53 kB │ gzip:   3.26 kB
+dist/assets/MyPrioritiesPage-BLXgZgzu.js         8.59 kB │ gzip:   3.02 kB
+dist/assets/formatDistanceToNow-BZHhq3ch.js      9.60 kB │ gzip:   3.30 kB
+dist/assets/LegalPage-DcrN2ecS.js               10.32 kB │ gzip:   4.03 kB
+dist/assets/Media-oTiHLtfI.js                   10.47 kB │ gzip:   3.81 kB
+dist/assets/PressRegistrationPage-C1wLpHTj.js   16.96 kB │ gzip:   4.28 kB
+dist/assets/Help-DOG-5kq0.js                    17.58 kB │ gzip:   4.67 kB
+dist/assets/hooks-w6XAZV_W.js                   19.73 kB │ gzip:   7.64 kB
+dist/assets/ChallengeReceiptPage-3qWkr8m4.js    19.77 kB │ gzip:   5.60 kB
+dist/assets/ModerationPage-CH7XgSGt.js          20.79 kB │ gzip:   5.15 kB
+dist/assets/CandidateDashboard-BNoYH47n.js      26.66 kB │ gzip:   6.38 kB
+dist/assets/Race-Bh-fjQzm.js                    63.48 kB │ gzip:  15.22 kB
+dist/assets/index-CTtfYFbI.js                  320.52 kB │ gzip: 100.45 kB
+
+✓ built in 3.04s

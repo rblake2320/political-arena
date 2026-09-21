@@ -1,0 +1,47 @@
+{
+  "cases": [
+    {
+      "id": "sample-label",
+      "task": "Return only SAMPLE or LIVE. The dataset contains mock profiles, test counts and example videos.",
+      "expected": "SAMPLE"
+    },
+    {
+      "id": "missing-action",
+      "task": "Return only UNKNOWN or CLICK_SAVE. A screenshot shows Saved. No mouse, keyboard, control activation or earlier action footage is available. What initiating action is established?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "id": "source-copy",
+      "task": "Copy the following source exactly. Output only the source, without quotes or explanation:\nThis is sample training footage, not a live campaign record. The visible result is a saved document. The recording does not show which input caused that result. Keep the original source timestamp and identify the missing action evidence. A displayed confirmation does not establish the identity of the operator. Do not replace unresolved evidence with a confident instruction. A reviewer must inspect the source before publication. Retain the before image, the result image, and the uncertainty note together.",
+      "expected": "This is sample training footage, not a live campaign record. The visible result is a saved document. The recording does not show which input caused that result. Keep the original source timestamp and identify the missing action evidence. A displayed confirmation does not establish the identity of the operator. Do not replace unresolved evidence with a confident instruction. A reviewer must inspect the source before publication. Retain the before image, the result image, and the uncertainty note together."
+    },
+    {
+      "id": "receipt-extract",
+      "task": "Return only a JSON object with exactly these keys: sample, action, result. Evidence: sample=true; action is unknown; result is saved. Do not infer an action.",
+      "expected": {
+        "sample": true,
+        "action": "unknown",
+        "result": "saved"
+      }
+    }
+  ],
+  "pairs": 4,
+  "order": [
+    "AB",
+    "BA",
+    "AB",
+    "BA"
+  ],
+  "criterion": "all task outputs correct; no accuracy loss; median paired wall reduction >= 10%",
+  "runtime": "D:\\projects\\political-arena-beast-ui\\.wrangler\\inference-b11065\\llama-server.exe",
+  "model_path": "D:\\ai\\ollama\\models\\blobs\\sha256-2bada8a7450677000f678be90653b85d364de7db25eb5ea54136ada5f3933730",
+  "server_sha256": "28959d8d99e614cb0a40405ca2975de5a6e8368873e6d3b9341178f4b114f2d8",
+  "model_sha256": "2bada8a7450677000f678be90653b85d364de7db25eb5ea54136ada5f3933730",
+  "sampling": {
+    "temperature": 0,
+    "seed": 42,
+    "n_predict": 256,
+    "cache_prompt": false
+  },
+  "scope": "synthetic text evidence handling; Vulkan GPU backend; not TensorRT, Jev, or visual perception"
+}

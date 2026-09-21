@@ -313,11 +313,11 @@ router.get('/', async (request, env) => {
   if (status && status !== 'all') { sql += ` AND r.status = ?`; binds.push(status); }
 
   if (sort === 'trending') {
-    sql += ` ORDER BY (challenge_count + ad_count + question_count + response_count) DESC, r.created_at DESC`;
+    sql += ` ORDER BY (challenge_count + ad_count + question_count + response_count) DESC, r.created_at DESC, r.id ASC`;
   } else if (sort === 'name') {
-    sql += ` ORDER BY r.name ASC`;
+    sql += ` ORDER BY r.name ASC, r.id ASC`;
   } else {
-    sql += ` ORDER BY r.created_at DESC`;
+    sql += ` ORDER BY r.created_at DESC, r.id ASC`;
   }
   sql += ` LIMIT ? OFFSET ?`;
   binds.push(limit, offset);

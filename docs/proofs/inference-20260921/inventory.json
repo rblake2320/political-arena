@@ -1,0 +1,19 @@
+{
+  ".gitattributes": "9e371c27f590d7364d010ac70cd4c0356ac4cd21b8881076bed8b467422681a4",
+  "batch-A-0-none.txt": "0c1a6dcb60e0a87e6a6d1b71793c0b32bf381faa2fa2765025e5eb49c3c937ce",
+  "batch-A-1-none.txt": "0fa41291a490fd8919583969041492e1ccba187c6b3e5c0f3e0a9cd5561683d3",
+  "batch-B-0-none.txt": "4d43a47a9d0935065c25444999fccc7cb9759f9ce2365bc61f477acaca53c542",
+  "batch-B-1-none.txt": "0f9f201dd85947922dcc84e31fd5fb05444f6617b084e188a8e5639b78fbf649",
+  "frozen-config.json": "4946e2b7bdf9efbf1ce7e1013136793c8c577b7585b52795899f56bb04722751",
+  "receipt.json": "c46f2d03c3c738d9fde27543f518ce81f2d9013a69acd4f3d6cbca1742fcef69",
+  "runner-original.py": "a67c39100ca3bf6e4c3c99b3042716cbd302185ed4236d24bbf07d8fca6714ae",
+  "spec-0-ngram-simple.txt": "4afefde9ec509a613e8a3b12f4775288c7635bde4ba6e87b34fad738cc5acd08",
+  "spec-0-none.txt": "fd96db6cc8bbff2dad2d5cf8be7f9c1f536b106ada165fac648bc01a834547ba",
+  "spec-1-ngram-simple.txt": "1c3f5db24f6bc8fc5cff33a2e4e8a4fc1c67bec88043401f3129421663a9f92d",
+  "spec-1-none.txt": "7436cca4f1f19ff9141816a0a6cdc167f12e27ed80d9c8be7cc145f413f26121",
+  "spec-2-ngram-simple.txt": "35e248cfcd9100df868d3863c6d2f2d4baf8315cdbbfcbb13ca239266b40e972",
+  "spec-2-none.txt": "18750f15f4414080077919105a73ada38bf809514d34a501728f3d568ef61743",
+  "spec-3-ngram-simple.txt": "25324ca0023d519644d9fd74b9ca7fc573e4f2897c479b701952573b9a9d885c",
+  "spec-3-none.txt": "02e42e94307e03f6ff73b233a9f01ce03bcfc07dbbf6198ea4c24b552844cceb",
+  "summary.json": "e52043d74aa347835c5cd029bfc2c5a582d9504383096cd038db28d9824b7880"
+}

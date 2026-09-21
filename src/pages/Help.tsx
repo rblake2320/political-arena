@@ -254,7 +254,7 @@ export function Help() {
           <div className="space-y-2 mt-2">
             <div className="flex items-start gap-2">
               <Users className="w-4 h-4 text-zinc-400 mt-0.5 flex-shrink-0" />
-              <span><strong className="text-white">Voter</strong> — basic account. Can view all content. Verified voters can submit questions and reactions; signed-in users can add recites.</span>
+              <span><strong className="text-white">Participant</strong> — basic account. Can view all content. Email-confirmed participants can submit questions and reactions; signed-in users can add recites. Email confirmation does not establish identity or voter eligibility.</span>
             </div>
             <div className="flex items-start gap-2">
               <Newspaper className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />

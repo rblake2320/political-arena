@@ -316,6 +316,7 @@ export function ContentMedia({
   clipEnd?: number;
 }) {
   const [errored, setErrored] = useState(false);
+  useEffect(() => { setErrored(false); setShowFull(false); }, [url]);
   const hasClip = typeof clipStart === 'number' || typeof clipEnd === 'number';
   const [showFull, setShowFull] = useState(false);
   // Native media fragments: #t=start,end starts playback at `start` and pauses at `end`.

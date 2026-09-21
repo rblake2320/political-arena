@@ -56,7 +56,7 @@ export function WhatMattersPage() {
           What Matters to Voters
         </h1>
         <p className="text-lg text-zinc-400 max-w-2xl mx-auto">
-          Real priorities from verified voters — not pollsters, not pundits.
+          Priorities submitted by email-confirmed participants. Identity and voter eligibility are not independently verified.
           See where both parties actually agree, and where they diverge.
         </p>
       </div>

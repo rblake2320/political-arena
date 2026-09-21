@@ -502,7 +502,7 @@ router.post('/verify-email', async (request, env, ctx) => {
   if (!user) return errorResponse('Invalid or expired verification token', 400);
 
   await env.ARENA_DB.prepare(
-    `UPDATE users SET email_verified = 1, verification_token = NULL, verification_status = 'verified', updated_at = datetime('now') WHERE id = ?`
+    `UPDATE users SET email_verified = 1, verification_token = NULL, updated_at = datetime('now') WHERE id = ?`
   ).bind(user.id).run();
 
   auditLog(env.ARENA_DB, ctx, {

@@ -86,7 +86,7 @@ export function EvidencePanel({ contentType, contentId, sideLabel }: { contentTy
       }
       await load();
     } catch (err: any) {
-      setMsg(err?.response?.data?.error || "Reactions require a verified voter account.");
+      setMsg(err?.response?.data?.error || "Reactions require email confirmation, not identity verification.");
     } finally {
       setBusy(false);
     }

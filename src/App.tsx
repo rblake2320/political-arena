@@ -23,6 +23,7 @@ const VerifyEmail = lazy(() => import("./pages/VerifyEmail").then((m) => ({ defa
 const LegalPage = lazy(() => import("./pages/LegalPage").then((m) => ({ default: m.LegalPage })));
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 import { LiveWire } from "./components/LiveWire";
+import { SampleNotice } from "./components/SampleNotice";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useAuth } from "./stores/auth";
 import { useArenaStore } from "./store";
@@ -351,8 +352,14 @@ function AppContent() {
   const userId = user?.id;
   const portalCandidates = useMemo(() => {
     if (!user) return [];
-    const linkedCandidateIds = new Set((user.staff_links || []).map((link: any) => link.candidate_id));
-    return allCandidates.filter(candidate => linkedCandidateIds.has(candidate.id));
+    // A pending campaign is intentionally absent from public race results.
+    // Its authorized staff must still be able to reach their private portal.
+    return (user.staff_links || []).map((link: any) =>
+      allCandidates.find(candidate => candidate.id === link.candidate_id) || {
+        id: link.candidate_id, name: link.candidate_name, party: link.candidate_party,
+        race_id: link.race_id, biography: '', issue_positions: [],
+        race_name: '', race_state: '',
+      });
   }, [allCandidates, user]);
 
   useEffect(() => {
@@ -460,6 +467,7 @@ function AppContent() {
     <CandidateContext.Provider value={{ candidates: portalCandidates, activeCandidateId, setActiveCandidateId }}>
       <div className="min-h-screen text-zinc-50 font-sans selection:bg-indigo-500/30" style={{ background: '#08080C' }}>
         <a href="#main-content" style={{ position: 'absolute', left: -9999, top: 0, zIndex: 100, background: '#6E6EF7', color: '#fff', padding: '10px 16px', borderRadius: 8 }} onFocus={e => { e.currentTarget.style.left = '12px'; e.currentTarget.style.top = '12px'; }} onBlur={e => { e.currentTarget.style.left = '-9999px'; }}>Skip to content</a>
+        <SampleNotice />
         <LiveWire />
         <Navigation />
         {user && !user.email_verified && (

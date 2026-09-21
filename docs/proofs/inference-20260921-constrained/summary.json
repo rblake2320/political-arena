@@ -1,0 +1,58 @@
+{
+  "comparisons": {
+    "speculation": {
+      "baseline_seconds": [
+        4.743831200001296,
+        4.394312399963383,
+        4.825231399969198,
+        4.476504699967336
+      ],
+      "treatment_seconds": [
+        1.7842638999572955,
+        1.7720669999835081,
+        1.7356070000096224,
+        1.7329255000222474
+      ],
+      "baseline_median": 4.610167949984316,
+      "treatment_median": 1.7538369999965653,
+      "median_paired_reduction": 0.618380635037165
+    },
+    "concurrent_requests": {
+      "baseline_seconds": [
+        4.6541220000362955,
+        4.810960399976466
+      ],
+      "treatment_seconds": [
+        3.6735216999659315,
+        3.7740880000055768
+      ],
+      "baseline_median": 4.732541200006381,
+      "treatment_median": 3.723804849985754,
+      "median_paired_reduction": 0.21310898432320202
+    }
+  },
+  "scored_requests": 48,
+  "correct": 48,
+  "exact_spec_output_matches": 16,
+  "spec_output_pairs": 16,
+  "all_owned_servers_stopped": true,
+  "spec_graduates": true,
+  "case_median_seconds": {
+    "missing-action": {
+      "none": 0.10733470000559464,
+      "ngram-simple": 0.11513594997813925
+    },
+    "receipt-extract": {
+      "none": 0.925567200029036,
+      "ngram-simple": 0.9052143000008073
+    },
+    "sample-label": {
+      "none": 0.11167630000272766,
+      "ngram-simple": 0.1013830500014592
+    },
+    "source-copy": {
+      "none": 3.4361757500155363,
+      "ngram-simple": 0.6131263000133913
+    }
+  }
+}
