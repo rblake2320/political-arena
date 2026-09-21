@@ -1,0 +1,4 @@
+# Raw Windows receipts intentionally preserve CRLF bytes for SHA-256 custody.
+inference-*/*.txt whitespace=cr-at-eol
+inference-*/*.json whitespace=cr-at-eol
+inference-*/*.py whitespace=cr-at-eol
