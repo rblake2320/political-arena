@@ -1,0 +1,22 @@
+
+> political-arena@1.0.0 test
+> vitest run && vitest run --config vitest.ui.config.ts
+
+
+ RUN  v4.1.11 D:/projects/political-arena-beast-ui
+
+
+ Test Files  18 passed (18)
+      Tests  144 passed (144)
+   Start at  00:23:44
+   Duration  11.06s (transform 19.79s, setup 0ms, import 67.65s, tests 11.47s, environment 3ms)
+
+
+ RUN  v4.1.11 D:/projects/political-arena-beast-ui
+
+
+ Test Files  4 passed (4)
+      Tests  13 passed (13)
+   Start at  00:23:56
+   Duration  1.64s (transform 559ms, setup 0ms, import 3.21s, tests 24ms, environment 0ms)
+

@@ -1,0 +1,18 @@
+name, memory.total [MiB], memory.used [MiB], utilization.gpu [%]
+NVIDIA GeForce RTX 5090, 32607 MiB, 18282 MiB, 8 %
+ollama found
+aiperf not on PATH
+trtllm-serve not on PATH
+{
+  "status": "ok",
+  "database": "ok",
+  "sample_data": true,
+  "version": "1.0.0",
+  "timestamp": "2026-09-21T05:24:20.692Z"
+}
+{
+  "version": "0.32.14"
+}
+{
+  "models": []
+}
