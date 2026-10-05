@@ -15,6 +15,17 @@ export default defineConfig({
         bindings: {
           ENVIRONMENT: 'test',
           JWT_SECRET: 'integration-test-secret-not-used-in-production',
+          // Wrangler reads .dev.vars. Never inherit a developer's provider
+          // credentials/endpoints or trigger real email/feed calls in tests.
+          EMAIL_PROVIDER: '',
+          EMAIL_FROM: '',
+          RESEND_API_KEY: '',
+          POSTMARK_SERVER_TOKEN: '',
+          PASSWORD_RESET_WEBHOOK_URL: '',
+          PASSWORD_RESET_WEBHOOK_TOKEN: '',
+          RESEND_API_URL: '',
+          POSTMARK_API_URL: '',
+          PRESS_FEED_RSS_SOURCES: '',
           CHALLENGE_SLA_HOURS: '72',
           REBUTTAL_WINDOW_HOURS: '48',
           MAX_CHALLENGES_PER_DAY: '3',
