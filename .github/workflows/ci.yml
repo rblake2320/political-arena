@@ -6,13 +6,16 @@ on:
   pull_request:
     branches: [master, main]
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
@@ -20,11 +23,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck + build frontend
-        run: npm run build
-
-      - name: Integration tests (real worker in workerd + D1)
-        run: npm test
-
-      - name: Dependency audit
-        run: npm audit --audit-level=low
+      - name: Verify build, Worker/D1/R2 regressions, client state and dependencies
+        run: npm run verify
