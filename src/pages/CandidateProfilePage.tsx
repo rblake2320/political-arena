@@ -4,6 +4,7 @@ import { AlertCircle, ExternalLink, FileText, ShieldCheck, Swords, Video } from 
 import { formatDistanceToNow } from "date-fns";
 import * as api from "../api";
 import { WatchButton } from "../components/WatchButton";
+import { VotingRecord } from "../components/VotingRecord";
 
 function scoreClass(score: number) {
   if (score >= 75) return "text-emerald-300 border-emerald-500/30 bg-emerald-500/10";
@@ -173,6 +174,8 @@ export function CandidateProfilePage() {
           </div>
         </aside>
       </div>
+
+      <VotingRecord candidateId={candidate.id} />
     </div>
   );
 }

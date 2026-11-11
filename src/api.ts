@@ -132,6 +132,27 @@ export async function getCandidatePublicProfile(candidateId: string) {
   return unwrap<any>(await api.get(`/candidates/${candidateId}/public-profile`));
 }
 
+// ---- Voting records ----
+export async function getCandidateVotingRecord(candidateId: string, page = 1, limit = 10) {
+  return unwrap<any>(await api.get(`/voting-records/candidates/${candidateId}`, { params: { page, limit } }));
+}
+export async function getIdentityLinks(status: 'proposed' | 'confirmed' = 'proposed') {
+  return unwrap<{ links: any[] }>(await api.get('/voting-records/identity-links', { params: { status } }));
+}
+export async function proposeIdentityLink(payload: {
+  candidate_id: string; identifier_value: string; official_name: string;
+  match_method: 'manual' | 'official_directory' | 'fec_crosswalk'; match_confidence: number;
+  evidence_url: string; evidence_note?: string;
+}) {
+  return unwrap<any>(await api.post('/voting-records/identity-links', payload));
+}
+export async function reviewIdentityLink(id: string, decision: 'confirm' | 'reject', note: string) {
+  return unwrap<any>(await api.post(`/voting-records/identity-links/${id}/review`, { decision, note }));
+}
+export async function revokeIdentityLink(id: string, note: string) {
+  return unwrap<any>(await api.post(`/voting-records/identity-links/${id}/revoke`, { note }));
+}
+
 export async function createCandidate(data: {
   race_id: string;
   name: string;
