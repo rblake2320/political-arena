@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import * as api from "../api";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ContentMedia } from "../components/Media";
@@ -277,6 +277,13 @@ export function ChallengeReceiptPage() {
                   </div>
                 )}
                 <span style={{ font: `400 10.5px/1.55 'Hanken Grotesk',sans-serif`, color: "#9B9BAB" }}>Every event on this receipt is hash-chained to the one before it. Any edit after the fact breaks the chain — and shows here. Tamper-evident audit trail.</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 12 }}>
+                  <span style={{ font: `400 12px/1.55 'Hanken Grotesk',sans-serif`, color: "#C9C9D4" }}>Don't take this page's word for it. Download the signed evidence bundle and check it yourself.</span>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Link to={`/verify?receipt=${encodeURIComponent(challenge.public_receipt_slug || challenge.id)}`} style={{ font: `600 12px 'Hanken Grotesk',sans-serif`, color: "#fff", background: "#6E6EF7", borderRadius: 8, padding: "9px 13px", textDecoration: "none" }}>Verify independently</Link>
+                    <a href={`/api/transparency/receipts/${encodeURIComponent(challenge.public_receipt_slug || challenge.id)}/bundle`} download={`arena-receipt-${challenge.public_receipt_slug || challenge.id}.json`} style={{ font: `600 12px 'Hanken Grotesk',sans-serif`, color: "#E8E8EF", border: "1px solid rgba(255,255,255,.2)", borderRadius: 8, padding: "8px 13px", textDecoration: "none" }}>Download signed bundle</a>
+                  </div>
+                </div>
               </div>
             </div>
 

@@ -7,6 +7,7 @@ import { Router } from 'itty-router';
 import { sendAndRecordTransactionalEmail, transactionalEmailStatus } from '../email.js';
 import { errorResponse, parseBody, requireRole, successResponse } from '../middleware.js';
 import { validate, launchEmailTestSchema } from '../validation.js';
+import { getReceiptSigner } from '../receipt-bundle.js';
 
 const router = Router({ base: '/api' });
 const CYCLE_ELECTION_DATE = '2026-11-03';
@@ -161,6 +162,20 @@ router.get('/stats/readiness', async (request, env) => {
       confirmation_env: 'AUDIT_ANCHOR_WORM_CONFIRMED=true',
     }, 'Publish at least one audit anchor and confirm R2 Bucket Lock / WORM retention on the anchor prefix.'),
   };
+
+  let receiptSigner = null;
+  let receiptSignerError = null;
+  try {
+    receiptSigner = await getReceiptSigner(env);
+  } catch (error) {
+    receiptSignerError = String(error?.message || error);
+  }
+  gates.receipt_signing = gate(!!receiptSigner, {
+    configured: !!receiptSigner,
+    key_id: receiptSigner?.keyId || null,
+    error: receiptSignerError,
+    public_keys_path: '/api/transparency/keys',
+  }, 'Set RECEIPT_SIGNING_KEY (Ed25519 PKCS#8, base64) so public receipt bundles are signed. Unsigned bundles cannot be verified by voters.');
 
   const blockers = Object.entries(gates)
     .filter(([, value]) => !value.ok)

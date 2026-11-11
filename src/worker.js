@@ -39,6 +39,7 @@ import electionsRoutes from './routes/elections.routes.js';
 import favoritesRoutes from './routes/favorites.routes.js';
 import safetyRoutes from './routes/safety.routes.js';
 import moderationRoutes from './routes/moderation.routes.js';
+import transparencyRoutes from './routes/transparency.routes.js';
 
 // Main API router
 const api = Router({ base: '/api' });
@@ -68,6 +69,7 @@ api.all('/elections/*', electionsRoutes.fetch);
 api.all('/favorites/*', favoritesRoutes.fetch);
 api.all('/safety/*', safetyRoutes.fetch);
 api.all('/moderation/*', moderationRoutes.fetch);
+api.all('/transparency/*', transparencyRoutes.fetch);
 
 // Health check fallback; fetch() handles /api/health directly so bootstrap
 // failures can return degraded health before route dispatch.

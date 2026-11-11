@@ -21,6 +21,7 @@ const ForgotPassword = lazy(() => import("./pages/ForgotPassword").then((m) => (
 const ResetPassword = lazy(() => import("./pages/ResetPassword").then((m) => ({ default: m.ResetPassword })));
 const VerifyEmail = lazy(() => import("./pages/VerifyEmail").then((m) => ({ default: m.VerifyEmail })));
 const LegalPage = lazy(() => import("./pages/LegalPage").then((m) => ({ default: m.LegalPage })));
+const VerifyReceiptPage = lazy(() => import("./pages/VerifyReceiptPage").then((m) => ({ default: m.VerifyReceiptPage })));
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 import { LiveWire } from "./components/LiveWire";
 import { SampleNotice } from "./components/SampleNotice";
@@ -506,6 +507,7 @@ function AppContent() {
             <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPassword />} />
             <Route path="/reset-password" element={user ? <Navigate to="/" replace /> : <ResetPassword />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
+            <Route path="/verify" element={<VerifyReceiptPage />} />
             <Route path="/settings" element={user ? <SettingsPage /> : <Navigate to="/login" replace />} />
             <Route path="/terms" element={<LegalPage />} />
             <Route path="/privacy" element={<LegalPage />} />

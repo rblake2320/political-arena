@@ -26,6 +26,10 @@ export default defineConfig({
           RESEND_API_URL: '',
           POSTMARK_API_URL: '',
           PRESS_FEED_RSS_SOURCES: '',
+          // TEST-ONLY Ed25519 key for receipt bundle signing. Generated for this
+          // suite, used nowhere else; production reads RECEIPT_SIGNING_KEY from a secret.
+          RECEIPT_SIGNING_KEY: 'MC4CAQAwBQYDK2VwBCIEIOQCzI/T95qtSCsQzOZHtwMICV7oi1Ui0n6BREIRltf3',
+          RECEIPT_RETIRED_PUBLIC_KEYS: '',
           CHALLENGE_SLA_HOURS: '72',
           REBUTTAL_WINDOW_HOURS: '48',
           MAX_CHALLENGES_PER_DAY: '3',
