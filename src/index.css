@@ -76,6 +76,7 @@ body {
 @keyframes arena-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 @keyframes arena-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 .arena-marquee { animation: arena-marquee 40s linear infinite; }
+.arena-marquee:hover, .arena-marquee:focus-within { animation-play-state: paused; }
 .arena-pulse { animation: arena-pulse 2s ease-in-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {

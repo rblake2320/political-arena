@@ -89,12 +89,26 @@ export async function getMe() {
 
 // ---- Races ----
 export async function getRaces(sort?: string) {
-  const params = new URLSearchParams({
-    status: 'all',
-    limit: '600',
-  });
-  if (sort) params.set('sort', sort);
-  return unwrap<{ races: any[]; total: number }>(await api.get(`/races?${params.toString()}`));
+  const races: any[] = [];
+  const seen = new Set<string>();
+  let expectedTotal: number | undefined;
+  // Bounded full-directory fetch: fail visibly rather than silently truncate.
+  for (let page = 1; page <= 100; page++) {
+    const params = new URLSearchParams({ status: 'all', limit: '200', page: String(page) });
+    if (sort) params.set('sort', sort);
+    const data = unwrap<{ races: any[]; total: number }>(await api.get(`/races?${params}`, { timeout: 15000 }));
+    if (!Number.isSafeInteger(data.total) || data.total < 0 || !Array.isArray(data.races)) throw new Error('Invalid race directory response');
+    if (expectedTotal !== undefined && expectedTotal !== data.total) throw new Error('Race directory changed during loading; retry');
+    expectedTotal = data.total;
+    for (const race of data.races) {
+      if (typeof race.id !== 'string' || seen.has(race.id)) throw new Error('Duplicate or invalid race in directory; retry');
+      seen.add(race.id);
+      races.push(race);
+    }
+    if (races.length === data.total) return { races, total: data.total };
+    if (!data.races.length || races.length > data.total) throw new Error('Incomplete race directory; retry');
+  }
+  throw new Error('Race directory exceeded the loading budget');
 }
 
 export async function getRace(id: string) {

@@ -2,9 +2,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import * as api from "../api";
 import { useAuth } from "../stores/auth";
+import { US_STATES as DIRECTORY_STATES } from "../us-states";
 
 const mono = "'IBM Plex Mono', ui-monospace, monospace";
-const US_STATES = ['', 'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC'];
+const US_STATES = ['', ...DIRECTORY_STATES];
 
 const card: React.CSSProperties = { border: "1px solid rgba(255,255,255,.1)", borderRadius: 14, background: "#0C0C13", padding: 22, display: "flex", flexDirection: "column", gap: 12 };
 const inputStyle: React.CSSProperties = { background: "#08080C", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "9px 11px", font: "400 13px 'Hanken Grotesk',sans-serif", color: "#F2F2F7" };
@@ -73,6 +74,13 @@ export function SettingsPage() {
   return (
     <div style={{ maxWidth: 640, margin: "0 auto", padding: "40px 20px 80px", display: "flex", flexDirection: "column", gap: 18 }}>
       <h1 style={{ font: "400 32px 'Instrument Serif',serif", color: "#F2F2F7", margin: 0 }}>Account settings</h1>
+      <section style={card} aria-label="Account verification and security">
+        <h2 style={h2}>Account verification and security</h2>
+        <p style={{ color: '#F2F2F7', margin: 0 }}>Email: {user?.email_verified ? 'Confirmed' : 'Not confirmed'}</p>
+        {!user?.email_verified && <a href="/verify-email" style={{ color: '#C7C7F9' }}>Confirm your email</a>}
+        <p style={{ color: '#9B9BAB', margin: 0 }}>Email confirmation unlocks participation. It does not verify your legal identity, address, or voter eligibility. Profile names and locations are self-reported.</p>
+        <p style={{ color: '#9B9BAB', margin: 0 }}>Campaign authorization is reviewed separately. A candidate listing or a chosen display name does not grant campaign access.</p>
+      </section>
       {msg && (
         <div role="status" style={{ border: `1px solid ${msg.kind === "ok" ? "rgba(52,195,132,.4)" : "rgba(229,99,106,.4)"}`, background: msg.kind === "ok" ? "rgba(52,195,132,.07)" : "rgba(229,99,106,.07)", borderRadius: 10, padding: "10px 14px", font: "500 13px 'Hanken Grotesk',sans-serif", color: msg.kind === "ok" ? "#7BE0B2" : "#E5636A" }}>{msg.text}</div>
       )}

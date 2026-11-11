@@ -26,6 +26,7 @@ describe('worker health and bootstrap failure handling', () => {
     const healthBody = await health.json();
     expect(healthBody.status).toBe('degraded');
     expect(healthBody.database).toBe('error');
+    expect(healthBody.sample_data).toBe(true);
 
     const api = await worker.fetch(new Request('https://example.com/api/users/me'), env, ctx);
     expect(api.status).toBe(503);

@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { Search, TrendingUp, ChevronRight, Flame, Clock } from "lucide-react";
 import { useArenaStore } from "../store";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { US_STATES } from "../us-states";
 
 type SortMode = 'trending' | 'newest' | 'name';
 
@@ -183,7 +184,7 @@ export function Home() {
     })
     : races;
   const visibleRaces = searchedRaces.filter(race => !stateFilter || race.state === stateFilter);
-  const states = [...new Set(races.map(race => race.state).filter(Boolean))].sort();
+  const states = [...new Set([...US_STATES, ...races.map(race => race.state).filter(Boolean)])].sort();
 
   const racesLive = stats?.races_live ?? (races.filter(r => r.status === 'active').length || races.length);
   const openCallouts = stats?.open_callouts;
@@ -264,6 +265,7 @@ export function Home() {
 
       {/* race grid */}
       <div style={{ maxWidth: 1440, margin: '0 auto', padding: isMobile ? '0 20px 40px' : '0 40px 56px' }}>
+        <p style={{ color: '#9B9BAB', fontSize: 13, margin: '0 0 18px' }}>Browse all 50 states and DC. This directory contains recorded races, not a certified list of every election. No results means coverage is missing or filters exclude the records—not that no election exists.</p>
         {raceError && <div role="alert" className="arena-directory-error">
           <span>{raceError}{races.length > 0 ? ' Previously loaded races remain visible.' : ''}</span>
           <button className="arena-directory-button" onClick={() => setRetry(value => value + 1)} disabled={!loaded}>Retry directory</button>
