@@ -45,7 +45,7 @@ Mostly wiring on existing infra (R2 uploads / media_uploads / ContentMedia, comp
 - [x] **Correction/appeal workflow.** Public submission, moderation queue, public correction history, and readiness gate are implemented.
 - [x] **Moderator accountability.** Published rubric and second-review queue are implemented; readiness verifies the public rubric path and review queue.
 - [ ] **Layer 1 identity/accuracy.** Disambiguation/identity-confidence before publishing a public-sourced profile (avoid wrong-person/stale/misattributed data) + prominent "report an error" → correction workflow.
-- [ ] **Inbound abuse + jurisdiction.** Velocity/dedup limits on callouts/questions so a brigade can't manufacture an "unanswered" wall; jurisdiction eligibility (or out-of-jurisdiction labeling) on voter accountability actions.
+- [x] **Inbound abuse + jurisdiction.** Velocity/dedup limits on callouts/questions so a brigade can't manufacture an "unanswered" wall; jurisdiction eligibility (or out-of-jurisdiction labeling) on voter accountability actions. **Shipped 2026-11-11** as duplicate collapse, per-account and surge limits, a per-target callout cap, and self-reported jurisdiction labels. Real residency verification is still an external gap.
 - [ ] **ToS + content agreement + retention/deletion policy** before candidates upload video (ownership, post-election lifecycle, deletion vs append-only chain).
 - [ ] **Accessibility (WCAG contrast on the near-black/gray design) + Spanish** for real FL/TX/CA civic reach (ADA exposure).
 - [ ] **Password reset email** and **served-notice email provider** are wired to the transactional email adapter, but production launch remains blocked until `EMAIL_FROM` is set to a verified sender.
@@ -59,3 +59,12 @@ Mostly wiring on existing infra (R2 uploads / media_uploads / ContentMedia, comp
 - [x] Two-partner redesign: Home (1a), chrome (ticker+nav), Receipt (1c, recites+fact-scores), Race (1b), mobile (1d), QA fixes. 78 tests green on redesign/arena.
 - [x] Backend: PBKDF2→600k versioned+rehash, governors (36), write-in API, /api/stats/cycle + /api/feed/live, /api/races candidates_summary + open_callout + challenge_recite_summary, receipt slug backfill, demo questions + recites, status=all support.
 - [x] Federal + governor race data loaded to arena-database (512 canonical).
+
+## Added 2026-11-11
+- [x] Signed, offline-verifiable receipt bundles with public key and anchor-root lists. **Go-live step:** set the `RECEIPT_SIGNING_KEY` secret (readiness gate `receipt_signing`).
+- [x] Layer 1 legislative voting records: `bills` + `roll_calls` + `member_votes` keyed by Bioguide ID, two-person identity links, correction path through the existing workflow.
+- [ ] Voting records follow-ups: `bill_cosponsors`; Senate automated source (senate.gov XML uses LIS ids, needs a second crosswalk); run the House sync once against the live Congress.gov API with a real key and confirm the response shape; OpenStates for state legislatures.
+- [ ] Audit entry format v2: hash private fields as a separate commitment so readers can recompute every entry hash from a public bundle. Needs a versioned chain so existing entries still verify.
+- [ ] Global audit anchors include every ledger entry, so anchor size and proof cost grow with the whole ledger. Move to incremental anchors (each covers only entries since the last, chained by previous root) before the ledger passes about 20,000 entries; bundles omit proofs above that size today and say so.
+- [ ] Demo seed user display names still read "Verified Texas Voter" etc.; rename to match the email-confirmed wording.
+- [ ] The cycle date `CYCLE_ELECTION_DATE = '2026-11-03'` has passed. Decide the post-election mode: freeze the 2026 record as an archive, and load the next cycle's races.

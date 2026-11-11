@@ -200,7 +200,7 @@ async function verifyAnchor(payload) {
   const anchor = payload.anchor;
   if (!anchor) {
     return [check('anchor', 'Included in a published anchor', 'skipped',
-      'No external anchor covers this receipt yet. The chain is internally consistent but has no outside witness.')];
+      'No published anchor covers this receipt yet, so there is no outside witness to when these entries existed.')];
   }
   const problems = [];
   if (!HEX64.test(anchor.merkle_root || '')) problems.push('malformed anchor root');

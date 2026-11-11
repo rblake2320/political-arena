@@ -24,7 +24,7 @@ const STATUS: Record<Check["status"], { text: string; color: string; bg: string 
 const VERDICT: Record<string, { title: string; detail: string; color: string }> = {
   verified: {
     title: "Verified",
-    detail: "This bundle was signed by a key the platform publishes, and its contents and audit trail are intact.",
+    detail: "This bundle was signed by a key the platform publishes, and nothing in it was changed after signing.",
     color: "#7BE0B2",
   },
   consistent_untrusted_key: {
@@ -122,6 +122,7 @@ export function VerifyReceiptPage() {
 
   const verdict = result ? VERDICT[result.verdict] || VERDICT.failed : null;
   const challenge = bundle?.payload?.receipt?.challenge;
+  const notChecked = result ? result.checks.filter(c => c.status === "skipped") : [];
 
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "40px 20px 80px", display: "flex", flexDirection: "column", gap: 20, fontFamily: body }}>
@@ -163,6 +164,11 @@ export function VerifyReceiptPage() {
             <div style={{ padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,.08)", display: "flex", flexDirection: "column", gap: 6 }}>
               <h2 style={{ font: `600 20px 'Space Grotesk',sans-serif`, color: verdict.color, margin: 0 }}>{verdict.title}</h2>
               <p style={{ font: `400 14px/1.6 ${body}`, color: "#C9C9D4", margin: 0 }}>{verdict.detail}</p>
+              {result.ok && notChecked.length > 0 && (
+                <p style={{ font: `500 13.5px/1.6 ${body}`, color: "#EFB643", margin: 0 }}>
+                  Not covered by this result: {notChecked.map(c => c.label.toLowerCase()).join("; ")}. See the notes below.
+                </p>
+              )}
             </div>
 
             {challenge && (

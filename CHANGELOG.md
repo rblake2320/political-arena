@@ -3,7 +3,45 @@
 All notable changes to Political Arena are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/) / Conventional Commits.
 
-## [Unreleased] - 2026-08-20
+## [Unreleased] - 2026-11-11
+
+Merges the two open draft branches and adds three capabilities. Suite: 188 → 263 tests.
+
+### Fixed
+- **Every public receipt page crashed once its data loaded**: a React hook sat
+  after the loading/error early returns in `ChallengeReceiptPage`, so the
+  loaded render ran one more hook than the loading render. Moved the hook and
+  added `test-ui/hook-order.test.ts`, which sweeps every page and component.
+- Merged `codex/review-tech-20261004`: archive exports can no longer overwrite
+  each other, provider replies without a message id are no longer recorded as
+  sent, provider error bodies are no longer stored, media HEAD/ETag/If-Range
+  handling, test isolation from local provider settings.
+- Merged `codex/arena-coverage-assurance-20260920` (application changes only):
+  "verified voter" relabelled to email-confirmed participant, paginated
+  full-directory fetch, sample-data banner, staff portal for pending
+  campaigns, clickable sources and ticker items, race load error state.
+  The unrelated local inference benchmark files were left on that branch.
+- Public question lists no longer return the author's user id.
+
+### Security
+- Dependencies updated for advisories published after October (Vite, Zod,
+  Undici, sharp, follow-redirects, Vitest mocker). `npm audit` is zero.
+
+### Added
+- **Participation integrity** (`src/integrity.js`): duplicate-question
+  collapse, per-account daily cap across races, surge slowdown for new
+  accounts only, per-target callout cap checked before any credit is spent,
+  self-reported jurisdiction labels with a public vote breakdown and optional
+  local ranking. 22 tests.
+- **Signed receipt bundles** (`src/receipt-bundle.js`, `src/receipt-verify.js`,
+  `/verify`, `scripts/verify-receipt-bundle.mjs`): Ed25519-signed evidence
+  bundles with audit-chain and Merkle anchor proofs; public key and anchor-root
+  endpoints; `receipt_signing` launch gate. 24 tests.
+- **Voting records** (`src/voting-records.js`): official-identifier-keyed
+  roll calls, two-person identity links with instant revoke, admin import,
+  Congress.gov House sync, profile section, moderation queue. 27 tests.
+
+## [Previous] - 2026-08-20
 
 Full production wiring pass (branch `improve/production-wiring-20260820`):
 every audited frontend↔backend contract break, dead-end write loop, and

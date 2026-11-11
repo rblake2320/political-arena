@@ -17,7 +17,10 @@ A fair, structured environment for political candidates to campaign, challenge e
 - **Timestamped statement archive** — public statements can link to YouTube/video/article sources, transcript URLs, exact timestamps, topics, truth review status, and evasion review status.
 - **Credits** — each challenge costs 1 credit (atomic deduction, ledgered in `credit_transactions`, refunded on withdrawal). Admins grant credits; every grant is audit-logged.
 - **What Matters** — voters rank their top-5 issues; aggregates and cross-party overlap surface what the electorate actually cares about.
-- **Questions** — voter and credentialed-press questions per race, with dedup-safe upvoting.
+- **Questions** — questions from email-confirmed participants and credentialed press per race, with dedup-safe upvoting. Email confirmation is not identity or voter verification.
+- **Participation integrity** — near-duplicate questions collapse onto one (case, spacing, punctuation and look-alike characters ignored); per-account daily caps; during a flood only brand-new accounts are slowed; one candidate can receive at most six callouts a day across all challengers. Every question and upvote carries a **self-reported** jurisdiction label and the public list shows a per-location vote breakdown with an optional local ranking. Labels never block anyone and the default ranking is never reweighted.
+- **Signed receipt bundles** — any public receipt downloads as an Ed25519-signed evidence bundle (claim, sources, scores, response, hash-chained audit trail, and a Merkle inclusion proof when an anchor covers it). Verify it in the browser at `/verify` or offline with `node scripts/verify-receipt-bundle.mjs`. Signing keys and anchor roots are public at `/api/transparency/keys` and `/api/transparency/anchors`.
+- **Voting records** — source-attributed roll-call votes on candidate profiles for candidates who have held legislative office. A record appears only after one reviewer proposes the identity match with evidence and a different reviewer confirms it; a wrong match can be revoked instantly. No score or characterization is attached. Loaded by admin import (House or Senate) or from Congress.gov (House) when `CONGRESS_API_KEY` is set.
 - **Press credentials** — journalists apply with outlet proof; admins/moderators review.
 - **Notifications** — subscribe to races/candidates; in-app notifications on challenge activity.
 - **Audit log** — append-only record of every state-changing action (who, what, before/after, hashed IP).
@@ -142,6 +145,13 @@ npx wrangler d1 create arena-database          # update database_id in wrangler.
 npx wrangler r2 bucket create political-arena-media
 npx wrangler secret put JWT_SECRET
 
+# Receipt signing key (Ed25519). Prints the private key once; paste it into the secret.
+node scripts/generate-receipt-key.mjs
+npx wrangler secret put RECEIPT_SIGNING_KEY
+
+# Optional: House roll-call sync from Congress.gov
+npx wrangler secret put CONGRESS_API_KEY
+
 # Choose one transactional email provider after verifying the sender/domain.
 npx wrangler secret put RESEND_API_KEY                  # Resend
 # or
@@ -164,6 +174,14 @@ CI (GitHub Actions) runs typecheck, build, the full workerd test suite, and `npm
 | `EMAIL_PROVIDER` | inferred | `resend`, `postmark`, or `webhook`; inferred from configured secret when omitted |
 | `PRESS_FEED_RSS_SOURCES` | newser + san | Public press feed RSS sources (`label\|url`, comma-separated), ingested by cron |
 | `CORS_ALLOWED_ORIGINS` | — | Extra CORS origins (comma-separated) for custom domains |
+| `QUESTION_MAX_PER_USER_PER_DAY` | 15 | Questions one account may submit per day across all races |
+| `QUESTION_MAX_PER_USER_PER_RACE_PER_DAY` | 5 | Questions one account may submit per race per day |
+| `QUESTION_RACE_SURGE_PER_HOUR` | 30 | Questions per race per hour after which brand-new accounts are slowed |
+| `QUESTION_NEW_ACCOUNT_DAYS` | 7 | Account age below which the surge limit applies |
+| `MAX_INBOUND_CHALLENGES_PER_TARGET_PER_DAY` | 6 | Callouts one candidate may receive per day across all challengers |
+| `RECEIPT_SIGNING_KEY` (secret) | none | Ed25519 PKCS#8 key (base64) that signs receipt bundles; without it bundles are explicitly unsigned |
+| `RECEIPT_RETIRED_PUBLIC_KEYS` | — | Comma-separated retired public keys (base64url) so older bundles still verify after rotation |
+| `CONGRESS_API_KEY` (secret) | none | Enables `POST /api/voting-records/sync` (House roll calls) |
 | `IP_HASH_SALT` (secret) | fallback constant | Salt for hashed IPs — set via `wrangler secret put IP_HASH_SALT` |
 | `EMAIL_FROM` | none | Verified sender used for transactional email, for example `Arena <noreply@example.com>` |
 | `EMAIL_REPLY_TO` | none | Optional reply-to address for transactional email |

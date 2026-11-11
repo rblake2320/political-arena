@@ -85,18 +85,11 @@ export function ChallengeReceiptPage() {
     api.getChallengeReceipt(id).then(setData).catch((e: any) => setError(e.response?.data?.error || e.message || "Receipt not found")).finally(() => setLoading(false));
   }, [id]);
 
-  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "80px 0" }}><div className="arena-pulse" style={{ width: 24, height: 24, border: "2px solid rgba(110,110,247,.3)", borderTopColor: "#6E6EF7", borderRadius: "50%" }} /></div>;
-  if (error || !data) return (
-    <div style={{ maxWidth: 520, margin: "0 auto", padding: "96px 16px", textAlign: "center" }}>
-      <div style={{ font: `400 28px ${serif}`, color: "#F2F2F7", marginBottom: 8 }}>Receipt unavailable</div>
-      <div style={{ font: `400 13px ${mono}`, color: "#9B9BAB" }}>{error || "This receipt could not be loaded."}</div>
-    </div>
-  );
-
-  const { challenge, response, recites, response_recites, fact_score, response_fact_score, timeline, audit_chain } = data;
-
   // schema.org ClaimReview — lets Google's fact-check surfaces index receipts
+  // Declared before the early returns below: hooks must run in the same order on every render.
   useEffect(() => {
+    const challenge = data?.challenge;
+    const fact_score = data?.fact_score;
     if (!challenge) return;
     const script = document.createElement('script');
     script.type = 'application/ld+json';
@@ -122,7 +115,17 @@ export function ChallengeReceiptPage() {
     });
     document.head.appendChild(script);
     return () => { document.getElementById('claimreview-jsonld')?.remove(); };
-  }, [challenge?.id]);
+  }, [data?.challenge?.id]);
+
+  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "80px 0" }}><div className="arena-pulse" style={{ width: 24, height: 24, border: "2px solid rgba(110,110,247,.3)", borderTopColor: "#6E6EF7", borderRadius: "50%" }} /></div>;
+  if (error || !data) return (
+    <div style={{ maxWidth: 520, margin: "0 auto", padding: "96px 16px", textAlign: "center" }}>
+      <div style={{ font: `400 28px ${serif}`, color: "#F2F2F7", marginBottom: 8 }}>Receipt unavailable</div>
+      <div style={{ font: `400 13px ${mono}`, color: "#9B9BAB" }}>{error || "This receipt could not be loaded."}</div>
+    </div>
+  );
+
+  const { challenge, response, recites, response_recites, fact_score, response_fact_score, timeline, audit_chain } = data;
 
   const status = challenge.status || "open";
   const cc = partyColor(challenge.challenger_party);
