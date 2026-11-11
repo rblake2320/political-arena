@@ -134,28 +134,58 @@ export async function r2MediaResponse(bucket, key, request, fallbackContentType,
   const head = await bucket.head(key);
   if (!head) return null;
 
-  const range = parseRange(request.headers.get('Range'), head.size);
+  const headers = new Headers();
+  const etag = head.httpEtag;
+  const modified = head.uploaded.toUTCString();
+  headers.set('Content-Type', head.httpMetadata?.contentType || fallbackContentType || 'application/octet-stream');
+  headers.set('Cache-Control', cacheControl);
+  headers.set('Accept-Ranges', 'bytes');
+  headers.set('ETag', etag);
+  headers.set('Last-Modified', modified);
+  headers.set('X-Content-Type-Options', 'nosniff');
+
+  const ifNoneMatch = request.headers.get('If-None-Match');
+  const matchesEtag = ifNoneMatch && ifNoneMatch.split(',').some(value => {
+    const tag = value.trim().replace(/^W\//, '');
+    return tag === '*' || tag === etag;
+  });
+  const ifModifiedSince = Date.parse(request.headers.get('If-Modified-Since') || '');
+  if (matchesEtag || (!ifNoneMatch && Number.isFinite(ifModifiedSince) &&
+      Math.floor(head.uploaded.getTime() / 1000) <= Math.floor(ifModifiedSince / 1000))) {
+    return new Response(null, { status: 304, headers });
+  }
+
+  // Range applies to GET, not HEAD. A changed object must not be stitched
+  // onto a partial download of an older version (If-Range).
+  const ifRange = request.headers.get('If-Range');
+  const rangeMatches = !ifRange || ifRange === etag ||
+    (!ifRange.startsWith('W/') && Number.isFinite(Date.parse(ifRange)) &&
+      Math.floor(head.uploaded.getTime() / 1000) <= Math.floor(Date.parse(ifRange) / 1000));
+  const range = request.method === 'GET' && rangeMatches
+    ? parseRange(request.headers.get('Range'), head.size) : null;
   if (range?.unsatisfiable) {
+    headers.set('Content-Range', `bytes */${head.size}`);
     return new Response(null, {
       status: 416,
-      headers: {
-        'Content-Range': `bytes */${head.size}`,
-        'Accept-Ranges': 'bytes',
-      },
+      headers,
     });
   }
 
-  const object = await bucket.get(key, range ? { range: { offset: range.offset, length: range.length } } : undefined);
-  if (!object) return null;
-
-  const headers = new Headers();
-  headers.set('Content-Type', object.httpMetadata?.contentType || fallbackContentType || head.httpMetadata?.contentType || 'application/octet-stream');
-  headers.set('Cache-Control', cacheControl);
-  headers.set('Accept-Ranges', 'bytes');
   headers.set('Content-Length', String(range ? range.length : head.size));
-  headers.set('X-Content-Type-Options', 'nosniff');
   if (range) {
     headers.set('Content-Range', `bytes ${range.offset}-${range.end}/${head.size}`);
+  }
+  if (request.method === 'HEAD') return new Response(null, { status: 200, headers });
+
+  const object = await bucket.get(key, {
+    ...(range ? { range: { offset: range.offset, length: range.length } } : {}),
+    onlyIf: { etagMatches: head.etag },
+  });
+  if (!object) return null;
+  if (!object.body) {
+    // Object changed between head() and get(). Return a retryable response
+    // instead of attaching stale size/ETag/range metadata to newer bytes.
+    return new Response(null, { status: 503, headers: { 'Retry-After': '1' } });
   }
 
   return new Response(object.body, { status: range ? 206 : 200, headers });
