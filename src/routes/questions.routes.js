@@ -7,16 +7,44 @@ import { Router } from 'itty-router';
 import { generateId } from '../db.js';
 import {
   requireAuth, requireVerifiedVoter, requireApprovedPress, requireRole,
-  optionalAuth, successResponse, errorResponse, parsePagination, parseBody, getClientIP,
+  optionalAuth, successResponse, errorResponse, parsePagination, parseBody, getClientIP, json,
 } from '../middleware.js';
 import { auditLog } from '../audit.js';
 import { validate, submitQuestionSchema } from '../validation.js';
 import { checkRateLimit } from '../ratelimit.js';
 import { notifySubscribers } from '../notifications.js';
+import { emptyVoteBreakdown, integrityLimits, jurisdictionMatch, questionFingerprint } from '../integrity.js';
 
 const router = Router({ base: '/api/questions' });
 const VOTE_MAX_PER_USER = 20;
 const VOTE_WINDOW_SECONDS = 10 * 60;
+
+// Fields safe to publish. Never return the author's user id or the dedup fingerprint.
+const PUBLIC_QUESTION_COLUMNS = `q.id, q.race_id, q.source_type, q.question_text, q.media_url, q.vote_count,
+  q.status, q.author_jurisdiction, q.created_at, q.updated_at, u.display_name as author_name`;
+
+/**
+ * Attach the per-jurisdiction vote breakdown to each question. Location is
+ * self-reported profile data: a label for readers, not proof of residency.
+ */
+async function attachVoteBreakdown(db, questions) {
+  const byId = new Map(questions.map(q => [q.id, { ...q, vote_breakdown: emptyVoteBreakdown() }]));
+  const ids = [...byId.keys()];
+  // D1 caps bound parameters at 100 per statement — chunk the IN list.
+  for (let i = 0; i < ids.length; i += 90) {
+    const chunk = ids.slice(i, i + 90);
+    const rows = await db.prepare(
+      `SELECT question_id, voter_jurisdiction, COUNT(*) as cnt FROM question_votes
+       WHERE question_id IN (${chunk.map(() => '?').join(',')})
+       GROUP BY question_id, voter_jurisdiction`
+    ).bind(...chunk).all();
+    for (const row of rows.results || []) {
+      const breakdown = byId.get(row.question_id)?.vote_breakdown;
+      if (breakdown && row.voter_jurisdiction in breakdown) breakdown[row.voter_jurisdiction] = row.cnt;
+    }
+  }
+  return [...byId.values()];
+}
 
 /**
  * GET /api/questions/:raceId — List questions for a race (public)
@@ -29,7 +57,12 @@ router.get('/:raceId', async (request, env) => {
   const sourceType = url.searchParams.get('source_type');
   const { page, limit, offset } = parsePagination(url);
 
-  let query = `SELECT q.*, u.display_name as author_name FROM questions q JOIN users u ON q.user_id = u.id WHERE q.race_id = ? AND q.status = 'active'`;
+  // sort=local ranks by votes from people who report living in the race's
+  // jurisdiction. The default order is unchanged: total votes, never reweighted.
+  const sortLocal = url.searchParams.get('sort') === 'local';
+  let query = `SELECT ${PUBLIC_QUESTION_COLUMNS},
+      (SELECT COUNT(*) FROM question_votes qv WHERE qv.question_id = q.id AND qv.voter_jurisdiction = 'in_jurisdiction') as local_votes
+    FROM questions q JOIN users u ON q.user_id = u.id WHERE q.race_id = ? AND q.status = 'active'`;
   const binds = [raceId];
 
   if (sourceType && (sourceType === 'voter' || sourceType === 'press')) {
@@ -37,7 +70,9 @@ router.get('/:raceId', async (request, env) => {
     binds.push(sourceType);
   }
 
-  query += ` ORDER BY q.vote_count DESC, q.created_at DESC LIMIT ? OFFSET ?`;
+  query += sortLocal
+    ? ` ORDER BY local_votes DESC, q.vote_count DESC, q.created_at DESC LIMIT ? OFFSET ?`
+    : ` ORDER BY q.vote_count DESC, q.created_at DESC LIMIT ? OFFSET ?`;
   binds.push(limit, offset);
 
   const questions = await env.ARENA_DB.prepare(query).bind(...binds).all();
@@ -69,7 +104,8 @@ router.get('/:raceId', async (request, env) => {
   }
 
   // Mark top 5 per source_type
-  const enriched = questions.results.map((q, idx) => ({
+  const withBreakdown = await attachVoteBreakdown(env.ARENA_DB, questions.results);
+  const enriched = withBreakdown.map((q, idx) => ({
     ...q,
     has_voted: !!userVotes[q.id],
     is_top: idx < 5 && offset === 0,
@@ -78,6 +114,8 @@ router.get('/:raceId', async (request, env) => {
   return successResponse({
     questions: enriched,
     pagination: { page, limit, total: total.total },
+    sort: sortLocal ? 'local' : 'votes',
+    jurisdiction_note: 'Location labels come from self-reported profile data. They are not verified residency or voter eligibility.',
   });
 });
 
@@ -90,10 +128,10 @@ router.get('/:raceId/top', async (request, env) => {
 
   const [voterQ, pressQ] = await Promise.all([
     env.ARENA_DB.prepare(
-      `SELECT q.*, u.display_name as author_name FROM questions q JOIN users u ON q.user_id = u.id WHERE q.race_id = ? AND q.source_type = 'voter' AND q.status = 'active' ORDER BY q.vote_count DESC LIMIT 5`
+      `SELECT ${PUBLIC_QUESTION_COLUMNS} FROM questions q JOIN users u ON q.user_id = u.id WHERE q.race_id = ? AND q.source_type = 'voter' AND q.status = 'active' ORDER BY q.vote_count DESC LIMIT 5`
     ).bind(raceId).all(),
     env.ARENA_DB.prepare(
-      `SELECT q.*, u.display_name as author_name FROM questions q JOIN users u ON q.user_id = u.id WHERE q.race_id = ? AND q.source_type = 'press' AND q.status = 'active' ORDER BY q.vote_count DESC LIMIT 5`
+      `SELECT ${PUBLIC_QUESTION_COLUMNS} FROM questions q JOIN users u ON q.user_id = u.id WHERE q.race_id = ? AND q.source_type = 'press' AND q.status = 'active' ORDER BY q.vote_count DESC LIMIT 5`
     ).bind(raceId).all(),
   ]);
 
@@ -115,10 +153,18 @@ router.get('/:raceId/top', async (request, env) => {
   const enrich = (arr) => arr.map(q => ({ ...q, has_voted: !!userVotes[q.id], is_top: true }));
 
   return successResponse({
-    voter_questions: enrich(voterQ.results),
-    press_questions: enrich(pressQ.results),
+    voter_questions: enrich(await attachVoteBreakdown(env.ARENA_DB, voterQ.results)),
+    press_questions: enrich(await attachVoteBreakdown(env.ARENA_DB, pressQ.results)),
   });
 });
+
+function duplicateQuestionResponse(existingQuestionId) {
+  return json({
+    success: false,
+    error: 'This question has already been asked in this race. Upvote the existing question instead.',
+    existing_question_id: existingQuestionId,
+  }, 409);
+}
 
 /**
  * POST /api/questions/:raceId — Submit a question
@@ -148,19 +194,66 @@ router.post('/:raceId', async (request, env) => {
   const { raceId } = request.params;
 
   // Verify race exists
-  const race = await env.ARENA_DB.prepare(`SELECT id FROM races WHERE id = ?`).bind(raceId).first();
+  const race = await env.ARENA_DB.prepare(`SELECT id, office, state, district FROM races WHERE id = ?`).bind(raceId).first();
   if (!race) return errorResponse('Race not found', 404);
 
-  // Rate limit: max 5 questions per user per race per day
-  const recentCount = await env.ARENA_DB.prepare(
-    `SELECT COUNT(*) as cnt FROM questions WHERE user_id = ? AND race_id = ? AND created_at > datetime('now', '-1 day')`
-  ).bind(request.user.id, raceId).first();
-  if (recentCount.cnt >= 5) return errorResponse('You can submit up to 5 questions per race per day', 429);
+  const limits = integrityLimits(env);
+  const fingerprint = await questionFingerprint(data.question_text);
+  if (!fingerprint) return errorResponse('Question must contain letters or numbers');
+
+  // Duplicate: point the reader at the question that already exists so they
+  // can upvote it. A wall of identical questions is not more accountability.
+  const duplicate = await env.ARENA_DB.prepare(
+    `SELECT id FROM questions WHERE race_id = ? AND text_fingerprint = ? AND status = 'active' LIMIT 1`
+  ).bind(raceId, fingerprint).first();
+  if (duplicate) return duplicateQuestionResponse(duplicate.id);
+
+  const [raceDayCount, userDayCount, raceHourCount, account] = await Promise.all([
+    env.ARENA_DB.prepare(
+      `SELECT COUNT(*) as cnt FROM questions WHERE user_id = ? AND race_id = ? AND created_at > datetime('now', '-1 day')`
+    ).bind(request.user.id, raceId).first(),
+    env.ARENA_DB.prepare(
+      `SELECT COUNT(*) as cnt FROM questions WHERE user_id = ? AND created_at > datetime('now', '-1 day')`
+    ).bind(request.user.id).first(),
+    env.ARENA_DB.prepare(
+      `SELECT COUNT(*) as cnt FROM questions WHERE race_id = ? AND created_at > datetime('now', '-1 hour')`
+    ).bind(raceId).first(),
+    env.ARENA_DB.prepare(
+      `SELECT created_at > datetime('now', ?) as is_new FROM users WHERE id = ?`
+    ).bind(`-${limits.newAccountDays} days`, request.user.id).first(),
+  ]);
+  if (raceDayCount.cnt >= limits.questionsPerUserPerRacePerDay) {
+    return errorResponse(`You can submit up to ${limits.questionsPerUserPerRacePerDay} questions per race per day`, 429);
+  }
+  if (userDayCount.cnt >= limits.questionsPerUserPerDay) {
+    return errorResponse(`You can submit up to ${limits.questionsPerUserPerDay} questions per day across all races`, 429);
+  }
+  // Surge guard: when a race is flooded, only brand-new accounts are slowed.
+  // Established accounts keep asking, so a flood cannot silence real voters.
+  if (raceHourCount.cnt >= limits.raceSurgePerHour && account?.is_new) {
+    return errorResponse(
+      `This race is receiving an unusually high number of questions. Accounts newer than ${limits.newAccountDays} days can upvote existing questions now and submit new ones later.`,
+      429,
+    );
+  }
 
   const id = generateId('q');
-  await env.ARENA_DB.prepare(
-    `INSERT INTO questions (id, race_id, user_id, source_type, question_text, media_url) VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(id, raceId, request.user.id, data.source_type, data.question_text, data.media_url || null).run();
+  const authorJurisdiction = jurisdictionMatch(request.user, race);
+  try {
+    await env.ARENA_DB.prepare(
+      `INSERT INTO questions (id, race_id, user_id, source_type, question_text, media_url, text_fingerprint, author_jurisdiction)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, raceId, request.user.id, data.source_type, data.question_text, data.media_url || null, fingerprint, authorJurisdiction).run();
+  } catch (error) {
+    // Two identical submissions raced; the unique index kept exactly one.
+    if (String(error?.message || error).includes('UNIQUE')) {
+      const winner = await env.ARENA_DB.prepare(
+        `SELECT id FROM questions WHERE race_id = ? AND text_fingerprint = ? AND status = 'active' LIMIT 1`
+      ).bind(raceId, fingerprint).first();
+      return duplicateQuestionResponse(winner?.id || null);
+    }
+    throw error;
+  }
 
   await notifySubscribers(env.ARENA_DB, {
     raceId,
@@ -170,7 +263,7 @@ router.post('/:raceId', async (request, env) => {
     linkUrl: `/race/${raceId}`,
   });
 
-  return successResponse({ id, source_type: data.source_type, question_text: data.question_text });
+  return successResponse({ id, source_type: data.source_type, question_text: data.question_text, author_jurisdiction: authorJurisdiction });
 });
 
 /**
@@ -181,7 +274,9 @@ router.post('/:questionId/vote', async (request, env) => {
 
   // Fetch question to determine source_type
   const question = await env.ARENA_DB.prepare(
-    `SELECT id, source_type, vote_count FROM questions WHERE id = ? AND status = 'active'`
+    `SELECT q.id, q.source_type, q.vote_count, r.office, r.state, r.district
+     FROM questions q JOIN races r ON q.race_id = r.id
+     WHERE q.id = ? AND q.status = 'active'`
   ).bind(questionId).first();
   if (!question) return errorResponse('Question not found', 404);
 
@@ -230,7 +325,9 @@ router.post('/:questionId/vote', async (request, env) => {
     // Upvote — INSERT OR IGNORE prevents UNIQUE violation in concurrent requests
     const voteId = generateId('qv');
     await env.ARENA_DB.batch([
-      env.ARENA_DB.prepare(`INSERT OR IGNORE INTO question_votes (id, question_id, user_id) VALUES (?, ?, ?)`).bind(voteId, questionId, request.user.id),
+      env.ARENA_DB.prepare(
+        `INSERT OR IGNORE INTO question_votes (id, question_id, user_id, voter_jurisdiction) VALUES (?, ?, ?, ?)`
+      ).bind(voteId, questionId, request.user.id, jurisdictionMatch(request.user, question)),
       recomputeStmt,
     ]);
     const updated = await env.ARENA_DB.prepare(`SELECT vote_count FROM questions WHERE id = ?`).bind(questionId).first();

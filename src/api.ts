@@ -672,10 +672,11 @@ export async function markAllNotificationsRead() {
 }
 
 // ---- Questions ----
-export async function getQuestions(raceId: string, sourceType?: string, page?: number) {
+export async function getQuestions(raceId: string, sourceType?: string, page?: number, sort?: 'votes' | 'local') {
   const params: Record<string, string | number> = {};
   if (sourceType) params.source_type = sourceType;
   if (page) params.page = page;
+  if (sort === 'local') params.sort = 'local';
   return unwrap<any>(await api.get(`/questions/${raceId}`, { params }));
 }
 

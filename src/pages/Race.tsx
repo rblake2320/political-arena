@@ -224,6 +224,36 @@ function FormMessage({ notice }: { notice: Notice }) {
   );
 }
 
+const JURISDICTION_TEXT: Record<string, { text: string; color: string }> = {
+  in_jurisdiction: { text: "IN THIS RACE'S AREA", color: "#7BE0B2" },
+  in_state: { text: "SAME STATE", color: "#C7C7F9" },
+  outside: { text: "OUTSIDE THE STATE", color: "#EFB643" },
+  not_stated: { text: "LOCATION NOT STATED", color: "#9B9BAB" },
+};
+
+export function JurisdictionChip({ label, prefix }: { label?: string; prefix?: string }) {
+  const cfg = JURISDICTION_TEXT[label || "not_stated"] || JURISDICTION_TEXT.not_stated;
+  return (
+    <span title="Self-reported location; not verified" style={{ font: `600 9.5px ${mono}`, letterSpacing: ".08em", color: cfg.color, border: "1px solid rgba(255,255,255,.12)", borderRadius: 6, padding: "2px 7px" }}>
+      {prefix ? `${prefix} · ` : ""}{cfg.text}
+    </span>
+  );
+}
+
+export function VoteBreakdown({ breakdown }: { breakdown?: Record<string, number> }) {
+  if (!breakdown) return null;
+  const total = Object.values(breakdown).reduce((sum, n) => sum + (Number(n) || 0), 0);
+  if (total === 0) return null;
+  const parts = (["in_jurisdiction", "in_state", "outside", "not_stated"] as const)
+    .filter(key => breakdown[key] > 0)
+    .map(key => `${breakdown[key]} ${JURISDICTION_TEXT[key].text.toLowerCase()}`);
+  return (
+    <span style={{ font: "400 11.5px/1.5 'Hanken Grotesk',sans-serif", color: "#9B9BAB" }}>
+      Upvotes by self-reported location: {parts.join(" · ")}
+    </span>
+  );
+}
+
 export function ReciteChip({ r }: { r: any }) {
   const stance = (r.stance || r.status || "").toLowerCase();
   const c = stance.includes("support") ? "#34C384" : stance.includes("context") ? "#EFB643" : "#E5636A";
@@ -335,9 +365,14 @@ export function Race() {
   const [loadFailed, setLoadFailed] = useState(false);
   const race = id ? raceDetails[id] : null;
 
-  const fetchQuestions = () => {
+  const [questionSort, setQuestionSort] = useState<"votes" | "local">("votes");
+  const fetchQuestions = (sort: "votes" | "local" = questionSort) => {
     if (!id) return;
-    api.getQuestions(id).then(data => setQuestions((data?.questions ?? []) as any[])).catch(() => setQuestions([]));
+    api.getQuestions(id, undefined, undefined, sort).then(data => setQuestions((data?.questions ?? []) as any[])).catch(() => setQuestions([]));
+  };
+  const changeQuestionSort = (sort: "votes" | "local") => {
+    setQuestionSort(sort);
+    fetchQuestions(sort);
   };
 
   const refresh = () => {
@@ -401,6 +436,7 @@ export function Race() {
     try {
       const result = await api.voteQuestion(questionId);
       setQuestions(prev => prev.map(q => q.id === questionId ? { ...q, has_voted: result.voted, vote_count: result.vote_count } : q));
+      fetchQuestions(); // refresh the per-location vote breakdown
     } catch (err: any) {
       setNotice({ kind: "error", text: errorText(err) });
     }
@@ -599,8 +635,18 @@ export function Race() {
           {(tab === "wire" || tab === "questions") && (
             <div style={{ border: "1px solid rgba(255,255,255,.1)", borderRadius: 16, background: "#0C0C13", overflow: "hidden" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: "1px solid rgba(255,255,255,.07)", background: "rgba(255,255,255,.015)", gap: 12 }}>
-                <span style={{ font: `600 10px ${mono}`, letterSpacing: ".14em", color: "#9B9BAB" }}>VOTER QUESTIONS · RANKED BY UPVOTES</span>
-                <ActionButton onClick={() => setAction("question")} variant="ghost">Submit</ActionButton>
+                <span style={{ font: `600 10px ${mono}`, letterSpacing: ".14em", color: "#9B9BAB" }}>VOTER QUESTIONS · RANKED BY {questionSort === "local" ? "LOCAL UPVOTES" : "ALL UPVOTES"}</span>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <div role="group" aria-label="Question ranking" style={{ display: "flex", border: "1px solid rgba(255,255,255,.14)", borderRadius: 8, overflow: "hidden" }}>
+                    {([["votes", "All votes"], ["local", "Local votes"]] as const).map(([key, label]) => (
+                      <button key={key} type="button" aria-pressed={questionSort === key} onClick={() => changeQuestionSort(key)} style={{ cursor: "pointer", border: "none", padding: "7px 11px", font: `600 10px ${mono}`, letterSpacing: ".06em", background: questionSort === key ? "rgba(110,110,247,.22)" : "transparent", color: questionSort === key ? "#F2F2F7" : "#9B9BAB" }}>{label.toUpperCase()}</button>
+                    ))}
+                  </div>
+                  <ActionButton onClick={() => setAction("question")} variant="ghost">Submit</ActionButton>
+                </div>
+              </div>
+              <div style={{ padding: "9px 22px", borderBottom: "1px solid rgba(255,255,255,.06)", font: "400 11.5px/1.5 'Hanken Grotesk',sans-serif", color: "#9B9BAB" }}>
+                Location labels use each person's self-reported profile. They are not verified residency or voter eligibility, and they never block anyone from asking or voting.
               </div>
               {questions.length === 0 && <div style={{ padding: "22px", font: `400 13px 'Hanken Grotesk',sans-serif`, color: "#5C5C6E" }}>No questions yet — be the first to ask the candidates.</div>}
               {questions.map((q: any) => (
@@ -610,9 +656,11 @@ export function Race() {
                   </button>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     <span style={{ font: `500 14.5px/1.45 'Hanken Grotesk',sans-serif`, color: "#E8E8EF" }}>{q.question_text}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, font: `500 9.5px ${mono}`, letterSpacing: ".08em", color: "#5C5C6E" }}>
-                      <span style={{ color: q.source_type === "press" ? "#8F8FF9" : "#5C5C6E" }}>{(q.source_type || "voter").toUpperCase()}{q.author_name ? ` · ${q.author_name.toUpperCase()}` : ""}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", font: `500 9.5px ${mono}`, letterSpacing: ".08em", color: "#5C5C6E" }}>
+                      <span style={{ color: q.source_type === "press" ? "#8F8FF9" : "#9B9BAB" }}>{(q.source_type || "voter").toUpperCase()}{q.author_name ? ` · ${q.author_name.toUpperCase()}` : ""}</span>
+                      <JurisdictionChip label={q.author_jurisdiction} prefix="ASKED" />
                     </div>
+                    <VoteBreakdown breakdown={q.vote_breakdown} />
                   </div>
                 </div>
               ))}
@@ -1041,6 +1089,11 @@ function AskQuestionModal({ raceId, onClose }: { raceId: string; onClose: (refre
       });
       onClose(true, "Question submitted.");
     } catch (err: any) {
+      // 409 = someone already asked this. Send the reader to the existing question.
+      if (err?.response?.status === 409) {
+        onClose(true, "That question was already asked in this race. Find it in the list and upvote it.");
+        return;
+      }
       setNotice({ kind: "error", text: errorText(err) });
       setSubmitting(false);
     }

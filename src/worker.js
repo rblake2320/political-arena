@@ -7,7 +7,7 @@
  */
 
 import { Router } from 'itty-router';
-import { initDatabase, seedIssueCategories, seedPressNewsSources, seedPressFeedItems, seedOutsideAdExamples, seedDemoData } from './db.js';
+import { initDatabase, backfillQuestionFingerprints, seedIssueCategories, seedPressNewsSources, seedPressFeedItems, seedOutsideAdExamples, seedDemoData } from './db.js';
 import { notifySubscribers } from './notifications.js';
 import { ingestPressFeeds } from './press-ingest.js';
 import { archiveAndPurge } from './archive.js';
@@ -127,6 +127,7 @@ async function bootstrap(env) {
       ),
     ]);
   }
+  await backfillQuestionFingerprints(env.ARENA_DB);
   bootstrappedDbs.add(env.ARENA_DB);
 }
 

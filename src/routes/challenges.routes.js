@@ -12,6 +12,7 @@ import { validate, createChallengeSchema, respondToChallengeSchema, refuseChalle
 import { computeFactScore, getRecitesForContent } from './recites.routes.js';
 import { isTransactionalEmailConfigured, sendAndRecordTransactionalEmail } from '../email.js';
 import { notifySubscribers } from '../notifications.js';
+import { integrityLimits } from '../integrity.js';
 
 const router = Router({ base: '/api/challenges' });
 
@@ -450,6 +451,18 @@ router.post('/', async (request, env, ctx) => {
 
   if (dailyCount.cnt >= maxDaily) return errorResponse(`Daily challenge limit reached (${maxDaily}/day). Try again tomorrow.`, 429);
   if (weeklyCount.cnt >= maxWeekly) return errorResponse(`Weekly challenge limit reached (${maxWeekly}/week). Try again next week.`, 429);
+
+  // Pile-on guard: cap how many callouts one candidate can receive in a day
+  // across ALL challengers, so several campaigns cannot bury a target under
+  // deadlines it cannot physically answer. Checked before any credit is spent.
+  const inboundLimit = integrityLimits(env).inboundChallengesPerTargetPerDay;
+  const inboundCount = await env.ARENA_DB.prepare(
+    `SELECT COUNT(*) as cnt FROM challenges
+     WHERE target_candidate_id = ? AND status != 'withdrawn' AND created_at > datetime('now', '-1 day')`
+  ).bind(data.target_candidate_id).first();
+  if (inboundCount.cnt >= inboundLimit) {
+    return errorResponse(`This candidate has already received ${inboundLimit} callouts in the last 24 hours. Try again later; no credit was used.`, 429);
+  }
 
   // Atomic credit deduction — UPDATE first, check rows affected.
   // This prevents TOCTOU race: two concurrent requests both reading balance=1.

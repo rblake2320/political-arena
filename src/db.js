@@ -4,6 +4,8 @@
  * Pattern: one-time schema bootstrap per D1 binding
  */
 
+import { questionFingerprint } from './integrity.js';
+
 const initializedDbs = new WeakSet();
 
 const DEMO_MEDIA = {
@@ -536,6 +538,47 @@ export async function runRuntimeMigrations(db) {
         WHERE status = 'pending'`),
     ]);
   }
+
+  // Participation integrity: duplicate fingerprint + self-reported jurisdiction labels.
+  const questionColumnsResult = await db.prepare(`PRAGMA table_info(questions)`).all();
+  const questionColumns = new Set((questionColumnsResult.results || []).map(c => c.name));
+  const questionVoteColumnsResult = await db.prepare(`PRAGMA table_info(question_votes)`).all();
+  const questionVoteColumns = new Set((questionVoteColumnsResult.results || []).map(c => c.name));
+  const integrityMigrations = [];
+  if (questionColumns.size > 0 && !questionColumns.has('text_fingerprint')) {
+    integrityMigrations.push(db.prepare(`ALTER TABLE questions ADD COLUMN text_fingerprint TEXT`));
+  }
+  if (questionColumns.size > 0 && !questionColumns.has('author_jurisdiction')) {
+    integrityMigrations.push(db.prepare(`ALTER TABLE questions ADD COLUMN author_jurisdiction TEXT NOT NULL DEFAULT 'not_stated'`));
+  }
+  if (questionVoteColumns.size > 0 && !questionVoteColumns.has('voter_jurisdiction')) {
+    integrityMigrations.push(db.prepare(`ALTER TABLE question_votes ADD COLUMN voter_jurisdiction TEXT NOT NULL DEFAULT 'not_stated'`));
+  }
+  if (integrityMigrations.length > 0) await db.batch(integrityMigrations);
+}
+
+/**
+ * Fingerprint questions written before duplicate detection existed. Bounded
+ * per call; older duplicates keep a NULL fingerprint (the unique index
+ * rejects the second copy) so nothing already public is hidden or rewritten.
+ */
+export async function backfillQuestionFingerprints(db, limit = 500) {
+  const pending = await db.prepare(
+    `SELECT id, question_text FROM questions WHERE text_fingerprint IS NULL AND status = 'active' ORDER BY created_at, id LIMIT ?`
+  ).bind(limit).all();
+  let updated = 0;
+  for (const row of pending.results || []) {
+    const fingerprint = await questionFingerprint(row.question_text);
+    if (!fingerprint) continue;
+    try {
+      await db.prepare(`UPDATE questions SET text_fingerprint = ? WHERE id = ? AND text_fingerprint IS NULL`)
+        .bind(fingerprint, row.id).run();
+      updated += 1;
+    } catch {
+      // An earlier active question in the same race already holds this fingerprint.
+    }
+  }
+  return updated;
 }
 
 export async function initDatabase(db) {
@@ -1148,6 +1191,8 @@ export async function initDatabase(db) {
       media_url TEXT,
       vote_count INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','hidden','answered')),
+      text_fingerprint TEXT,
+      author_jurisdiction TEXT NOT NULL DEFAULT 'not_stated',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`),
@@ -1156,8 +1201,78 @@ export async function initDatabase(db) {
       id TEXT PRIMARY KEY,
       question_id TEXT NOT NULL REFERENCES questions(id),
       user_id TEXT NOT NULL REFERENCES users(id),
+      voter_jurisdiction TEXT NOT NULL DEFAULT 'not_stated',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(question_id, user_id)
+    )`),
+
+    // ========== VOTING RECORDS (public-sourced, incumbents only) ==========
+    // Votes are keyed by the official identifier, never by candidate. A
+    // candidate only shows a record through a CONFIRMED identity link, so
+    // revoking a wrong link hides the record immediately.
+    db.prepare(`CREATE TABLE IF NOT EXISTS candidate_identity_links (
+      id TEXT PRIMARY KEY,
+      candidate_id TEXT NOT NULL REFERENCES candidates(id),
+      identifier_type TEXT NOT NULL DEFAULT 'bioguide' CHECK(identifier_type IN ('bioguide')),
+      identifier_value TEXT NOT NULL,
+      official_name TEXT,
+      match_method TEXT NOT NULL CHECK(match_method IN ('manual','official_directory','fec_crosswalk')),
+      match_confidence INTEGER NOT NULL CHECK(match_confidence BETWEEN 0 AND 100),
+      evidence_url TEXT NOT NULL,
+      evidence_note TEXT,
+      status TEXT NOT NULL DEFAULT 'proposed' CHECK(status IN ('proposed','confirmed','rejected','revoked')),
+      proposed_by TEXT NOT NULL REFERENCES users(id),
+      reviewed_by TEXT REFERENCES users(id),
+      reviewed_at TEXT,
+      review_note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS bills (
+      id TEXT PRIMARY KEY,
+      congress INTEGER NOT NULL,
+      bill_type TEXT NOT NULL,
+      bill_number TEXT NOT NULL,
+      title TEXT,
+      source_name TEXT NOT NULL,
+      source_url TEXT NOT NULL,
+      retrieved_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(congress, bill_type, bill_number)
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS roll_calls (
+      id TEXT PRIMARY KEY,
+      chamber TEXT NOT NULL CHECK(chamber IN ('house','senate')),
+      congress INTEGER NOT NULL,
+      session INTEGER NOT NULL,
+      roll_number INTEGER NOT NULL,
+      vote_date TEXT NOT NULL,
+      question TEXT NOT NULL,
+      description TEXT,
+      result TEXT,
+      bill_id TEXT REFERENCES bills(id),
+      source_name TEXT NOT NULL,
+      source_url TEXT NOT NULL,
+      retrieved_at TEXT NOT NULL,
+      imported_by TEXT REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(chamber, congress, session, roll_number)
+    )`),
+
+    db.prepare(`CREATE TABLE IF NOT EXISTS member_votes (
+      id TEXT PRIMARY KEY,
+      roll_call_id TEXT NOT NULL REFERENCES roll_calls(id),
+      identifier_type TEXT NOT NULL DEFAULT 'bioguide' CHECK(identifier_type IN ('bioguide')),
+      identifier_value TEXT NOT NULL,
+      vote_position TEXT NOT NULL CHECK(vote_position IN ('yea','nay','present','not_voting')),
+      raw_position TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(roll_call_id, identifier_type, identifier_value)
     )`),
 
     // ========== PRESS CREDENTIALS ==========
@@ -1330,6 +1445,20 @@ export async function initDatabase(db) {
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_questions_votes ON questions(race_id, vote_count DESC)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_question_votes_question ON question_votes(question_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_question_votes_user ON question_votes(user_id)`),
+    db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_questions_active_fingerprint
+      ON questions(race_id, text_fingerprint)
+      WHERE status = 'active' AND text_fingerprint IS NOT NULL`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_questions_race_created ON questions(race_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_questions_user_created ON questions(user_id, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_challenges_target_created ON challenges(target_candidate_id, created_at)`),
+    // Voting records
+    db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_identity_links_one_live
+      ON candidate_identity_links(candidate_id, identifier_type)
+      WHERE status IN ('proposed','confirmed')`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_identity_links_identifier ON candidate_identity_links(identifier_type, identifier_value, status)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_identity_links_status ON candidate_identity_links(status, created_at)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_roll_calls_date ON roll_calls(vote_date DESC, id)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_member_votes_identifier ON member_votes(identifier_type, identifier_value, roll_call_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_creds_user ON press_credentials(user_id)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_feed_active_published ON press_feed_items(is_active, published_at DESC, first_seen_at DESC)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_press_feed_source ON press_feed_items(source, section)`),
