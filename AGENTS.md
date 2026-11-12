@@ -18,7 +18,10 @@ The product must stay nonpartisan. Do not add features that favor a party, ideol
 - Recite moderation queue and review notes.
 - Timestamped public statement ledger with source/transcript/timestamp metadata.
 - Candidate public trust profiles with response rate, no-response count, evasion score, reviewed statements, verified recites, and timeline.
-- Verified voter/press questions and issue-priority aggregation.
+- Questions from email-confirmed participants and approved press, and issue-priority aggregation. Email confirmation is not identity or voter verification.
+- Participation integrity: duplicate-question collapse, per-account and surge limits, a per-target callout cap, and self-reported jurisdiction labels with a public vote breakdown.
+- Signed receipt bundles: Ed25519-signed, offline-verifiable evidence bundles with audit-chain and anchor inclusion proofs; public key and anchor-root lists.
+- Source-attributed legislative voting records, shown only through a two-person-confirmed identity link.
 
 ## Architecture
 
@@ -37,6 +40,10 @@ Important route modules:
 - `src/routes/statements.routes.js`: timestamped public statement ledger.
 - `src/routes/candidates.routes.js`: public candidate trust profile.
 - `src/routes/ads.routes.js`: ads, rebuttals, outside ad response flow.
+- `src/routes/questions.routes.js` + `src/integrity.js`: questions, duplicate fingerprints, limits, jurisdiction labels.
+- `src/routes/transparency.routes.js` + `src/receipt-bundle.js`: signed receipt bundles, public keys, anchor roots.
+- `src/receipt-verify.js`: the one dependency-free verifier shared by the Worker tests, the `/verify` page and `scripts/verify-receipt-bundle.mjs`. Keep it free of imports.
+- `src/routes/voting-records.routes.js` + `src/voting-records.js`: identity links, roll-call import/sync, public voting record.
 
 ## Non-Negotiable Product Rules
 
@@ -48,6 +55,10 @@ Important route modules:
 6. Public candidate profiles must show history over time, not just campaign-owned messaging.
 7. Non-response must remain visible and easy to inspect.
 8. Staff-only dashboards must not be the only way for voters to evaluate a candidate.
+9. Jurisdiction labels are self-reported. Never present them as verified residency, never use them to block an action, and never silently reweight the default ranking.
+10. A receipt bundle must never contain private audit fields (network address, internal metadata), and an unsigned bundle must say it is unsigned.
+11. Votes are stored against the official identifier, not the candidate. A candidate shows a voting record only through an identity link confirmed by a reviewer other than its proposer. Attach no score or characterization to a vote.
+12. React hooks go before any early return in a component (`test-ui/hook-order.test.ts` enforces this; a violation crashed every receipt page).
 
 ## Engineering Rules
 
@@ -93,6 +104,9 @@ These require real external providers or policy/legal decisions:
 - Production video transcoding, thumbnails, captions, and format normalization.
 - Copyright/fair-use/takedown workflow for reposted outside ads.
 - Legal review for election-law disclaimers and defamation policy.
+- Real jurisdiction verification: location labels are self-reported profile data.
+- Senate roll calls are not in the Congress.gov API; they enter through the manual import. The House sync is built to the documented response shape and tested with injected responses, but has not been run against the live API.
+- Receipt bundles cannot let a reader recompute an audit entry's hash when that entry holds a private field; those entries are covered by the signature and chain links only.
 
 Do not pretend these are solved locally unless provider integration and policy are actually implemented.
 

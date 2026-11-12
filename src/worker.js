@@ -7,7 +7,7 @@
  */
 
 import { Router } from 'itty-router';
-import { initDatabase, seedIssueCategories, seedPressNewsSources, seedPressFeedItems, seedOutsideAdExamples, seedDemoData } from './db.js';
+import { initDatabase, backfillQuestionFingerprints, seedIssueCategories, seedPressNewsSources, seedPressFeedItems, seedOutsideAdExamples, seedDemoData } from './db.js';
 import { notifySubscribers } from './notifications.js';
 import { ingestPressFeeds } from './press-ingest.js';
 import { archiveAndPurge } from './archive.js';
@@ -39,6 +39,8 @@ import electionsRoutes from './routes/elections.routes.js';
 import favoritesRoutes from './routes/favorites.routes.js';
 import safetyRoutes from './routes/safety.routes.js';
 import moderationRoutes from './routes/moderation.routes.js';
+import transparencyRoutes from './routes/transparency.routes.js';
+import votingRecordsRoutes from './routes/voting-records.routes.js';
 
 // Main API router
 const api = Router({ base: '/api' });
@@ -68,6 +70,8 @@ api.all('/elections/*', electionsRoutes.fetch);
 api.all('/favorites/*', favoritesRoutes.fetch);
 api.all('/safety/*', safetyRoutes.fetch);
 api.all('/moderation/*', moderationRoutes.fetch);
+api.all('/transparency/*', transparencyRoutes.fetch);
+api.all('/voting-records/*', votingRecordsRoutes.fetch);
 
 // Health check fallback; fetch() handles /api/health directly so bootstrap
 // failures can return degraded health before route dispatch.
@@ -127,6 +131,7 @@ async function bootstrap(env) {
       ),
     ]);
   }
+  await backfillQuestionFingerprints(env.ARENA_DB);
   bootstrappedDbs.add(env.ARENA_DB);
 }
 
@@ -152,6 +157,7 @@ export default {
       return withApiHeaders(json({
         status: bootstrapError ? 'degraded' : 'ok',
         database: bootstrapError ? 'error' : 'ok',
+        sample_data: env.ENVIRONMENT !== 'production' || env.SEED_DEMO_DATA === 'true',
         version: '1.0.0',
         timestamp: new Date().toISOString(),
       }, bootstrapError ? 503 : 200), request, env);
@@ -174,9 +180,9 @@ export default {
 
     // robots.txt + sitemap.xml — voters find candidates through search
     if (url.pathname === '/robots.txt') {
-      return new Response(`User-agent: *\nAllow: /\nSitemap: ${url.origin}/sitemap.xml\n`, {
+      return withSecurityHeaders(new Response(`User-agent: *\nAllow: /\nSitemap: ${url.origin}/sitemap.xml\n`, {
         headers: { 'Content-Type': 'text/plain' },
-      });
+      }));
     }
     if (url.pathname === '/sitemap.xml') {
       const staticPaths = ['/', '/what-matters', '/help', '/press/register', '/terms', '/privacy', '/moderation-policy', '/dmca'];
@@ -191,11 +197,14 @@ export default {
       } catch { /* serve the static portion regardless */ }
       const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
         urls.map(u => `  <url><loc>${u.replace(/&/g, '&amp;')}</loc></url>`).join('\n') + `\n</urlset>`;
-      return new Response(xml, { headers: { 'Content-Type': 'application/xml', 'Cache-Control': 'public, max-age=3600' } });
+      return withSecurityHeaders(new Response(xml, { headers: { 'Content-Type': 'application/xml', 'Cache-Control': 'public, max-age=3600' } }));
     }
 
     // Serve media files from R2
     if (url.pathname.startsWith('/media/')) {
+      if (!['GET', 'HEAD'].includes(request.method)) {
+        return withApiHeaders(new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } }), request, env);
+      }
       if (!env.ARENA_MEDIA) {
         return withApiHeaders(json({ success: false, error: 'Media storage not available' }, 503), request, env);
       }
@@ -203,10 +212,14 @@ export default {
       if (!key || !key.startsWith('uploads/')) {
         return withApiHeaders(json({ success: false, error: 'Invalid media path' }, 403), request, env);
       }
-      const response = await r2MediaResponse(env.ARENA_MEDIA, key, request);
-      if (!response) {
-        return new Response('Not Found', { status: 404 });
+      let response;
+      try {
+        response = await r2MediaResponse(env.ARENA_MEDIA, key, request);
+      } catch (err) {
+        console.error('Media storage error:', err);
+        return withApiHeaders(json({ success: false, error: 'Media storage unavailable' }, 503), request, env);
       }
+      if (!response) return withApiHeaders(new Response('Not Found', { status: 404 }), request, env);
       const headers = new Headers(response.headers);
       headers.set('Content-Security-Policy', "default-src 'none'");
       Object.entries(SECURITY_HEADERS).forEach(([k, v]) => headers.set(k, v));
@@ -282,7 +295,7 @@ export default {
       const isHtml = (response.headers.get('Content-Type') || '').includes('text/html');
       return withSecurityHeaders(response, { isHtml });
     } catch (e) {
-      return new Response('Internal Server Error', { status: 500 });
+      return withSecurityHeaders(new Response('Internal Server Error', { status: 500 }));
     }
   },
 

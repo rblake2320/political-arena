@@ -45,3 +45,14 @@ PASSWORD_RESET_EXPOSE_DEV_TOKEN=true
 
 # Optional: force demo data seeding (never enable in production)
 # SEED_DEMO_DATA=true
+
+# --- Receipt signing (launch gate) ---
+# Ed25519 PKCS#8 private key, base64. Generate with:
+#   node scripts/generate-receipt-key.mjs
+# Without it, receipt bundles are returned explicitly unsigned.
+# RECEIPT_SIGNING_KEY=paste-the-private-line-here
+# RECEIPT_RETIRED_PUBLIC_KEYS=oldPublicKeyBase64Url,anotherOldKey
+
+# --- Voting records ---
+# Enables POST /api/voting-records/sync (House roll calls from Congress.gov).
+# CONGRESS_API_KEY=your-api-data-gov-key

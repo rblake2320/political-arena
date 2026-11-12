@@ -102,7 +102,7 @@ describe('transactional email provider adapter', () => {
         text: 'Plain text',
       }, async (url, init) => {
         request = { url, init };
-        return new Response(JSON.stringify({ id: 'ok', MessageID: 'ok' }), {
+        return new Response(JSON.stringify({ id: 'ok', MessageID: 'ok', ErrorCode: 0 }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });

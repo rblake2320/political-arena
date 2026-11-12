@@ -492,6 +492,65 @@ export const updateProfileSchema = z.object({
 
 // ===== Validation Helper =====
 
+// ===== Voting Record Schemas =====
+
+const httpsSourceUrl = z.string().url().max(1000).refine(
+  url => /^https?:\/\//i.test(url),
+  { message: 'URL must use http or https' },
+);
+const bioguideId = z.string().trim().toUpperCase().regex(/^[A-Z]\d{6}$/, 'Bioguide ID must be one letter followed by six digits');
+
+export const proposeIdentityLinkSchema = z.object({
+  candidate_id: z.string().min(1).max(100),
+  identifier_value: bioguideId,
+  official_name: z.string().trim().min(2).max(200),
+  match_method: z.enum(['manual', 'official_directory', 'fec_crosswalk']),
+  match_confidence: z.number().int().min(0).max(100),
+  // The evidence must be something a second reviewer can open and check.
+  evidence_url: httpsSourceUrl,
+  evidence_note: z.string().max(1000).optional(),
+});
+
+export const reviewIdentityLinkSchema = z.object({
+  decision: z.enum(['confirm', 'reject']),
+  note: z.string().trim().min(5).max(1000),
+});
+
+export const revokeIdentityLinkSchema = z.object({
+  note: z.string().trim().min(5).max(1000),
+});
+
+export const importRollCallSchema = z.object({
+  roll_call: z.object({
+    chamber: z.enum(['house', 'senate']),
+    congress: z.number().int().min(1).max(999),
+    session: z.number().int().min(1).max(9),
+    roll_number: z.number().int().min(1).max(99999),
+    vote_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'vote_date must be YYYY-MM-DD'),
+    question: z.string().trim().min(3).max(500),
+    description: z.string().max(500).optional(),
+    result: z.string().max(120).optional(),
+    source_name: z.string().trim().min(2).max(200),
+    source_url: httpsSourceUrl,
+    bill: z.object({
+      bill_type: z.string().trim().min(1).max(20).regex(/^[A-Za-z.]+$/, 'bill_type must be letters'),
+      bill_number: z.string().trim().regex(/^\d{1,6}$/, 'bill_number must be digits'),
+      title: z.string().max(500).optional(),
+      source_url: httpsSourceUrl.optional(),
+    }).optional(),
+  }),
+  votes: z.array(z.object({
+    bioguide_id: bioguideId,
+    position: z.string().trim().min(1).max(60),
+  })).min(1).max(600),
+});
+
+export const syncHouseVotesSchema = z.object({
+  congress: z.number().int().min(100).max(999),
+  session: z.number().int().min(1).max(2),
+  limit: z.number().int().min(1).max(50).optional().default(20),
+});
+
 export function validate(schema, data) {
   const result = schema.safeParse(data);
   if (!result.success) {

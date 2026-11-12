@@ -1,0 +1,28 @@
+{
+  "results": [
+    {
+      "check": "restored-media-playback",
+      "pass": true,
+      "players": 4
+    },
+    {
+      "check": "directory-tabs-evidence-question-gate",
+      "pass": true
+    },
+    {
+      "check": "unknown-race-retry",
+      "pass": true
+    },
+    {
+      "check": "file-import-through-ui-to-draft",
+      "pass": true
+    },
+    {
+      "check": "public-route-content",
+      "pass": true,
+      "routes": 6
+    }
+  ],
+  "page_errors": [],
+  "failure": ""
+}

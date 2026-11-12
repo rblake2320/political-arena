@@ -72,14 +72,15 @@ export function requireRole(...roles) {
 }
 
 /**
- * Require verified voter (verification_status = 'verified')
+ * Legacy name: require email-confirmed participation, NOT identity/voter verification.
+ * Generic historical verification_status values are not identity evidence.
  */
 export async function requireVerifiedVoter(request, env) {
   const authError = await requireAuth(request, env);
   if (authError) return authError;
 
-  if (request.user.verification_status !== 'verified') {
-    return errorResponse('Account verification required. Please verify your identity to perform this action.', 403);
+  if (!request.user.email_verified) {
+    return errorResponse('Email confirmation required to perform this action. This does not verify identity or voter eligibility.', 403);
   }
   return null;
 }

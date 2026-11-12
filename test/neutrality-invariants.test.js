@@ -15,9 +15,12 @@ const publicAccountabilityFiles = [
   'src/routes/recites.routes.js',
   'src/routes/statements.routes.js',
   'src/routes/surveys.routes.js',
+  'src/routes/transparency.routes.js',
+  'src/routes/voting-records.routes.js',
   'src/pages/CandidateProfilePage.tsx',
   'src/pages/ChallengeReceiptPage.tsx',
   'src/pages/Race.tsx',
+  'src/pages/VerifyReceiptPage.tsx',
   'src/pages/WhatMattersPage.tsx',
 ];
 

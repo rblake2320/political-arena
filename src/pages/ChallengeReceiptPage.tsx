@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import * as api from "../api";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ContentMedia } from "../components/Media";
@@ -85,18 +85,11 @@ export function ChallengeReceiptPage() {
     api.getChallengeReceipt(id).then(setData).catch((e: any) => setError(e.response?.data?.error || e.message || "Receipt not found")).finally(() => setLoading(false));
   }, [id]);
 
-  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "80px 0" }}><div className="arena-pulse" style={{ width: 24, height: 24, border: "2px solid rgba(110,110,247,.3)", borderTopColor: "#6E6EF7", borderRadius: "50%" }} /></div>;
-  if (error || !data) return (
-    <div style={{ maxWidth: 520, margin: "0 auto", padding: "96px 16px", textAlign: "center" }}>
-      <div style={{ font: `400 28px ${serif}`, color: "#F2F2F7", marginBottom: 8 }}>Receipt unavailable</div>
-      <div style={{ font: `400 13px ${mono}`, color: "#9B9BAB" }}>{error || "This receipt could not be loaded."}</div>
-    </div>
-  );
-
-  const { challenge, response, recites, response_recites, fact_score, response_fact_score, timeline, audit_chain } = data;
-
   // schema.org ClaimReview — lets Google's fact-check surfaces index receipts
+  // Declared before the early returns below: hooks must run in the same order on every render.
   useEffect(() => {
+    const challenge = data?.challenge;
+    const fact_score = data?.fact_score;
     if (!challenge) return;
     const script = document.createElement('script');
     script.type = 'application/ld+json';
@@ -122,7 +115,17 @@ export function ChallengeReceiptPage() {
     });
     document.head.appendChild(script);
     return () => { document.getElementById('claimreview-jsonld')?.remove(); };
-  }, [challenge?.id]);
+  }, [data?.challenge?.id]);
+
+  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "80px 0" }}><div className="arena-pulse" style={{ width: 24, height: 24, border: "2px solid rgba(110,110,247,.3)", borderTopColor: "#6E6EF7", borderRadius: "50%" }} /></div>;
+  if (error || !data) return (
+    <div style={{ maxWidth: 520, margin: "0 auto", padding: "96px 16px", textAlign: "center" }}>
+      <div style={{ font: `400 28px ${serif}`, color: "#F2F2F7", marginBottom: 8 }}>Receipt unavailable</div>
+      <div style={{ font: `400 13px ${mono}`, color: "#9B9BAB" }}>{error || "This receipt could not be loaded."}</div>
+    </div>
+  );
+
+  const { challenge, response, recites, response_recites, fact_score, response_fact_score, timeline, audit_chain } = data;
 
   const status = challenge.status || "open";
   const cc = partyColor(challenge.challenger_party);
@@ -277,6 +280,13 @@ export function ChallengeReceiptPage() {
                   </div>
                 )}
                 <span style={{ font: `400 10.5px/1.55 'Hanken Grotesk',sans-serif`, color: "#9B9BAB" }}>Every event on this receipt is hash-chained to the one before it. Any edit after the fact breaks the chain — and shows here. Tamper-evident audit trail.</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 12 }}>
+                  <span style={{ font: `400 12px/1.55 'Hanken Grotesk',sans-serif`, color: "#C9C9D4" }}>Don't take this page's word for it. Download the signed evidence bundle and check it yourself.</span>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Link to={`/verify?receipt=${encodeURIComponent(challenge.public_receipt_slug || challenge.id)}`} style={{ font: `600 12px 'Hanken Grotesk',sans-serif`, color: "#fff", background: "#6E6EF7", borderRadius: 8, padding: "9px 13px", textDecoration: "none" }}>Verify independently</Link>
+                    <a href={`/api/transparency/receipts/${encodeURIComponent(challenge.public_receipt_slug || challenge.id)}/bundle`} download={`arena-receipt-${challenge.public_receipt_slug || challenge.id}.json`} style={{ font: `600 12px 'Hanken Grotesk',sans-serif`, color: "#E8E8EF", border: "1px solid rgba(255,255,255,.2)", borderRadius: 8, padding: "8px 13px", textDecoration: "none" }}>Download signed bundle</a>
+                  </div>
+                </div>
               </div>
             </div>
 

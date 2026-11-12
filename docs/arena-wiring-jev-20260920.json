@@ -1,0 +1,708 @@
+{
+  "created_at": "2026-09-20T22:55:47.457Z",
+  "execution_commit": "fe63199a2d3dffa48105c249ccb28919dce49e4f",
+  "working_diff_sha256": "952433f9853ad6e80150f0424b30f72113834ecdb4098c6a07d778a95a30347f",
+  "script_sha256": "fde8154d2a337012065c60e5f14c1746f4625353bad9c7af3940fd3b45a2833d",
+  "http_ms": 296.9764,
+  "live_passes": 15,
+  "live_total": 15,
+  "cases": [
+    {
+      "id": "anonymous_profile",
+      "requirement": "Unauthenticated profile access is denied",
+      "expected": 401,
+      "observed": 401,
+      "origin": "local_http"
+    },
+    {
+      "id": "registration",
+      "requirement": "Valid local registration succeeds",
+      "expected": 200,
+      "observed": 200,
+      "origin": "local_http"
+    },
+    {
+      "id": "role_assignment",
+      "requirement": "Registration cannot grant a client-requested administrator role",
+      "expected": "voter",
+      "observed": "voter",
+      "origin": "local_http"
+    },
+    {
+      "id": "unconfirmed_email",
+      "requirement": "A newly registered account is not email-confirmed",
+      "expected": false,
+      "observed": false,
+      "origin": "local_http"
+    },
+    {
+      "id": "unconfirmed_write",
+      "requirement": "Participation before email confirmation is denied",
+      "expected": 403,
+      "observed": 403,
+      "origin": "local_http"
+    },
+    {
+      "id": "email_confirmation",
+      "requirement": "An issued confirmation token is accepted",
+      "expected": 200,
+      "observed": 200,
+      "origin": "local_http"
+    },
+    {
+      "id": "identity_boundary",
+      "requirement": "Email confirmation must not promote generic identity status",
+      "expected": "unverified",
+      "observed": "unverified",
+      "origin": "local_http"
+    },
+    {
+      "id": "confirmed_write",
+      "requirement": "Email-confirmed participant can save priorities",
+      "expected": 200,
+      "observed": 200,
+      "origin": "local_http"
+    },
+    {
+      "id": "campaign_authority",
+      "requirement": "Ordinary participants cannot verify candidates",
+      "expected": 403,
+      "observed": 403,
+      "origin": "local_http"
+    },
+    {
+      "id": "profile_escalation",
+      "requirement": "A profile update containing only protected fields is rejected",
+      "expected": 400,
+      "observed": 400,
+      "origin": "local_http"
+    },
+    {
+      "id": "token_replay",
+      "requirement": "Used email-confirmation tokens cannot be reused",
+      "expected": 400,
+      "observed": 400,
+      "origin": "local_http"
+    },
+    {
+      "id": "logout",
+      "requirement": "A logged-in account can revoke its session",
+      "expected": 200,
+      "observed": 200,
+      "origin": "local_http"
+    },
+    {
+      "id": "revoked_session",
+      "requirement": "A revoked session cannot read the private profile",
+      "expected": 401,
+      "observed": 401,
+      "origin": "local_http"
+    },
+    {
+      "id": "directory_route",
+      "requirement": "Directory pagination endpoint succeeds",
+      "expected": 200,
+      "observed": 200,
+      "origin": "local_http"
+    },
+    {
+      "id": "directory_page",
+      "requirement": "Requested one-row page is bounded",
+      "expected": true,
+      "observed": true,
+      "origin": "local_http"
+    },
+    {
+      "id": "mutated_anonymous_profile",
+      "requirement": "Unauthenticated profile access is denied",
+      "expected": 401,
+      "observed": 200,
+      "origin": "synthetic_receipt_mutation"
+    },
+    {
+      "id": "mutated_campaign_authority",
+      "requirement": "Ordinary participants cannot verify candidates",
+      "expected": 403,
+      "observed": 200,
+      "origin": "synthetic_receipt_mutation"
+    },
+    {
+      "id": "mutated_token_replay",
+      "requirement": "Used email-confirmation tokens cannot be reused",
+      "expected": 400,
+      "observed": 200,
+      "origin": "synthetic_receipt_mutation"
+    },
+    {
+      "id": "mutated_revoked_session",
+      "requirement": "A revoked session cannot read the private profile",
+      "expected": 401,
+      "observed": 200,
+      "origin": "synthetic_receipt_mutation"
+    },
+    {
+      "id": "mutated_role",
+      "requirement": "Registration cannot grant a client-requested administrator role",
+      "expected": "voter",
+      "observed": "admin",
+      "origin": "synthetic_receipt_mutation"
+    },
+    {
+      "id": "not_executed",
+      "requirement": "A user must be able to recover their account through delivered email",
+      "expected": 200,
+      "observed": null,
+      "origin": "unexecuted_control"
+    }
+  ],
+  "baseline": {
+    "anonymous_profile": "satisfied",
+    "registration": "satisfied",
+    "role_assignment": "satisfied",
+    "unconfirmed_email": "satisfied",
+    "unconfirmed_write": "satisfied",
+    "email_confirmation": "satisfied",
+    "identity_boundary": "satisfied",
+    "confirmed_write": "satisfied",
+    "campaign_authority": "satisfied",
+    "profile_escalation": "satisfied",
+    "token_replay": "satisfied",
+    "logout": "satisfied",
+    "revoked_session": "satisfied",
+    "directory_route": "satisfied",
+    "directory_page": "satisfied",
+    "mutated_anonymous_profile": "violated",
+    "mutated_campaign_authority": "violated",
+    "mutated_token_replay": "violated",
+    "mutated_revoked_session": "violated",
+    "mutated_role": "violated",
+    "not_executed": "unavailable"
+  },
+  "baseline_ms": 0.041200000000003456,
+  "jev": {
+    "model": "jev-1.13.0",
+    "usage": {
+      "input_tokens": 3834,
+      "output_tokens": 950
+    },
+    "wall_ms": 532.3316,
+    "request": {
+      "model": "jev-latest",
+      "state": {
+        "cases": [
+          {
+            "id": "anonymous_profile",
+            "requirement": "Unauthenticated profile access is denied",
+            "expected": 401,
+            "observed": 401
+          },
+          {
+            "id": "registration",
+            "requirement": "Valid local registration succeeds",
+            "expected": 200,
+            "observed": 200
+          },
+          {
+            "id": "role_assignment",
+            "requirement": "Registration cannot grant a client-requested administrator role",
+            "expected": "voter",
+            "observed": "voter"
+          },
+          {
+            "id": "unconfirmed_email",
+            "requirement": "A newly registered account is not email-confirmed",
+            "expected": false,
+            "observed": false
+          },
+          {
+            "id": "unconfirmed_write",
+            "requirement": "Participation before email confirmation is denied",
+            "expected": 403,
+            "observed": 403
+          },
+          {
+            "id": "email_confirmation",
+            "requirement": "An issued confirmation token is accepted",
+            "expected": 200,
+            "observed": 200
+          },
+          {
+            "id": "identity_boundary",
+            "requirement": "Email confirmation must not promote generic identity status",
+            "expected": "unverified",
+            "observed": "unverified"
+          },
+          {
+            "id": "confirmed_write",
+            "requirement": "Email-confirmed participant can save priorities",
+            "expected": 200,
+            "observed": 200
+          },
+          {
+            "id": "campaign_authority",
+            "requirement": "Ordinary participants cannot verify candidates",
+            "expected": 403,
+            "observed": 403
+          },
+          {
+            "id": "profile_escalation",
+            "requirement": "A profile update containing only protected fields is rejected",
+            "expected": 400,
+            "observed": 400
+          },
+          {
+            "id": "token_replay",
+            "requirement": "Used email-confirmation tokens cannot be reused",
+            "expected": 400,
+            "observed": 400
+          },
+          {
+            "id": "logout",
+            "requirement": "A logged-in account can revoke its session",
+            "expected": 200,
+            "observed": 200
+          },
+          {
+            "id": "revoked_session",
+            "requirement": "A revoked session cannot read the private profile",
+            "expected": 401,
+            "observed": 401
+          },
+          {
+            "id": "directory_route",
+            "requirement": "Directory pagination endpoint succeeds",
+            "expected": 200,
+            "observed": 200
+          },
+          {
+            "id": "directory_page",
+            "requirement": "Requested one-row page is bounded",
+            "expected": true,
+            "observed": true
+          },
+          {
+            "id": "mutated_anonymous_profile",
+            "requirement": "Unauthenticated profile access is denied",
+            "expected": 401,
+            "observed": 200
+          },
+          {
+            "id": "mutated_campaign_authority",
+            "requirement": "Ordinary participants cannot verify candidates",
+            "expected": 403,
+            "observed": 200
+          },
+          {
+            "id": "mutated_token_replay",
+            "requirement": "Used email-confirmation tokens cannot be reused",
+            "expected": 400,
+            "observed": 200
+          },
+          {
+            "id": "mutated_revoked_session",
+            "requirement": "A revoked session cannot read the private profile",
+            "expected": 401,
+            "observed": 200
+          },
+          {
+            "id": "mutated_role",
+            "requirement": "Registration cannot grant a client-requested administrator role",
+            "expected": "voter",
+            "observed": "admin"
+          },
+          {
+            "id": "not_executed",
+            "requirement": "A user must be able to recover their account through delivered email",
+            "expected": 200,
+            "observed": null
+          }
+        ]
+      },
+      "questions": {
+        "anonymous_profile": {
+          "type": "choice",
+          "instructions": "For the case with id anonymous_profile in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "registration": {
+          "type": "choice",
+          "instructions": "For the case with id registration in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "role_assignment": {
+          "type": "choice",
+          "instructions": "For the case with id role_assignment in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "unconfirmed_email": {
+          "type": "choice",
+          "instructions": "For the case with id unconfirmed_email in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "unconfirmed_write": {
+          "type": "choice",
+          "instructions": "For the case with id unconfirmed_write in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "email_confirmation": {
+          "type": "choice",
+          "instructions": "For the case with id email_confirmation in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "identity_boundary": {
+          "type": "choice",
+          "instructions": "For the case with id identity_boundary in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "confirmed_write": {
+          "type": "choice",
+          "instructions": "For the case with id confirmed_write in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "campaign_authority": {
+          "type": "choice",
+          "instructions": "For the case with id campaign_authority in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "profile_escalation": {
+          "type": "choice",
+          "instructions": "For the case with id profile_escalation in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "token_replay": {
+          "type": "choice",
+          "instructions": "For the case with id token_replay in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "logout": {
+          "type": "choice",
+          "instructions": "For the case with id logout in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "revoked_session": {
+          "type": "choice",
+          "instructions": "For the case with id revoked_session in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "directory_route": {
+          "type": "choice",
+          "instructions": "For the case with id directory_route in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "directory_page": {
+          "type": "choice",
+          "instructions": "For the case with id directory_page in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "mutated_anonymous_profile": {
+          "type": "choice",
+          "instructions": "For the case with id mutated_anonymous_profile in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "mutated_campaign_authority": {
+          "type": "choice",
+          "instructions": "For the case with id mutated_campaign_authority in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "mutated_token_replay": {
+          "type": "choice",
+          "instructions": "For the case with id mutated_token_replay in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "mutated_revoked_session": {
+          "type": "choice",
+          "instructions": "For the case with id mutated_revoked_session in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "mutated_role": {
+          "type": "choice",
+          "instructions": "For the case with id mutated_role in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        },
+        "not_executed": {
+          "type": "choice",
+          "instructions": "For the case with id not_executed in cases, does its observed result satisfy its requirement and expected value? Judge only recorded values, not desired behavior. A null observation means no execution evidence.",
+          "criteria": {
+            "satisfied": "Observed value equals required expected value",
+            "violated": "Observed value conflicts with required expected value",
+            "unavailable": "Observation is null, so execution evidence is missing"
+          }
+        }
+      }
+    },
+    "answers": {
+      "anonymous_profile": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "registration": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "role_assignment": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "unconfirmed_email": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "unconfirmed_write": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "email_confirmation": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "identity_boundary": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "confirmed_write": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "campaign_authority": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "profile_escalation": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "token_replay": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "logout": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "revoked_session": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "directory_route": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "directory_page": {
+        "choice": "satisfied",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 0,
+          "satisfied": 1
+        }
+      },
+      "mutated_anonymous_profile": {
+        "choice": "violated",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 1,
+          "satisfied": 0
+        }
+      },
+      "mutated_campaign_authority": {
+        "choice": "violated",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 1,
+          "satisfied": 0
+        }
+      },
+      "mutated_token_replay": {
+        "choice": "violated",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 1,
+          "satisfied": 0
+        }
+      },
+      "mutated_revoked_session": {
+        "choice": "violated",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 1,
+          "satisfied": 0
+        }
+      },
+      "mutated_role": {
+        "choice": "violated",
+        "confidence": 1,
+        "probabilities": {
+          "unavailable": 0,
+          "violated": 1,
+          "satisfied": 0
+        }
+      },
+      "not_executed": {
+        "choice": "unavailable",
+        "confidence": 1,
+        "probabilities": {
+          "violated": 0,
+          "unavailable": 1,
+          "satisfied": 0
+        }
+      }
+    },
+    "agreement": 21,
+    "total": 21,
+    "invoice_cost": null
+  }
+}

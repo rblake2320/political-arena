@@ -17,7 +17,10 @@ A fair, structured environment for political candidates to campaign, challenge e
 - **Timestamped statement archive** — public statements can link to YouTube/video/article sources, transcript URLs, exact timestamps, topics, truth review status, and evasion review status.
 - **Credits** — each challenge costs 1 credit (atomic deduction, ledgered in `credit_transactions`, refunded on withdrawal). Admins grant credits; every grant is audit-logged.
 - **What Matters** — voters rank their top-5 issues; aggregates and cross-party overlap surface what the electorate actually cares about.
-- **Questions** — voter and credentialed-press questions per race, with dedup-safe upvoting.
+- **Questions** — questions from email-confirmed participants and credentialed press per race, with dedup-safe upvoting. Email confirmation is not identity or voter verification.
+- **Participation integrity** — near-duplicate questions collapse onto one (case, spacing, punctuation and look-alike characters ignored); per-account daily caps; during a flood only brand-new accounts are slowed; one candidate can receive at most six callouts a day across all challengers. Every question and upvote carries a **self-reported** jurisdiction label and the public list shows a per-location vote breakdown with an optional local ranking. Labels never block anyone and the default ranking is never reweighted.
+- **Signed receipt bundles** — any public receipt downloads as an Ed25519-signed evidence bundle (claim, sources, scores, response, hash-chained audit trail, and a Merkle inclusion proof when an anchor covers it). Verify it in the browser at `/verify` or offline with `node scripts/verify-receipt-bundle.mjs`. Signing keys and anchor roots are public at `/api/transparency/keys` and `/api/transparency/anchors`.
+- **Voting records** — source-attributed roll-call votes on candidate profiles for candidates who have held legislative office. A record appears only after one reviewer proposes the identity match with evidence and a different reviewer confirms it; a wrong match can be revoked instantly. No score or characterization is attached. Loaded by admin import (House or Senate) or from Congress.gov (House) when `CONGRESS_API_KEY` is set.
 - **Press credentials** — journalists apply with outlet proof; admins/moderators review.
 - **Notifications** — subscribe to races/candidates; in-app notifications on challenge activity.
 - **Audit log** — append-only record of every state-changing action (who, what, before/after, hashed IP).
@@ -29,13 +32,13 @@ Browser (React SPA)
    │  /api/*  (axios, Bearer JWT)
    ▼
 Cloudflare Worker (src/worker.js)
-   ├─ 16 route modules (src/routes/*.routes.js, itty-router)
+   ├─ route modules (src/routes/*.routes.js, itty-router)
    ├─ auth.js        PBKDF2 password hashing + encrypted JWT (A256GCM) + session binding
    ├─ middleware.js  auth guards, role checks, CORS allowlist, pagination
    ├─ validation.js  Zod schemas for every write endpoint
    ├─ ratelimit.js   D1-backed fixed-window rate limiter (atomic UPSERT)
    ├─ audit.js       non-blocking append-only audit log (ctx.waitUntil)
-   └─ db.js          33 tables + 61 indexes, CREATE IF NOT EXISTS bootstrap + runtime migrations
+   └─ db.js          schema/index bootstrap + runtime migrations
    │
    ├─ D1  (ARENA_DB)     all relational state
    ├─ R2  (ARENA_MEDIA)  candidate media (video/image/audio), served via /media/*
@@ -52,6 +55,7 @@ The Vite-built SPA is served from Workers static assets; unknown paths fall back
 - **Passwords** — PBKDF2-SHA256 (100k iterations, per-user salt), constant-time comparison, complexity policy enforced by Zod.
 - **Password reset** — reset tokens are random, stored only as hashes, expire after 1 hour, and invalidate all active sessions after a successful reset. Forgot-password responses are always generic to avoid email enumeration.
 - **Transactional email** — password resets and public-callout notices use a configured Resend or Postmark provider, with every delivery attempt recorded in `email_deliveries`. The old webhook path remains available as a legacy fallback.
+- **Email receipts** — Resend/Postmark must return a valid message ID (and Postmark `ErrorCode: 0`) before a `sent` record is written. Empty/malformed replies are failures; provider error bodies are not retained. `sent` means provider acceptance, not recipient inbox delivery; legacy webhooks retain their HTTP acknowledgement contract.
 - **Authorization** — role hierarchy (`voter → candidate_staff → moderator → admin → super_admin`) plus per-candidate staff links; every candidate-scoped mutation verifies the staff link server-side.
 - **Bootstrap health** — `/api/health` reports `database: ok`; if schema/bootstrap fails, it returns `503` with degraded health and other API routes return `503` instead of pretending the app is healthy.
 - **Content visibility** — unpublished ads (draft/submitted/rejected) return 404 to everyone except owning staff and admins.
@@ -61,28 +65,32 @@ The Vite-built SPA is served from Workers static assets; unknown paths fall back
 - **Direct target notifications** — tagged campaign staff receive an in-app notification that links to the public receipt, independent of opt-in subscriptions.
 - **Headers** — HSTS, CSP, `X-Frame-Options: DENY`, `nosniff`, referrer and permissions policies on all worker responses, including preflight and streamed media; CORS restricted to an explicit origin allowlist.
 - **Privacy** — client IPs are stored only as salted SHA-256 hashes; analytics/impression logs are purged after a configurable retention window (default 30 days).
+- **Retention** — expiring analytics/impression rows are exported to R2 before deletion. Unique, create-only archive objects prevent overlapping runs from overwriting prior exports; storage refusal/outage retains source rows. Duplicate exports can occur after an interrupted purge.
+- **Media HTTP** — HEAD, ETag/Last-Modified revalidation, byte ranges and If-Range are supported. Object replacement between metadata/content reads returns a retryable 503 instead of mismatched bytes.
 - **Demo data** — fictional seed candidates/ads never seed in production (`ENVIRONMENT=production` gates them; opt back in only with `SEED_DEMO_DATA=true`).
 
 ## Development
 
 ```bash
-npm install
+npm ci
 cp .dev.vars.example .dev.vars   # set JWT_SECRET
-
-# Frontend dev server (Vite, proxies nothing — run the worker for the API)
-npm run dev
 
 # Full stack locally (build SPA, then run worker + D1 + R2 emulation)
 npm run build
-npx wrangler dev
+npx wrangler dev --ip 127.0.0.1 --port 8787
+
+# Optional frontend hot reload, in a second terminal.
+# /api and /media proxy to the local worker on port 8787.
+npm run dev -- --host 127.0.0.1
 ```
 
 ## Testing
 
-Tests are **real integration tests**: they run the actual worker inside `workerd` (Cloudflare's production runtime) against a real SQLite-backed D1 database via `@cloudflare/vitest-pool-workers`. No mocks.
+The Worker suite runs inside `workerd` against local SQLite-backed D1 and R2 using `@cloudflare/vitest-pool-workers`. Provider responses and outage boundaries are injected in targeted tests; client-state tests mock API responses. These tests do not send external email.
 
 ```bash
-npm test          # 85 tests: auth/reset flows, session invalidation,
+npm run verify    # Build/typecheck, tests and dependency audit (same CI gate)
+npm test          # Worker/D1/R2 and client-state suites: auth/reset flows, session invalidation,
                   # rate limiting, ad visibility/authorization regressions,
                   # challenge credit lifecycle, mobile media upload/streaming,
                   # side-by-side outside ad responses, recites/fact scores,
@@ -92,6 +100,43 @@ npm test          # 85 tests: auth/reset flows, session invalidation,
 npm run test:watch
 ```
 
+With the local Worker running, `npm run verify:http` creates a synthetic account
+and PNG, then checks the built SPA, real HTTP session revocation and R2 media
+HEAD/cache/range behavior. It refuses non-loopback URLs. To retain a receipt:
+
+```bash
+npm run verify:http -- http://127.0.0.1:8787 http-acceptance.json
+```
+
+`npm run verify:email` checks Worker-to-HTTP-to-D1 receipt recording with a
+synthetic receiver on `127.0.0.1:8799`. Add these **local test-only** values to
+`.dev.vars`, restart Wrangler, then run the script:
+
+```dotenv
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=synthetic-test-only
+EMAIL_FROM=Arena <noreply@example.com>
+RESEND_API_URL=http://127.0.0.1:8799/emails
+```
+
+```bash
+npm run verify:email -- http://127.0.0.1:8787 email-acceptance.json
+```
+
+It tests accepted, empty-200 and rejected-422 responses against the real local
+delivery ledger, preserving production rate limits. Synthetic accounts and
+uploads remain in the local `.wrangler` state. Repeated runs can hit rate limits;
+use a separate local test state rather than disabling limits. Remove the test
+email settings and restart Wrangler before ordinary development.
+
+The Cloudflare test pool currently requires Vitest 4; stay on that supported
+line. The `miniflare.undici` override repairs the test pool's pinned older
+dependency graph without downgrading the pool. Keep it until upstream no longer
+pins an affected version; `npm run verify` is the release check.
+
+On Windows, stop Vite/Wrangler before reinstalling with `npm ci`; running
+servers hold native dependency files open.
+
 ## Deployment
 
 ```bash
@@ -99,6 +144,13 @@ npm run test:watch
 npx wrangler d1 create arena-database          # update database_id in wrangler.toml
 npx wrangler r2 bucket create political-arena-media
 npx wrangler secret put JWT_SECRET
+
+# Receipt signing key (Ed25519). Prints the private key once; paste it into the secret.
+node scripts/generate-receipt-key.mjs
+npx wrangler secret put RECEIPT_SIGNING_KEY
+
+# Optional: House roll-call sync from Congress.gov
+npx wrangler secret put CONGRESS_API_KEY
 
 # Choose one transactional email provider after verifying the sender/domain.
 npx wrangler secret put RESEND_API_KEY                  # Resend
@@ -122,6 +174,14 @@ CI (GitHub Actions) runs typecheck, build, the full workerd test suite, and `npm
 | `EMAIL_PROVIDER` | inferred | `resend`, `postmark`, or `webhook`; inferred from configured secret when omitted |
 | `PRESS_FEED_RSS_SOURCES` | newser + san | Public press feed RSS sources (`label\|url`, comma-separated), ingested by cron |
 | `CORS_ALLOWED_ORIGINS` | — | Extra CORS origins (comma-separated) for custom domains |
+| `QUESTION_MAX_PER_USER_PER_DAY` | 15 | Questions one account may submit per day across all races |
+| `QUESTION_MAX_PER_USER_PER_RACE_PER_DAY` | 5 | Questions one account may submit per race per day |
+| `QUESTION_RACE_SURGE_PER_HOUR` | 30 | Questions per race per hour after which brand-new accounts are slowed |
+| `QUESTION_NEW_ACCOUNT_DAYS` | 7 | Account age below which the surge limit applies |
+| `MAX_INBOUND_CHALLENGES_PER_TARGET_PER_DAY` | 6 | Callouts one candidate may receive per day across all challengers |
+| `RECEIPT_SIGNING_KEY` (secret) | none | Ed25519 PKCS#8 key (base64) that signs receipt bundles; without it bundles are explicitly unsigned |
+| `RECEIPT_RETIRED_PUBLIC_KEYS` | — | Comma-separated retired public keys (base64url) so older bundles still verify after rotation |
+| `CONGRESS_API_KEY` (secret) | none | Enables `POST /api/voting-records/sync` (House roll calls) |
 | `IP_HASH_SALT` (secret) | fallback constant | Salt for hashed IPs — set via `wrangler secret put IP_HASH_SALT` |
 | `EMAIL_FROM` | none | Verified sender used for transactional email, for example `Arena <noreply@example.com>` |
 | `EMAIL_REPLY_TO` | none | Optional reply-to address for transactional email |

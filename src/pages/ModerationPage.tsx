@@ -4,7 +4,7 @@ import * as api from "../api";
 
 const mono = "'IBM Plex Mono', ui-monospace, monospace";
 
-type Queue = "candidates" | "press" | "recites" | "ads" | "rebuttals" | "corrections" | "reports" | "statements" | "safety";
+type Queue = "candidates" | "press" | "recites" | "ads" | "rebuttals" | "corrections" | "reports" | "statements" | "safety" | "identity";
 
 const QUEUES: { key: Queue; label: string; blurb: string }[] = [
   { key: "candidates", label: "Candidate claims", blurb: "Campaign profile registrations awaiting verification." },
@@ -15,6 +15,7 @@ const QUEUES: { key: Queue; label: string; blurb: string }[] = [
   { key: "corrections", label: "Corrections", blurb: "Correction and appeal requests awaiting a ruling. A ruling needs a resolution note." },
   { key: "reports", label: "Reports", blurb: "User-flagged content — defamation, threats, impersonation, undisclosed AI media, copyright, spam. Highest priority first." },
   { key: "statements", label: "Statements", blurb: "Public statements awaiting truth/answer scoring against the published rubric. High-stakes designations need a second reviewer." },
+  { key: "identity", label: "Voting-record identity", blurb: "Which official record belongs to a candidate. One person proposes with evidence; a different person confirms. Attaching the wrong person's votes is the worst error here — when unsure, reject." },
   { key: "safety", label: "Safety", blurb: "Threat and abuse case files. Open a case on any subject and follow it with an audited event trail." },
 ];
 
@@ -32,6 +33,65 @@ function Meta({ children }: { children: React.ReactNode }) {
 const inputStyle: React.CSSProperties = { background: "#08080C", border: "1px solid rgba(255,255,255,.12)", borderRadius: 8, padding: "8px 10px", font: `400 12px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" };
 
 const SEVERITY_COLORS: Record<string, string> = { critical: "#E5636A", high: "#EFB643", medium: "#8F8FF9", low: "#9B9BAB" };
+
+const EMPTY_IDENTITY = { candidate_id: "", identifier_value: "", official_name: "", match_method: "official_directory", match_confidence: "90", evidence_url: "", evidence_note: "" };
+
+function IdentityProposeForm({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(EMPTY_IDENTITY);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const idOk = /^[A-Za-z]\d{6}$/.test(form.identifier_value.trim());
+  const confidence = Number(form.match_confidence);
+  const ready = form.candidate_id.trim() && idOk && form.official_name.trim().length >= 2 && /^https?:\/\//i.test(form.evidence_url.trim()) && Number.isInteger(confidence) && confidence >= 0 && confidence <= 100;
+  const submit = async () => {
+    setSaving(true);
+    setErr("");
+    try {
+      await api.proposeIdentityLink({
+        candidate_id: form.candidate_id.trim(),
+        identifier_value: form.identifier_value.trim().toUpperCase(),
+        official_name: form.official_name.trim(),
+        match_method: form.match_method as any,
+        match_confidence: confidence,
+        evidence_url: form.evidence_url.trim(),
+        evidence_note: form.evidence_note.trim() || undefined,
+      });
+      setForm(EMPTY_IDENTITY);
+      setOpen(false);
+      onCreated();
+    } catch (e: any) { setErr(e?.response?.data?.error || e?.message || "Could not propose the match"); }
+    finally { setSaving(false); }
+  };
+  if (!open) {
+    return <div style={{ marginBottom: 14 }}><Btn tone="neutral" onClick={() => setOpen(true)}>+ Propose an identity match</Btn></div>;
+  }
+  return (
+    <div style={{ border: "1px solid rgba(255,255,255,.12)", borderRadius: 12, background: "#0C0C13", padding: 16, marginBottom: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input aria-label="Candidate ID" value={form.candidate_id} onChange={e => setForm({ ...form, candidate_id: e.target.value })} placeholder="Candidate ID (from the profile address)" style={{ ...inputStyle, flex: 1, minWidth: 200 }} />
+        <input aria-label="Bioguide ID" value={form.identifier_value} onChange={e => setForm({ ...form, identifier_value: e.target.value })} placeholder="Bioguide ID, e.g. A000001" style={{ ...inputStyle, width: 190 }} />
+      </div>
+      <input aria-label="Official name" value={form.official_name} onChange={e => setForm({ ...form, official_name: e.target.value })} placeholder="Name exactly as the official directory lists it" style={inputStyle} />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <select aria-label="Match method" value={form.match_method} onChange={e => setForm({ ...form, match_method: e.target.value })} style={inputStyle}>
+          <option value="official_directory">Official directory</option>
+          <option value="fec_crosswalk">FEC crosswalk</option>
+          <option value="manual">Manual research</option>
+        </select>
+        <input aria-label="Confidence 0 to 100" value={form.match_confidence} onChange={e => setForm({ ...form, match_confidence: e.target.value })} inputMode="numeric" placeholder="Confidence 0–100" style={{ ...inputStyle, width: 150 }} />
+        <input aria-label="Evidence link" value={form.evidence_url} onChange={e => setForm({ ...form, evidence_url: e.target.value })} placeholder="Evidence link the second reviewer can open (https://…)" style={{ ...inputStyle, flex: 1, minWidth: 220 }} />
+      </div>
+      <textarea aria-label="Evidence note" value={form.evidence_note} onChange={e => setForm({ ...form, evidence_note: e.target.value })} placeholder="What matches: state, district, years served (optional)" rows={2} style={inputStyle} />
+      {form.identifier_value && !idOk && <div style={{ font: `500 12px 'Hanken Grotesk',sans-serif`, color: "#EFB643" }}>A Bioguide ID is one letter followed by six digits.</div>}
+      {err && <div role="alert" style={{ font: `500 12px 'Hanken Grotesk',sans-serif`, color: "#E5636A" }}>{err}</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn tone="ok" disabled={saving || !ready} onClick={submit}>Propose match</Btn>
+        <Btn onClick={() => setOpen(false)}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
 
 function SafetyCaseForm({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
@@ -144,11 +204,13 @@ export function ModerationPage() {
               : queue === "reports" ? api.getReports()
                 : queue === "statements" ? api.getPendingStatements()
                   : queue === "safety" ? api.getSafetyCases()
+                    : queue === "identity" ? Promise.all([api.getIdentityLinks("proposed"), api.getIdentityLinks("confirmed")]).then(([p, c]) => ({ links: [...p.links, ...c.links] }))
                     : api.getAdModerationQueue();
     fetcher
       .then((d: any) => {
         if (queue === "ads") return setItems(d?.ads || []);
         if (queue === "rebuttals") return setItems(d?.rebuttals || []);
+        if (queue === "identity") return setItems(d?.links || []);
         setItems(d?.candidates || d?.applications || d?.credentials || d?.press || d?.recites || d?.corrections || d?.cases || d?.reports || d?.statements || (Array.isArray(d) ? d : []));
       })
       .catch(() => setItems([]))
@@ -193,6 +255,7 @@ export function ModerationPage() {
         )}
 
         {queue === "safety" && <SafetyCaseForm onCreated={load} />}
+        {queue === "identity" && <IdentityProposeForm onCreated={load} />}
 
         {loading ? (
           <div style={{ padding: "60px 0", textAlign: "center" }}><span className="arena-pulse" style={{ display: "inline-block", width: 20, height: 20, border: "2px solid rgba(110,110,247,.3)", borderTopColor: "#6E6EF7", borderRadius: "50%" }} /></div>
@@ -280,6 +343,23 @@ export function ModerationPage() {
                   </div>
                 </>}
                 {queue === "safety" && <SafetyCaseCard item={it} noteValue={notes[it.id] || ""} onNote={v => setNotes(prev => ({ ...prev, [it.id]: v }))} onChanged={load} busy={busy === it.id} setBusy={setBusy} />}
+                {queue === "identity" && <>
+                  <div><span style={{ font: `600 15px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{it.candidate_name} → {it.identifier_value}{it.official_name ? ` (${it.official_name})` : ""}</span></div>
+                  <Meta>{[it.status, it.race_name, `${it.race_state} ${it.race_office}`, `METHOD ${it.match_method}`, `CONFIDENCE ${it.match_confidence}`, `${it.loaded_votes} VOTES LOADED`, it.proposed_by_name && `PROPOSED BY ${it.proposed_by_name}`].filter(Boolean).join(" · ").toUpperCase()}</Meta>
+                  {it.evidence_note && <div style={{ font: `400 13px/1.55 'Hanken Grotesk',sans-serif`, color: "#C9C9D4", borderLeft: "2px solid rgba(255,255,255,.14)", paddingLeft: 12 }}>{it.evidence_note}</div>}
+                  <a href={it.evidence_url} target="_blank" rel="noopener noreferrer" style={{ font: `500 11px ${mono}`, color: "#8F8FF9", overflowWrap: "anywhere" }}>{it.evidence_url} ↗</a>
+                  {it.status === "proposed" && !it.can_review && <div style={{ font: `500 12px 'Hanken Grotesk',sans-serif`, color: "#EFB643" }}>You proposed this link. A different reviewer must decide it.</div>}
+                  {(it.status === "confirmed" || it.can_review) && <>
+                    <input value={notes[it.id] || ""} onChange={e => setNotes(prev => ({ ...prev, [it.id]: e.target.value }))} aria-label="Decision note" placeholder={it.status === "confirmed" ? "Why revoke? (required, min 5 chars)" : "What you checked (required, min 5 chars)"} style={inputStyle} />
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {it.status === "proposed" && <>
+                        <Btn tone="ok" disabled={busy === it.id || noteFor(it.id).length < 5} onClick={() => act(it.id, () => api.reviewIdentityLink(it.id, "confirm", noteFor(it.id)))}>Confirm match</Btn>
+                        <Btn tone="no" disabled={busy === it.id || noteFor(it.id).length < 5} onClick={() => act(it.id, () => api.reviewIdentityLink(it.id, "reject", noteFor(it.id)))}>Reject</Btn>
+                      </>}
+                      {it.status === "confirmed" && <Btn tone="no" disabled={busy === it.id || noteFor(it.id).length < 5} onClick={() => act(it.id, () => api.revokeIdentityLink(it.id, noteFor(it.id)))}>Revoke (hides the record now)</Btn>}
+                    </div>
+                  </>}
+                </>}
                 {queue === "corrections" && <>
                   <div><span style={{ font: `600 15px 'Hanken Grotesk',sans-serif`, color: "#F2F2F7" }}>{(it.reason || "correction").replace(/_/g, " ")} — {it.content_type}</span></div>
                   <Meta>{[it.candidate_name, it.race_name, it.requester_name && `FROM ${it.requester_name}`, it.created_at && `FILED ${String(it.created_at).slice(0, 10)}`].filter(Boolean).join(" · ").toUpperCase()}</Meta>

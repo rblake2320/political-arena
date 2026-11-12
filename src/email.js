@@ -95,13 +95,23 @@ function safeJson(value) {
 }
 
 async function parseProviderResponse(response) {
-  const text = await response.text();
-  if (!text) return {};
   try {
-    return JSON.parse(text);
+    return await response.json();
   } catch {
-    return { raw: text };
+    return null;
   }
+}
+
+function requireProviderReceipt(response, payload, provider, idField) {
+  // A 2xx proxy/error page is not a provider acceptance receipt. Do not put
+  // provider bodies in errors: they may echo reset tokens or personal data.
+  if (!response.ok) throw new Error(`${provider} email failed with HTTP ${response.status}`);
+  const id = payload?.[idField];
+  if (typeof id !== 'string' || !id.trim() ||
+      (provider === 'Postmark' && payload?.ErrorCode !== 0)) {
+    throw new Error(`${provider} email returned an invalid acceptance receipt`);
+  }
+  return id;
 }
 
 function compactMetadata(metadata = {}) {
@@ -170,8 +180,8 @@ export async function sendTransactionalEmail(env, message, fetchImpl = fetch) {
       }),
     });
     const payload = await parseProviderResponse(response);
-    if (!response.ok) throw new Error(`Resend email failed with ${response.status}: ${safeJson(payload)}`);
-    return { delivered: true, provider: 'resend', provider_message_id: payload.id || null, response: payload };
+    const id = requireProviderReceipt(response, payload, 'Resend', 'id');
+    return { delivered: true, provider: 'resend', provider_message_id: id, response: payload };
   }
 
   if (config.provider === 'postmark') {
@@ -196,8 +206,8 @@ export async function sendTransactionalEmail(env, message, fetchImpl = fetch) {
       }),
     });
     const payload = await parseProviderResponse(response);
-    if (!response.ok) throw new Error(`Postmark email failed with ${response.status}: ${safeJson(payload)}`);
-    return { delivered: true, provider: 'postmark', provider_message_id: payload.MessageID || null, response: payload };
+    const id = requireProviderReceipt(response, payload, 'Postmark', 'MessageID');
+    return { delivered: true, provider: 'postmark', provider_message_id: id, response: payload };
   }
 
   const response = await fetchImpl(config.url, {
@@ -217,8 +227,9 @@ export async function sendTransactionalEmail(env, message, fetchImpl = fetch) {
     }),
   });
   const payload = await parseProviderResponse(response);
-  if (!response.ok) throw new Error(`Email webhook failed with ${response.status}: ${safeJson(payload)}`);
-  return { delivered: true, provider: 'webhook', provider_message_id: payload.id || null, response: payload };
+  if (!response.ok) throw new Error(`Email webhook failed with HTTP ${response.status}`);
+  // Legacy hooks use HTTP acknowledgement; they do not have a standard receipt.
+  return { delivered: true, provider: 'webhook', provider_message_id: payload?.id || null, response: payload };
 }
 
 export async function recordEmailDelivery(db, delivery) {
@@ -259,19 +270,9 @@ export async function sendAndRecordTransactionalEmail(db, env, message, context 
     return { delivered: false, skipped: true };
   }
 
+  let result;
   try {
-    const result = await sendTransactionalEmail(env, message, fetchImpl);
-    await recordEmailDelivery(db, {
-      ...context,
-      provider: result.provider,
-      provider_message_id: result.provider_message_id,
-      recipient_email: Array.isArray(message.to) ? message.to.join(',') : message.to,
-      subject: message.subject,
-      template_key: message.tag,
-      status: result.delivered ? 'sent' : 'skipped',
-      metadata: message.metadata,
-    });
-    return result;
+    result = await sendTransactionalEmail(env, message, fetchImpl);
   } catch (error) {
     await recordEmailDelivery(db, {
       ...context,
@@ -285,4 +286,17 @@ export async function sendAndRecordTransactionalEmail(db, env, message, context 
     });
     throw error;
   }
+  // Ledger failure after acceptance must propagate as a ledger failure, not
+  // be rewritten as a failed send (which could encourage a duplicate retry).
+  await recordEmailDelivery(db, {
+    ...context,
+    provider: result.provider,
+    provider_message_id: result.provider_message_id,
+    recipient_email: Array.isArray(message.to) ? message.to.join(',') : message.to,
+    subject: message.subject,
+    template_key: message.tag,
+    status: result.delivered ? 'sent' : 'skipped',
+    metadata: message.metadata,
+  });
+  return result;
 }

@@ -87,3 +87,37 @@ Verify with:
 ```powershell
 wrangler r2 bucket lock list political-arena-media
 ```
+
+## Receipt signing gate
+
+Public receipt bundles are signed with an Ed25519 key held as a Worker secret.
+Without it the `receipt_signing` gate is red and bundles are returned unsigned.
+
+```powershell
+node scripts/generate-receipt-key.mjs
+npx wrangler secret put RECEIPT_SIGNING_KEY
+```
+
+Paste the PRIVATE line when prompted. The script writes the key nowhere; if
+the terminal scrollback is the only copy, that is intended. Confirm:
+
+```powershell
+curl.exe https://<your-host>/api/transparency/keys
+```
+
+`signing_configured` should be `true` and the `key_id` should match the one
+the script printed. Record that key id somewhere outside the platform (a
+press release, an archive snapshot) so readers have an independent reference.
+
+Rotation: generate a new key, replace the secret, and append the old PUBLIC
+key to the `RECEIPT_RETIRED_PUBLIC_KEYS` variable so earlier bundles still verify.
+
+### Troubleshooting
+
+- `/api/transparency/keys` returns 503: the secret is not a valid Ed25519
+  PKCS#8 key. Paste only the base64 line, with no quotes or line breaks.
+- A bundle verifies as "consistent, but the signer is not confirmed": the
+  verifier was not given the platform key. Pass `--key <public key>` to the
+  offline script.
+- A bundle shows "Included in a published anchor: not checked": no anchor
+  covers that receipt yet. Publish one with `POST /api/audit/anchors`.
