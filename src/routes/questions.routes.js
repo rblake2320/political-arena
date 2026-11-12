@@ -239,11 +239,25 @@ router.post('/:raceId', async (request, env) => {
 
   const id = generateId('q');
   const authorJurisdiction = jurisdictionMatch(request.user, race);
+  const isNewAccount = account?.is_new ? 1 : 0;
   try {
-    await env.ARENA_DB.prepare(
+    // The checks above give a precise message. THIS statement is the
+    // enforcement: the limits are re-evaluated inside the insert itself, so
+    // requests that all read "under the limit" at the same moment cannot all
+    // get in. D1 runs writes one at a time, so each insert sees the ones before it.
+    const inserted = await env.ARENA_DB.prepare(
       `INSERT INTO questions (id, race_id, user_id, source_type, question_text, media_url, text_fingerprint, author_jurisdiction)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(id, raceId, request.user.id, data.source_type, data.question_text, data.media_url || null, fingerprint, authorJurisdiction).run();
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+       WHERE (SELECT COUNT(*) FROM questions WHERE user_id = ?3 AND race_id = ?2 AND created_at > datetime('now', '-1 day')) < ?9
+         AND (SELECT COUNT(*) FROM questions WHERE user_id = ?3 AND created_at > datetime('now', '-1 day')) < ?10
+         AND NOT (?11 = 1 AND (SELECT COUNT(*) FROM questions WHERE race_id = ?2 AND created_at > datetime('now', '-1 hour')) >= ?12)`
+    ).bind(
+      id, raceId, request.user.id, data.source_type, data.question_text, data.media_url || null, fingerprint, authorJurisdiction,
+      limits.questionsPerUserPerRacePerDay, limits.questionsPerUserPerDay, isNewAccount, limits.raceSurgePerHour,
+    ).run();
+    if (!inserted.meta?.changes) {
+      return errorResponse('A question limit was reached while this was being submitted. Try again later.', 429);
+    }
   } catch (error) {
     // Two identical submissions raced; the unique index kept exactly one.
     if (String(error?.message || error).includes('UNIQUE')) {

@@ -17,6 +17,8 @@ import { generateId } from './db.js';
 export const BIOGUIDE_PATTERN = /^[A-Z]\d{6}$/;
 const CONGRESS_API_BASE = 'https://api.congress.gov/v3';
 const FETCH_TIMEOUT_MS = 15000;
+// 5 bound parameters per vote row; 19 rows = 95, under D1's limit of 100 per statement.
+const VOTE_ROWS_PER_STATEMENT = 19;
 
 const POSITION_MAP = new Map([
   ['yea', 'yea'], ['aye', 'yea'], ['yes', 'yea'],
@@ -86,22 +88,32 @@ export async function upsertRollCall(db, rollCall, memberVotes, { importedBy = n
   let skippedPositions = 0;
   let skippedIdentifiers = 0;
   const seen = new Set();
+  const rows = [];
   for (const vote of memberVotes) {
     const bioguide = String(vote.bioguide_id || '').trim().toUpperCase();
     if (!BIOGUIDE_PATTERN.test(bioguide) || seen.has(bioguide)) { skippedIdentifiers += 1; continue; }
     const position = normalizeVotePosition(vote.position);
     if (!position) { skippedPositions += 1; continue; }
     seen.add(bioguide);
-    statements.push(db.prepare(
-      `INSERT INTO member_votes (id, roll_call_id, identifier_type, identifier_value, vote_position, raw_position)
-       VALUES (?, ?, 'bioguide', ?, ?, ?)
-       ON CONFLICT(roll_call_id, identifier_type, identifier_value) DO UPDATE SET
-         vote_position = excluded.vote_position, raw_position = excluded.raw_position, updated_at = datetime('now')`
-    ).bind(generateId('mv'), id, bioguide, position, String(vote.position).trim().slice(0, 60)));
+    rows.push([generateId('mv'), id, bioguide, position, String(vote.position).trim().slice(0, 60)]);
   }
 
-  // One batch per chunk keeps each roll call's writes together and under D1's statement limits.
-  for (let i = 0; i < statements.length; i += 50) await db.batch(statements.slice(i, i + 50));
+  // Multi-row inserts keep a full chamber (435+ votes) to a few dozen
+  // statements, each under D1's 100-bound-parameter limit.
+  for (let i = 0; i < rows.length; i += VOTE_ROWS_PER_STATEMENT) {
+    const chunk = rows.slice(i, i + VOTE_ROWS_PER_STATEMENT);
+    statements.push(db.prepare(
+      `INSERT INTO member_votes (id, roll_call_id, identifier_type, identifier_value, vote_position, raw_position)
+       VALUES ${chunk.map(() => "(?, ?, 'bioguide', ?, ?, ?)").join(', ')}
+       ON CONFLICT(roll_call_id, identifier_type, identifier_value) DO UPDATE SET
+         vote_position = excluded.vote_position, raw_position = excluded.raw_position, updated_at = datetime('now')`
+    ).bind(...chunk.flat()));
+  }
+
+  // ONE batch = one transaction: the roll call, its bill and every member vote
+  // commit together or not at all. A reader never sees half an import, and a
+  // failed re-import leaves the previous version intact.
+  await db.batch(statements);
 
   return { roll_call_id: id, votes_written: seen.size, skipped_positions: skippedPositions, skipped_identifiers: skippedIdentifiers };
 }

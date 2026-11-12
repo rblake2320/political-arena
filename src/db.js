@@ -559,8 +559,11 @@ export async function runRuntimeMigrations(db) {
 
 /**
  * Fingerprint questions written before duplicate detection existed. Bounded
- * per call; older duplicates keep a NULL fingerprint (the unique index
- * rejects the second copy) so nothing already public is hidden or rewritten.
+ * per call, and every row it visits leaves the NULL set so the next call moves
+ * on: a row that cannot take a real fingerprint (an older duplicate the unique
+ * index rejects, or text with no letters or numbers) gets a per-row
+ * `legacy:<id>` marker. A marker never equals a SHA-256 hex digest, so it
+ * never matches a new submission, and nothing already public is hidden.
  */
 export async function backfillQuestionFingerprints(db, limit = 500) {
   const pending = await db.prepare(
@@ -569,13 +572,16 @@ export async function backfillQuestionFingerprints(db, limit = 500) {
   let updated = 0;
   for (const row of pending.results || []) {
     const fingerprint = await questionFingerprint(row.question_text);
-    if (!fingerprint) continue;
+    const mark = value => db.prepare(`UPDATE questions SET text_fingerprint = ? WHERE id = ? AND text_fingerprint IS NULL`)
+      .bind(value, row.id).run();
+    if (!fingerprint) { await mark(`legacy:${row.id}`); continue; }
     try {
-      await db.prepare(`UPDATE questions SET text_fingerprint = ? WHERE id = ? AND text_fingerprint IS NULL`)
-        .bind(fingerprint, row.id).run();
+      await mark(fingerprint);
       updated += 1;
-    } catch {
+    } catch (error) {
+      if (!String(error?.message || error).includes('UNIQUE')) throw error;
       // An earlier active question in the same race already holds this fingerprint.
+      await mark(`legacy:${row.id}`);
     }
   }
   return updated;

@@ -472,6 +472,67 @@ describe('Congress.gov sync', () => {
   });
 });
 
+describe('import atomicity', () => {
+  const fullChamber = () => Array.from({ length: 435 }, () => ({ bioguide_id: newBioguide(), position: 'Yea' }));
+  const rollCall = roll => ({
+    chamber: 'house', congress: 119, session: 2, roll_number: roll, vote_date: '2026-03-03', question: 'On Passage',
+    source_name: 'Clerk of the U.S. House', source_url: `https://clerk.house.gov/Votes/2026${roll}`,
+  });
+
+  it('stores a full 435-member roll call in one transaction', async () => {
+    const votes = fullChamber();
+    const outcome = await upsertRollCall(env.ARENA_DB, rollCall(6001), votes);
+    expect(outcome.votes_written).toBe(435);
+    const stored = await env.ARENA_DB.prepare(`SELECT COUNT(*) as cnt FROM member_votes WHERE roll_call_id = ?`).bind(outcome.roll_call_id).first();
+    expect(stored.cnt).toBe(435);
+  });
+
+  // A database whose statement for one specific member fails. That member is
+  // the LAST vote, so an import split into several commits would already have
+  // committed everything before it.
+  function failingOnMember(bioguide) {
+    const calls = { batches: 0 };
+    const db = {
+      prepare: sql => {
+        const real = env.ARENA_DB.prepare(sql);
+        return {
+          bind: (...args) => (args.includes(bioguide)
+            ? env.ARENA_DB.prepare(`INSERT INTO no_such_table (x) VALUES (1)`)
+            : real.bind(...args)),
+        };
+      },
+      batch: statements => { calls.batches += 1; return env.ARENA_DB.batch(statements); },
+    };
+    return { db, calls };
+  }
+
+  it('a failure on the last member writes nothing at all', async () => {
+    const votes = fullChamber();
+    const { db, calls } = failingOnMember(votes.at(-1).bioguide_id);
+    await expect(upsertRollCall(db, rollCall(6002), votes)).rejects.toThrow();
+    expect(calls.batches).toBe(1); // the whole import is a single transaction
+    const rc = await env.ARENA_DB.prepare(`SELECT COUNT(*) as cnt FROM roll_calls WHERE roll_number = 6002`).first();
+    const mv = await env.ARENA_DB.prepare(`SELECT COUNT(*) as cnt FROM member_votes WHERE roll_call_id = 'rc-house-119-2-6002'`).first();
+    expect(rc.cnt).toBe(0);
+    expect(mv.cnt).toBe(0);
+  });
+
+  it('a failed re-import leaves the previous version fully intact', async () => {
+    const votes = fullChamber();
+    await upsertRollCall(env.ARENA_DB, { ...rollCall(6003), result: 'Passed' }, votes);
+    const { db } = failingOnMember(votes.at(-1).bioguide_id);
+    const corrected = votes.map(v => ({ ...v, position: 'Nay' }));
+    await expect(upsertRollCall(db, { ...rollCall(6003), result: 'Failed' }, corrected)).rejects.toThrow();
+
+    const rc = await env.ARENA_DB.prepare(`SELECT result FROM roll_calls WHERE roll_number = 6003`).first();
+    expect(rc.result).toBe('Passed');
+    const positions = await env.ARENA_DB.prepare(
+      `SELECT vote_position, COUNT(*) as cnt FROM member_votes WHERE roll_call_id = 'rc-house-119-2-6003' GROUP BY vote_position`
+    ).all();
+    expect(positions.results).toEqual([{ vote_position: 'yea', cnt: 435 }]);
+  });
+});
+
 describe('module-level guarantees', () => {
   it('upsertRollCall reports what it skipped', async () => {
     const outcome = await upsertRollCall(env.ARENA_DB, {

@@ -367,10 +367,90 @@ describe('fingerprint backfill for older questions', () => {
       `SELECT text_fingerprint, status FROM questions WHERE race_id = ? ORDER BY id`
     ).bind(raceId).all();
     expect(rows.results.map(r => r.status)).toEqual(['active', 'active']);
-    expect(rows.results.filter(r => r.text_fingerprint)).toHaveLength(1);
+    expect(rows.results.filter(r => /^[0-9a-f]{64}$/.test(r.text_fingerprint || ''))).toHaveLength(1);
+    expect(rows.results.filter(r => String(r.text_fingerprint).startsWith('legacy:'))).toHaveLength(1);
 
     // A new copy of the legacy question is still caught.
     const copy = await ask(raceId, 'legacy duplicate question about zoning', await participant('backfill_copy'));
     expect(copy.status).toBe(409);
+  });
+});
+
+describe('limits hold under concurrency', () => {
+  it('one account firing distinct questions at once cannot exceed the per-race cap', async () => {
+    const raceId = await makeRace('conc_race');
+    const user = await participant('conc_race');
+    const results = await Promise.all(Array.from({ length: 12 }, (_, i) =>
+      ask(raceId, `Concurrent distinct question ${i} about the county budget line`, user)));
+    expect(results.filter(r => r.status === 200)).toHaveLength(5);
+    expect(results.filter(r => r.status === 429)).toHaveLength(7);
+    const count = await env.ARENA_DB.prepare(`SELECT COUNT(*) as cnt FROM questions WHERE race_id = ?`).bind(raceId).first();
+    expect(count.cnt).toBe(5);
+  });
+
+  it('one account firing across many races at once cannot exceed the daily cap', async () => {
+    const user = await participant('conc_day');
+    const races = await Promise.all(Array.from({ length: 22 }, (_, i) => makeRace(`conc_day_${i}`)));
+    const results = await Promise.all(races.map((raceId, i) =>
+      ask(raceId, `Concurrent cross-race question ${i} about transit funding`, user)));
+    expect(results.filter(r => r.status === 200)).toHaveLength(15);
+    const count = await env.ARENA_DB.prepare(`SELECT COUNT(*) as cnt FROM questions WHERE user_id = ?`).bind(user.id).first();
+    expect(count.cnt).toBe(15);
+  });
+
+  it('new accounts arriving together at the surge threshold cannot all slip under it', async () => {
+    const raceId = await makeRace('conc_surge');
+    const seedAuthor = await participant('conc_surge_seed');
+    // 29 questions in the last hour: one below the default threshold of 30.
+    await env.ARENA_DB.batch(Array.from({ length: 29 }, (_, i) => env.ARENA_DB.prepare(
+      `INSERT INTO questions (id, race_id, user_id, source_type, question_text, text_fingerprint) VALUES (?, ?, ?, 'voter', ?, ?)`
+    ).bind(`q-csurge-${seq}-${i}`, raceId, seedAuthor.id, `Surge seed ${i}`, `csurge-${seq}-${i}`)));
+
+    const fresh = await Promise.all(Array.from({ length: 8 }, (_, i) => participant(`conc_new${i}`, { ageDays: 0 })));
+    const results = await Promise.all(fresh.map((u, i) =>
+      ask(raceId, `New account ${i} piles on with a distinct question`, u)));
+    // Exactly one reaches the threshold; the rest are slowed.
+    expect(results.filter(r => r.status === 200)).toHaveLength(1);
+    const count = await env.ARENA_DB.prepare(`SELECT COUNT(*) as cnt FROM questions WHERE race_id = ?`).bind(raceId).first();
+    expect(count.cnt).toBe(30);
+  });
+});
+
+describe('backfill makes progress past rows it cannot fingerprint', () => {
+  it('a page full of unprocessable legacy rows does not block later questions', async () => {
+    const raceId = await makeRace('backfill_stuck');
+    const author = await participant('backfill_stuck');
+    // Oldest rows: duplicates and symbol-only text, none of which can take a real fingerprint
+    // beyond the first copy. Then one ordinary legacy question after them.
+    const statements = [];
+    for (let i = 0; i < 4; i++) {
+      statements.push(env.ARENA_DB.prepare(
+        `INSERT INTO questions (id, race_id, user_id, source_type, question_text, created_at) VALUES (?, ?, ?, 'voter', 'Same legacy question about parking?', datetime('now', ?))`
+      ).bind(`q-stuck-dup-${seq}-${i}`, raceId, author.id, `-${50 - i} days`));
+      statements.push(env.ARENA_DB.prepare(
+        `INSERT INTO questions (id, race_id, user_id, source_type, question_text, created_at) VALUES (?, ?, ?, 'voter', '?!?!?!?!?!?!', datetime('now', ?))`
+      ).bind(`q-stuck-sym-${seq}-${i}`, raceId, author.id, `-${40 - i} days`));
+    }
+    statements.push(env.ARENA_DB.prepare(
+      `INSERT INTO questions (id, race_id, user_id, source_type, question_text, created_at) VALUES (?, ?, ?, 'voter', 'A later legacy question about the library hours?', datetime('now', '-1 days'))`
+    ).bind(`q-stuck-late-${seq}`, raceId, author.id));
+    await env.ARENA_DB.batch(statements);
+
+    // Clear anything other tests left, then use a page smaller than the unprocessable set.
+    await backfillQuestionFingerprints(env.ARENA_DB, 10000);
+    await env.ARENA_DB.prepare(`UPDATE questions SET text_fingerprint = NULL WHERE race_id = ?`).bind(raceId).run();
+    for (let pass = 0; pass < 4; pass++) await backfillQuestionFingerprints(env.ARENA_DB, 3);
+
+    const remaining = await env.ARENA_DB.prepare(
+      `SELECT COUNT(*) as cnt FROM questions WHERE race_id = ? AND text_fingerprint IS NULL`
+    ).bind(raceId).first();
+    expect(remaining.cnt).toBe(0);
+    const late = await env.ARENA_DB.prepare(`SELECT text_fingerprint FROM questions WHERE id = ?`).bind(`q-stuck-late-${seq}`).first();
+    expect(late.text_fingerprint).toMatch(/^[0-9a-f]{64}$/);
+
+    // The later question is now protected against a new copy; every legacy row is still public.
+    expect((await ask(raceId, 'a later legacy question about the library hours', await participant('stuck_copy'))).status).toBe(409);
+    const active = await env.ARENA_DB.prepare(`SELECT COUNT(*) as cnt FROM questions WHERE race_id = ? AND status = 'active'`).bind(raceId).first();
+    expect(active.cnt).toBe(9);
   });
 });
